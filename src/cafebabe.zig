@@ -114,6 +114,7 @@ pub const ClassFile = struct {
         return ClassFile{ .constant_pool = constant_pool, .access_flags = access_flags, .this_cls = this_cls, .super_cls = super_cls, .interfaces = ifaces, .fields = fields, .methods = methods, .attributes = attributes };
     }
 
+    // TODO errdefer release list
     fn parseAttributes(persistent: Allocator, cp: *const ConstantPool, reader: *Reader) !std.ArrayListUnmanaged(Attribute) {
         var attr_count = try reader.readIntBig(u16);
         var attrs = try std.ArrayListUnmanaged(Attribute).initCapacity(persistent, attr_count);
