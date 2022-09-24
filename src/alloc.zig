@@ -3,8 +3,9 @@ const object = @import("object.zig");
 const jvm = @import("jvm.zig");
 const Allocator = std.mem.Allocator;
 
+/// Verbose reference counting logging
 var logging = false;
-// TODO drop_fn belongs in the T class. then also it can provide the length needed for the alloc (depends on field layout)
+
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
     return struct {
@@ -16,7 +17,7 @@ pub fn VmRef(comptime T: type) type {
             return thread.global.allocator;
         }
 
-        const Weak = struct {
+        pub const Weak = struct {
             ptr: *Inner,
 
             const dangle_ptr: *Inner = @intToPtr(*Inner, std.mem.alignBackwardGeneric(usize, std.math.maxInt(usize), @alignOf(Inner)));
@@ -49,40 +50,42 @@ pub fn VmRef(comptime T: type) type {
             }
         };
 
-        const Strong = struct {
-            ptr: *Inner,
+        // Strong reference (i.e. the VmRef itself)
+        // pub const Strong = {
+        ptr: *Inner,
 
-            pub fn get(self: Strong) *T {
-                return &self.ptr.data;
-            }
+        const Strong = @This();
+        pub fn get(self: Strong) *T {
+            return &self.ptr.data;
+        }
 
-            pub fn clone(self: Strong) Strong {
-                const old = self.ptr.block.strong.fetchAdd(1, .Monotonic);
+        pub fn clone(self: Strong) Strong {
+            const old = self.ptr.block.strong.fetchAdd(1, .Monotonic);
 
-                if (logging) std.log.debug("{*}: bumped strong count to {d}", .{ self.ptr, old + 1 });
+            if (logging) std.log.debug("{*}: bumped strong count to {d}", .{ self.ptr, old + 1 });
 
-                if (old > max_counter)
-                    @panic("too many refs");
+            if (old > max_counter)
+                @panic("too many refs");
 
-                return Strong{ .ptr = self.ptr };
-            }
+            return Strong{ .ptr = self.ptr };
+        }
 
-            pub fn drop(self: Strong) void {
-                // TODO extra debug field to track double drop
-                const old = self.ptr.block.strong.fetchSub(1, .Release);
-                if (logging) std.log.debug("{*}: dropped strong count to {d}", .{ self.ptr, old - 1 });
-                if (old != 1) return;
+        pub fn drop(self: Strong) void {
+            // TODO extra debug field to track double drop
+            const old = self.ptr.block.strong.fetchSub(1, .Release);
+            if (logging) std.log.debug("{*}: dropped strong count to {d}", .{ self.ptr, old - 1 });
+            if (old != 1) return;
 
-                self.ptr.block.strong.fence(.Acquire);
+            self.ptr.block.strong.fence(.Acquire);
 
-                // destroy data
-                T.vmRefDrop(self.ptr.data);
+            // destroy data
+            T.vmRefDrop(self.ptr.data);
 
-                // destroy implicit shared weak
-                const implicit_weak = Weak{ .ptr = self.ptr };
-                implicit_weak.drop();
-            }
-        };
+            // destroy implicit shared weak
+            const implicit_weak = Weak{ .ptr = self.ptr };
+            implicit_weak.drop();
+        }
+        // }; // end of Strong
 
         const InnerBlock = struct {
             weak: Counter,
@@ -109,10 +112,13 @@ pub fn VmRef(comptime T: type) type {
             };
             return Strong{ .ptr = inner };
         }
+
+        /// Data is undefined
+        fn new() !Strong {
+            return new_uninit(0, @alignOf(T));
+        }
     };
 }
-
-pub const VmClassRef = VmRef(object.VmClass);
 
 /// Global instance accessed by all VmRefs (threadlocal->global, not a real global so multiple JVMs can coexist in a process)
 pub const VmAllocator = struct {
@@ -122,22 +128,18 @@ pub const VmAllocator = struct {
 
 // TODO return jvm OutOfMemoryException instance? or is that for the caller?
 /// Returned class data is still unintialised
-pub fn allocClass(layout: object.ObjectLayout) !VmClassRef.Strong {
-    const ref = try VmClassRef.new_uninit(layout.static_offset, @alignOf(object.VmClass));
+pub fn allocClass() !object.VmClassRef.Strong {
+    const ref = try object.VmClassRef.new();
     return ref;
 }
 
 test "alloc class" {
-    var layout = object.ObjectLayout{};
-    layout.static_offset += 16; // fake field storage
-
     // init global allocator
-    const handle = try jvm.ThreadEnv.initMainThread(std.testing.allocator);
+    const handle = try jvm.ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
-    const alloced = try allocClass(layout);
+    const alloced = try allocClass();
     // everything is unintialised!!! just set this so it can be dropped
-    alloced.get().layout = layout;
     defer alloced.drop();
 }
 
@@ -158,7 +160,7 @@ test "vmref" {
     const IntRef = VmRef(VmInt);
 
     // init global allocator
-    const handle = try jvm.ThreadEnv.initMainThread(std.testing.allocator);
+    const handle = try jvm.ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     // simulate runtime known size, like a class field count

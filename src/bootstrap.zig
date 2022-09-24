@@ -7,14 +7,15 @@ const Preload = struct {
 
 const preload_classes: [1]Preload = .{.{ .cls = "java/lang/String" }};
 
-fn load(preload: Preload, loader: *classloader.ClassLoader) void {
-    _ = preload;
-    _=loader;
+fn load(preload: Preload, loader: *classloader.ClassLoader) !void {
+    // TODO check for array
+    // TODO handle user loader
+
+    // TODO comptime check '[' and call another func. but check that all the many preload funcs share the same generated code
+    _ = try loader.loadBootstrapClass(preload.cls);
 }
 
-pub fn initBootstrapClasses(loader: *classloader.ClassLoader) void {
-    load(.{ .cls = "java/lang/Object" }, loader);
-    load(.{ .cls = "java/lang/Class" }, loader);
-
-    @panic("nice"); // TODO
+pub fn initBootstrapClasses(loader: *classloader.ClassLoader) !void {
+    try load(.{ .cls = "java/lang/Object" }, loader);
+    try load(.{ .cls = "java/lang/Class" }, loader);
 }

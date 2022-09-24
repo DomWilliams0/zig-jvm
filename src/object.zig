@@ -4,37 +4,45 @@ const vm_alloc = @import("alloc.zig");
 const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
 
-/// The header on every vm object.
-/// Always allocated on GC heap. Variable size depending on static field storage
-/// TODO needs to be packed?
+/// Always allocated on GC heap
 pub const VmClass = struct {
-    constant_pool: RuntimeConstantPool,
+    constant_pool: cafebabe.ConstantPool, // TODO will be tweaked at runtime when refs are resolved
     flags: std.EnumSet(cafebabe.ClassFile.Flags),
     /// Owned copy
     name: []const u8,
-    /// Owned copy
-    super_name: ?[]const u8,
-    super_cls: ?*VmClass,
+    // /// Owned copy
+    // super_name: ?[]const u8,
+    super_cls: ?VmClassRef,
     interfaces: []*VmClass,
+    /// Only fields for this class
     fields: []Field,
     // TODO methods
     attributes: []const cafebabe.Attribute,
 
-    /// These are the exact sizes of the object, including all headers and storage
+    /// Exact size of the object, including all headers and storage
     layout: ObjectLayout,
 
     // ---------- VmRef interface
-    pub fn vmRefSize(self: *const VmClass) usize {
-        return self.layout.static_offset;
+    pub fn vmRefSize(_: *const VmClass) usize {
+        return 0; // nothing extra
     }
     pub fn vmRefDrop(_: @This()) void {
-        // TODO finalizers or something
+        // TODO release owned memory
     }
 
     // ---------- field accessors
+    // TODO expose generic versions for each type instead
     pub fn getField(self: *@This(), comptime T: type, field: FieldId) *T {
-        var byte_ptr: [*]u8 = @ptrCast([*]align(@alignOf(T)) u8, self);
-        return @ptrCast(*T, byte_ptr + field.offset);
+        switch (field) {
+            .instance_offset => |offset| {
+                var byte_ptr: [*]u8 = @ptrCast([*]align(@alignOf(T)) u8, self);
+                return @ptrCast(*T, byte_ptr + offset);
+            },
+            .static_index => |idx| {
+                const ptr = &self.fields[idx].u.value;
+                return @ptrCast(*T, ptr);
+            },
+        }
     }
 };
 
@@ -43,19 +51,27 @@ pub const VmObject = struct {
     class: *VmClass,
 };
 
-/// Persistent copy of relevant parts of the cafebabe constant pool
-pub const RuntimeConstantPool = packed struct {};
+pub const VmClassRef = vm_alloc.VmRef(VmClass);
+pub const VmObjectRef = vm_alloc.VmRef(VmObject);
 
-pub const FieldId = struct { offset: u16 };
+pub const FieldId = union(enum) {
+    /// Offset into obj storage
+    instance_offset: u16,
+    /// Index into fields slice
+    static_index: u16,
+};
 
-const vmclass_size = @sizeOf(VmClass);
 pub const ObjectLayout = struct {
-    static_offset: u16 = @sizeOf(VmClass),
     instance_offset: u16 = @sizeOf(VmObject),
 };
 
+pub const WhichLoader = union(enum) {
+    bootstrap,
+    user: VmObjectRef,
+};
+
 /// Updates layout_offset in each field, offset from the given base. Updates to the offset after these fields
-fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) !void {
+pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) !void {
     // TODO pass class loading arena alloc in instead
 
     // sort types into reverse size order
@@ -86,31 +102,34 @@ fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) !v
     std.debug.assert(fields.len <= 65535); // TODO include super class field count too
 
     for (sorted_fields) |f| {
-        const size = f.descriptor.size();
-        var offset_ref = if (f.flags.contains(.static)) &out_offset.static_offset else &out_offset.instance_offset;
-
-        var offset = offset_ref.*;
-        offset = std.mem.alignForwardGeneric(u16, offset, size);
-        f.layout_offset = offset;
-        std.log.debug(" {s} {s} at offset {d}", .{ f.descriptor.str, f.name, offset });
-        offset += size;
-
-        offset_ref.* = offset;
+        if (f.flags.contains(.static)) {
+            // static values just live in the class directly
+            f.u = .{ .value = 0 };
+        } else {
+            // instance
+            const size = f.descriptor.size();
+            out_offset.instance_offset = std.mem.alignForwardGeneric(u16, out_offset.instance_offset, size);
+            f.u = .{ .layout_offset = out_offset.instance_offset };
+            std.log.debug(" {s} {s} at offset {d}", .{ f.descriptor.str, f.name, out_offset.instance_offset });
+            out_offset.instance_offset += size;
+        }
     }
 }
 
 fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, flags: std.EnumSet(Field.Flags), antiflags: std.EnumSet(Field.Flags)) ?FieldId {
-    for (fields) |f| {
+    for (fields) |f, i| {
         if ((f.flags.bits.mask & flags.bits.mask) == flags.bits.mask and
             (f.flags.bits.mask & ~(antiflags.bits.mask)) == f.flags.bits.mask and
             std.mem.eql(u8, desc, f.descriptor.str) and std.mem.eql(u8, name, f.name))
         {
-            return .{ .offset = f.layout_offset };
+            return if (f.flags.contains(.static)) .{ .static_index = @intCast(u16, i) } else .{ .instance_offset = f.u.layout_offset };
         }
     }
 
     return null;
 }
+
+// -- tests
 
 fn test_helper() type {
     return struct {
@@ -155,7 +174,7 @@ fn test_helper() type {
 }
 
 test "layout" {
-    std.testing.log_level = .debug;
+    // std.testing.log_level = .debug;
 
     const helper = test_helper();
     var layout = ObjectLayout{};
@@ -168,15 +187,14 @@ test "layout" {
     try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "I", helper.mkFlags(.{ .private = true }), .{}) == null); // wrong visiblity
     try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "I", .{}, helper.mkFlags(.{ .public = true })) == null); // antiflag
     const int3 = lookupFieldId(&helper.fields, "myInt3", "I", helper.mkFlags(.{ .public = true }), helper.mkFlags(.{ .private = true })) orelse unreachable;
-    try std.testing.expectEqual(@as(u16, 48 + @sizeOf(VmObject)), int3.offset);
+    try std.testing.expectEqual(@as(u16, 48 + @sizeOf(VmObject)), int3.instance_offset);
 
     // static
-    const staticBool = lookupFieldId(&helper.fields, "myBoolStatic", "Z", .{}, .{}) orelse unreachable;
-    try std.testing.expect(staticBool.offset > 0);
+    _ = lookupFieldId(&helper.fields, "myBoolStatic", "Z", .{}, .{}) orelse unreachable;
 }
 
 test "allocate class" {
-    std.testing.log_level = .debug;
+    // std.testing.log_level = .debug;
     const helper = test_helper();
     var alloc = std.testing.allocator;
 
@@ -192,18 +210,23 @@ test "allocate class" {
     try defineObjectLayout(alloc, &helper.fields, &layout);
 
     const int3 = lookupFieldId(&helper.fields, "myInt3", "I", helper.mkFlags(.{ .public = true }), helper.mkFlags(.{ .private = true })) orelse unreachable;
-    try std.testing.expect(int3.offset > 0 and int3.offset % @alignOf(i32) == 0);
+    try std.testing.expect(int3.instance_offset > 0 and int3.instance_offset % @alignOf(i32) == 0);
 
     // init global allocator
-    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator);
+    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     // allocate class with static storage
-    const cls = try vm_alloc.allocClass(layout);
+    const cls = try vm_alloc.allocClass();
     cls.get().layout = layout; // everything is unintialised
     cls.get().fields = &helper.fields; // only instance fields, need to concat super and this fields together
     defer cls.drop();
 
     const static_int_val = cls.get().getField(i32, lookupFieldId(cls.get().fields, "myIntStatic", "I", .{}, .{}) orelse unreachable);
     static_int_val.* = 0x12345678;
+}
+
+test "vmref size" {
+    try std.testing.expectEqual(@sizeOf(*u8), @sizeOf(VmObjectRef));
+    try std.testing.expectEqual(@sizeOf(*u8), @sizeOf(VmObjectRef.Weak));
 }

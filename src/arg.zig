@@ -26,7 +26,8 @@ const args_def = [_]Arg{
     Arg{ .name = "cp", .short = true, .ty = .classpath },
     Arg{ .name = "classpath", .short = false, .ty = .classpath },
 
-    Arg{ .name = "Xbootclasspath", .short = false, .ty = .bootclasspath },
+    // TODO needs /p or /a
+    Arg{ .name = "Xbootclasspath", .short = true, .ty = .bootclasspath },
 
     Arg{ .name = "h", .short = true, .ty = .help },
     Arg{ .name = "help", .short = true, .ty = .help },
@@ -224,7 +225,7 @@ test "long/short key values" {
 }
 
 test "bad" {
-    std.testing.log_level = .debug;
+    // std.testing.log_level = .debug;
     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath=" }));
     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp:" }));
     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath" }));
@@ -233,7 +234,7 @@ test "bad" {
 }
 
 test "load and parse" {
-    std.testing.log_level = .debug;
+    // std.testing.log_level = .debug;
     var args = try JvmArgs.parse(std.testing.allocator, &[_][:0]const u8{ "jvm", "-cp", "/nice:cool/epic/sweet.jar:lalala", "positional" }) orelse unreachable;
     defer args.deinit();
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const classloader = @import("classloader.zig");
 const vm_alloc = @import("alloc.zig");
+const JvmArgs = @import("arg.zig").JvmArgs;
 const Allocator = std.mem.Allocator;
 
 threadlocal var thread_env: ThreadEnv = undefined;
@@ -13,6 +14,7 @@ pub const GlobalState = struct {
 
     classloader: classloader.ClassLoader,
     allocator: vm_alloc.VmAllocator,
+    args: *const JvmArgs,
 };
 
 /// Each thread owns one
@@ -23,7 +25,7 @@ pub const ThreadEnv = struct {
         return ThreadEnv{ .global = global };
     }
 
-    pub fn initMainThread(alloc: Allocator) !JvmHandle {
+    pub fn initMainThread(alloc: Allocator, args: *const JvmArgs) !JvmHandle {
         var global = try alloc.create(GlobalState);
         // TODO errdefer global.deinit();
         errdefer alloc.destroy(global);
@@ -32,6 +34,7 @@ pub const ThreadEnv = struct {
             .daemon_threads = 0,
             .classloader = try classloader.ClassLoader.new(alloc),
             .allocator = vm_alloc.VmAllocator{ .inner = alloc },
+            .args = args,
         };
 
         _ = initThread(global);

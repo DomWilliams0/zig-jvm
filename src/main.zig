@@ -17,27 +17,24 @@ pub fn main() !void {
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);
 
-    const jvm_args = try arg.JvmArgs.parse(alloc, raw_args);
-    if (jvm_args) |args| {
-        // TODO put this into JvmArgs
-        std.log.debug("args:", .{});
-        std.log.debug(" main_class: {s}", .{args.main_class});
-        std.log.debug(" classpath: {?s}", .{args.classpath.slice});
-        std.log.debug(" bootclasspath: {?s}", .{args.boot_classpath.slice});
-    } else {
+    const jvm_args = try arg.JvmArgs.parse(alloc, raw_args) orelse {
         std.log.info("TODO show usage", .{});
         return;
-    }
+    };
 
-    var jvm_handle = try jvm.ThreadEnv.initMainThread(alloc);
+    // TODO put this into JvmArgs
+    std.log.debug("args:", .{});
+    std.log.debug(" main_class: {s}", .{jvm_args.main_class});
+    std.log.debug(" classpath: {?s}", .{jvm_args.classpath.slice});
+    std.log.debug(" bootclasspath: {?s}", .{jvm_args.boot_classpath.slice});
+
+    var jvm_handle = try jvm.ThreadEnv.initMainThread(alloc, &jvm_args);
     defer jvm_handle.deinit();
 
-    bootstrap.initBootstrapClasses(&jvm_handle.global.classloader);
-
-    // var arena_alloc = std.heap.ArenaAllocator.init(alloc);
-    // defer arena_alloc.deinit();
-    // const arena = arena_alloc.allocator();
-    // _ = try cafebabe.ClassFile.load(arena, alloc, path);
+    // TODO exception
+    try bootstrap.initBootstrapClasses(
+        &jvm_handle.global.classloader,
+    );
 
     std.log.info("done", .{});
 }
