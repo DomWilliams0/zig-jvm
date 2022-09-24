@@ -16,7 +16,7 @@ pub const CafebabeError = error{
 
 pub const ClassFile = struct {
     constant_pool: ConstantPool,
-    access_flags: u16,
+    flags: std.EnumSet(Flags),
     this_cls: []const u8,
     super_cls: ?[]const u8,
     interfaces: std.ArrayListUnmanaged([]const u8),
@@ -25,7 +25,7 @@ pub const ClassFile = struct {
     /// Persistently allocated
     attributes: std.ArrayListUnmanaged(Attribute),
 
-    const Flags = enum(u16) {
+    pub const Flags = enum(u16) {
         public = 0x0001,
         final = 0x0010,
         super = 0x0020,
@@ -87,6 +87,9 @@ pub const ClassFile = struct {
     }
 
     fn parse(arena: Allocator, persistent: Allocator, buf: *std.io.FixedBufferStream([]const u8)) !ClassFile {
+        // TODO could some of this be done with a packed struct? how does that work with unaligned ints.
+        //  would need to convert from big to native endian anyway
+
         var reader = buf.reader();
         if (try reader.readIntBig(u32) != 0xcafebabe) return CafebabeError.BadMagic;
 
@@ -103,6 +106,7 @@ pub const ClassFile = struct {
         const constant_pool = try ConstantPool.parse(arena, buf, cp_len);
 
         const access_flags = try reader.readIntBig(u16);
+        const flags = enumFromIntClass(ClassFile.Flags, access_flags) orelse return CafebabeError.BadFlags;
 
         const this_cls_idx = try reader.readIntBig(u16);
         const this_cls = constant_pool.lookupConstant(this_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
@@ -121,12 +125,10 @@ pub const ClassFile = struct {
         }
 
         const fields = try parseFieldsOrMethods(Field, arena, persistent, &constant_pool, &reader);
-
         const methods = try parseFieldsOrMethods(Method, arena, persistent, &constant_pool, &reader);
-
         const attributes = try parseAttributes(persistent, &constant_pool, &reader);
 
-        return ClassFile{ .constant_pool = constant_pool, .access_flags = access_flags, .this_cls = this_cls, .super_cls = super_cls, .interfaces = ifaces, .fields = fields, .methods = methods, .attributes = attributes };
+        return ClassFile{ .constant_pool = constant_pool, .flags = flags, .this_cls = this_cls, .super_cls = super_cls, .interfaces = ifaces, .fields = fields, .methods = methods, .attributes = attributes };
     }
 
     // TODO errdefer release list
@@ -214,7 +216,7 @@ const ClassAccessibility = enum(u16) {
 
 pub const Field = struct {
     flags: std.EnumSet(Flags),
-    name: []const u8,
+    name: []const u8, // TODO decide where this lives, who owns it, how to share/intern
     descriptor: FieldDescriptor,
     /// This list and its elems are NOT allocated in arena, rather in a persistent
     /// allocator that JVM will keep around
@@ -357,7 +359,7 @@ const ConstantPool = struct {
     };
 
     /// Allocated in the arena
-    indices: std.ArrayListUnmanaged(u16),
+    indices: []const (u16),
     slice: []const u8,
 
     fn parse(arena: Allocator, buf: *std.io.FixedBufferStream([]const u8), count: u16) !ConstantPool {
@@ -403,7 +405,8 @@ const ConstantPool = struct {
         }
 
         const slice = buf.buffer[start_idx..buf.pos];
-        return .{ .indices = indices, .slice = slice };
+        // no need for toOwnedSlice, list is fully initialised and in arena
+        return .{ .indices = indices.allocatedSlice(), .slice = slice };
     }
 
     pub fn lookupConstant(self: Self, idx_cp: u16) ?[]const u8 {
@@ -422,12 +425,12 @@ const ConstantPool = struct {
 
     fn validateIndexCp(self: Self, idx_cp: u16) ?usize {
         // const idx = std.math.sub(u16, idx_cp, 1) catch return null; // adjust for 1 based indexing
-        if (idx_cp == 0 or idx_cp >= self.indices.items.len + 1) {
+        if (idx_cp == 0 or idx_cp >= self.indices.len + 1) {
             std.log.err("invalid constant pool index {d}", .{idx_cp});
             return null;
         }
 
-        return self.indices.items[idx_cp];
+        return self.indices[idx_cp];
     }
 
     /// Checks one-based index. Returns slice starting at body of element

@@ -1,5 +1,6 @@
 const std = @import("std");
 
+// TODO intern all types of descriptors, could store borrowed tag in last bit(s) of ptr
 pub const FieldDescriptor = struct {
     // Must be validated with new
     str: []const u8,
