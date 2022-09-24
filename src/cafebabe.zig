@@ -1,14 +1,17 @@
 const std = @import("std");
-const root = @import("root");
 const io = std.io;
 const log = std.log;
 const Allocator = std.mem.Allocator;
+const FieldDescriptor = @import("descriptor.zig").FieldDescriptor;
+const MethodDescriptor = @import("descriptor.zig").MethodDescriptor;
 
 pub const CafebabeError = error{
     BadMagic,
+    BadFlags,
     UnsupportedVersion,
     MalformedConstantPool,
     BadConstantPoolIndex,
+    InvalidDescriptor,
 };
 
 pub const ClassFile = struct {
@@ -17,10 +20,22 @@ pub const ClassFile = struct {
     this_cls: []const u8,
     super_cls: ?[]const u8,
     interfaces: std.ArrayListUnmanaged([]const u8),
-    fields: std.ArrayListUnmanaged(FieldOrMethod),
-    methods: std.ArrayListUnmanaged(FieldOrMethod),
+    fields: std.ArrayListUnmanaged(Field),
+    methods: std.ArrayListUnmanaged(Method),
     /// Persistently allocated
     attributes: std.ArrayListUnmanaged(Attribute),
+
+    const Flags = enum(u16) {
+        public = 0x0001,
+        final = 0x0010,
+        super = 0x0020,
+        interface = 0x0200,
+        abstract = 0x0400,
+        synthetic = 0x1000,
+        annotation = 0x2000,
+        enum_ = 0x4000,
+        module = 0x8000,
+    };
 
     /// Mostly allocated into the given arena, will be thrown away when class is linked EXCEPT
     /// * field, method and class attributes (arraylist and the contents of each attribute)
@@ -105,9 +120,9 @@ pub const ClassFile = struct {
             }
         }
 
-        const fields = try parseFieldsOrMethods(arena, persistent, &constant_pool, &reader);
+        const fields = try parseFieldsOrMethods(Field, arena, persistent, &constant_pool, &reader);
 
-        const methods = try parseFieldsOrMethods(arena, persistent, &constant_pool, &reader);
+        const methods = try parseFieldsOrMethods(Method, arena, persistent, &constant_pool, &reader);
 
         const attributes = try parseAttributes(persistent, &constant_pool, &reader);
 
@@ -121,7 +136,6 @@ pub const ClassFile = struct {
         while (attr_count > 0) {
             const attr_name_idx = try reader.readIntBig(u16);
             const attr_name = cp.lookupUtf8(attr_name_idx) orelse return CafebabeError.BadConstantPoolIndex;
-            log.debug("attribute {s}", .{attr_name});
 
             const attr_len = try reader.readIntBig(u32);
 
@@ -142,21 +156,28 @@ pub const ClassFile = struct {
         return attrs;
     }
 
-    fn parseFieldsOrMethods(arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader) !std.ArrayListUnmanaged(FieldOrMethod) {
+    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader) !std.ArrayListUnmanaged(T) {
         var count = try reader.readIntBig(u16);
-        var list = try std.ArrayListUnmanaged(FieldOrMethod).initCapacity(arena, count);
+        var list = try std.ArrayListUnmanaged(T).initCapacity(arena, count);
 
         while (count > 0) {
             const access_flags = try reader.readIntBig(u16);
+            const flags = T.enumFromInt(T.Flags, access_flags) orelse return CafebabeError.BadFlags;
             const name_idx = try reader.readIntBig(u16);
             const desc_idx = try reader.readIntBig(u16);
 
             const name = cp.lookupUtf8(name_idx) orelse return CafebabeError.BadConstantPoolIndex;
-            const desc = cp.lookupUtf8(desc_idx) orelse return CafebabeError.BadConstantPoolIndex;
+            const desc_str = cp.lookupUtf8(desc_idx) orelse return CafebabeError.BadConstantPoolIndex;
+
+            // validate desc
+            const desc = T.descriptor.new(desc_str) orelse {
+                std.log.warn("invalid descriptor '{s}'", .{desc_str});
+                return CafebabeError.InvalidDescriptor;
+            };
             // log.debug("field/method {s} {s}", .{ name, desc });
 
             const attributes = try parseAttributes(persistent, cp, reader);
-            list.appendAssumeCapacity(FieldOrMethod{ .access_flags = access_flags, .name = name, .descriptor = desc, .attributes = attributes });
+            list.appendAssumeCapacity(.{ .flags = flags, .name = name, .descriptor = desc, .attributes = attributes });
 
             count -= 1;
         }
@@ -191,17 +212,115 @@ const ClassAccessibility = enum(u16) {
     module = 0x8000,
 };
 
-/// Only access flags type differ
-const FieldOrMethod = struct {
-    access_flags: u16,
+pub const Field = struct {
+    flags: std.EnumSet(Flags),
     name: []const u8,
-    descriptor: []const u8,
+    descriptor: FieldDescriptor,
     /// This list and its elems are NOT allocated in arena, rather in a persistent
     /// allocator that JVM will keep around
     attributes: std.ArrayListUnmanaged(Attribute),
+    // TODO ^ store slice instead, or just specifically the attrs needed like ConstantValue
+
+    /// Offset of this field in an object from its base offset, calculated after cafebabe load
+    layout_offset: u16 = undefined,
+
+    const descriptor = FieldDescriptor;
+
+    pub const Flags = enum(u16) {
+        public = 0x0001,
+        private = 0x0002,
+        protected = 0x0004,
+        static = 0x0008,
+        final = 0x0010,
+        volatile_ = 0x0040,
+        transient = 0x0080,
+        synthetic = 0x1000,
+        enum_ = 0x4000,
+    };
+
+    const enumFromInt = enumFromIntField; // temporary
 };
 
-const Attribute = union(enum) {
+pub const Method = struct {
+    flags: std.EnumSet(Flags),
+    name: []const u8,
+    descriptor: MethodDescriptor,
+    /// This list and its elems are NOT allocated in arena, rather in a persistent
+    /// allocator that JVM will keep around
+    attributes: std.ArrayListUnmanaged(Attribute),
+    // TODO ^ store slice instead, or just specifically the attrs needed like Code
+
+    const descriptor = MethodDescriptor;
+
+    const Flags = enum(u16) {
+        public = 0x0001,
+        private = 0x0002,
+        protected = 0x0004,
+        static = 0x0008,
+        final = 0x0010,
+        synchronized = 0x0020,
+        bridge = 0x0040,
+        varargs = 0x0080,
+        native = 0x0100,
+        abstract = 0x0400,
+        strict = 0x0800,
+        synthetic = 0x1000,
+    };
+    const enumFromInt = enumFromIntMethod; // temporary
+};
+
+// TODO return type due to https://github.com/ziglang/zig/issues/12949 :(
+fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.EnumSet(Field.Flags) {
+    const all = comptime blk: {
+        var bits = 0;
+        inline for (@typeInfo(T).Enum.fields) |d| {
+            bits |= d.value;
+        }
+        break :blk bits;
+    };
+
+    if ((input | all) != all) return null;
+
+    var set: std.EnumSet(T) = undefined;
+    set.bits.mask = @intCast(@TypeOf(set.bits.mask), input);
+    return set;
+}
+
+// XXX see above
+fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.EnumSet(Method.Flags) {
+    const all = comptime blk: {
+        var bits = 0;
+        inline for (@typeInfo(T).Enum.fields) |d| {
+            bits |= d.value;
+        }
+        break :blk bits;
+    };
+
+    if ((input | all) != all) return null;
+
+    var set: std.EnumSet(T) = undefined;
+    set.bits.mask = @intCast(@TypeOf(set.bits.mask), input);
+    return set;
+}
+
+// XXX see above
+fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.EnumSet(ClassFile.Flags) {
+    const all = comptime blk: {
+        var bits = 0;
+        inline for (@typeInfo(T).Enum.fields) |d| {
+            bits |= d.value;
+        }
+        break :blk bits;
+    };
+
+    if ((input | all) != all) return null;
+
+    var set: std.EnumSet(T) = undefined;
+    set.bits.mask = @intCast(@TypeOf(set.bits.mask), input);
+    return set;
+}
+
+pub const Attribute = union(enum) {
     code: []const u8,
 };
 
@@ -322,7 +441,7 @@ const ConstantPool = struct {
     }
 };
 
-test "parse" {
+test "parse class" {
     std.testing.log_level = .debug;
 
     const bytes = @embedFile("Test.class");
@@ -335,4 +454,15 @@ test "parse" {
     const classfile = ClassFile.parse(arena.allocator(), alloc, &buf) catch unreachable;
 
     try classfile.deinit(alloc);
+}
+
+test "parse flags" {
+    try std.testing.expect(enumFromIntField(Field.Flags, 0) != null);
+    try std.testing.expect(enumFromIntField(Field.Flags, 9999) == null);
+
+    var valid = enumFromIntField(Field.Flags, 2 | 8 | 16) orelse unreachable;
+    try std.testing.expect(valid.contains(.private));
+    try std.testing.expect(valid.contains(.static));
+    try std.testing.expect(valid.contains(.final));
+    try std.testing.expect(!valid.contains(.public));
 }
