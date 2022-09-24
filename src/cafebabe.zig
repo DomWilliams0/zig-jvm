@@ -221,7 +221,8 @@ pub const Field = struct {
     attributes: std.ArrayListUnmanaged(Attribute),
     // TODO ^ store slice instead, or just specifically the attrs needed like ConstantValue
 
-    /// Offset of this field in an object from its base offset, calculated after cafebabe load
+    /// Offset of this field, calculated after cafebabe load.
+    /// For static vars, offset into class storage, otherwise offset into object storage
     layout_offset: u16 = undefined,
 
     const descriptor = FieldDescriptor;
