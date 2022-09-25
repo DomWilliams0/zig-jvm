@@ -17,19 +17,23 @@ pub const VmClass = struct {
     interfaces: []*VmClass, // TODO class refs
 
     /// Only fields for this class
-    fields: []Field,
+    u: union {
+        /// Object class with fields
+        obj: struct {
+            fields: []Field,
+            layout: ObjectLayout,
+        },
+        primitive: vm_type.DataType,
+        array: struct {
+            elem_cls: VmClassRef,
+            dims: u8,
+            layout: ObjectLayout,
+        },
+    },
+
     // TODO methods
     attributes: []const cafebabe.Attribute,
     // TODO vmdata field
-
-    layout: union {
-        /// Exact size of the object, including all headers and storage
-        fields: ObjectLayout,
-
-        primitive: vm_type.DataType,
-
-        // TODO array elem type
-    },
 
     // ---------- VmRef interface
     pub fn vmRefSize(_: *const VmClass) usize {
@@ -48,7 +52,7 @@ pub const VmClass = struct {
                 return @ptrCast(*T, byte_ptr + offset);
             },
             .static_index => |idx| {
-                const ptr = &self.fields[idx].u.value;
+                const ptr = &self.u.obj.fields[idx].u.value;
                 return @ptrCast(*T, ptr);
             },
         }
@@ -71,6 +75,7 @@ pub const FieldId = union(enum) {
 };
 
 pub const ObjectLayout = struct {
+    /// Exact offset to start of fields from start of object
     instance_offset: u16 = @sizeOf(VmObject),
 };
 
@@ -227,11 +232,10 @@ test "allocate class" {
 
     // allocate class with static storage
     const cls = try vm_alloc.allocClass();
-    cls.get().layout = layout; // everything is unintialised
-    cls.get().fields = &helper.fields; // only instance fields, need to concat super and this fields together
+    cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout } }; // only instance fields, need to concat super and this fields together
     defer cls.drop();
 
-    const static_int_val = cls.get().getField(i32, lookupFieldId(cls.get().fields, "myIntStatic", "I", .{}, .{}) orelse unreachable);
+    const static_int_val = cls.get().getField(i32, lookupFieldId(cls.get().u.obj.fields, "myIntStatic", "I", .{}, .{}) orelse unreachable);
     static_int_val.* = 0x12345678;
 }
 

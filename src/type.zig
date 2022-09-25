@@ -28,6 +28,21 @@ pub const DataType = enum(u4) {
                     break val;
         } else null;
     }
+
+    pub fn fromType(ty: []const u8) ?DataType {
+        const c = if (ty.len == 0) return null else ty[0];
+        return switch (c) {
+            'B' => .byte,
+            'Z' => .boolean,
+            'C' => .char,
+            'S' => .short,
+            'I' => .int,
+            'F' => .float,
+            'D' => .double,
+            'J' => .long,
+            else => null,
+        };
+    }
 };
 
 const Primitive = struct {

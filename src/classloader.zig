@@ -84,12 +84,32 @@ pub const ClassLoader = struct {
         self.classes = .{};
     }
 
+    /// Main entrypoint - name can be array or class name. Loads now if not already
     // TODO return exception
-    pub fn loadClass(self: *Self, name: []const u8, loader: WhichLoader) anyerror!object.VmClassRef {
+    pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) anyerror!object.VmClassRef {
+        // TODO exception
+        if (name.len < 2) std.debug.panic("class name too short {s}", .{name});
 
-        // TODO check for array
+        const ArrayType = enum {
+            not,
+            primitive,
+            reference,
+        };
         // TODO helper wrapper type around type names like java/lang/String and [[C ?
-        std.debug.assert(name.len > 0 and name[0] != '['); // TODO array classes
+        const array_type: ArrayType = if (name[0] == '[')
+            if (name[1] == 'L' or name[1] == '[')
+                .reference
+            else
+                .primitive
+        else
+            .not;
+
+        // use bootstrap loader for primitive arrays
+        var loader = if (array_type == .primitive) .bootstrap else requested_loader;
+
+        if (array_type == .reference) {
+            unreachable; // TODO load element class first
+        }
 
         switch (self.getLoadState(name, loader)) {
             .loading => unreachable, // TODO other threads
@@ -102,8 +122,11 @@ pub const ClassLoader = struct {
         try self.setLoadState(name, loader, .{ .loading = Thread.getCurrentId() });
 
         const loaded_res = switch (loader) {
-            .bootstrap => self.loadBootstrapClass(name),
-            .user => |_| unreachable, // TODO user loader
+            .bootstrap => if (array_type == .not) self.loadBootstrapClass(name) else self.loadArrayClass(name, array_type == .primitive, loader),
+            .user => |_| {
+                std.debug.assert(array_type != .primitive); // already filtered out
+                unreachable; // TODO user loader
+            },
         };
 
         if (loaded_res) |cls| {
@@ -151,6 +174,46 @@ pub const ClassLoader = struct {
         return try self.defineClass(&arena, name, file_bytes, .bootstrap);
     }
 
+    // TODO set exception
+    fn loadArrayClass(self: *Self, name: []const u8, is_primitive: bool, loader: WhichLoader) !object.VmClassRef {
+        std.debug.assert(name[0] == '[');
+        const elem_name = name[1..];
+
+        const elem_class_ref = try if (is_primitive) self.loadPrimitive(elem_name) else self.loadClass(elem_name, loader);
+        const elem_class = elem_class_ref.get();
+
+        var flags = elem_class.flags;
+        if (!is_primitive) flags.remove(.interface) else flags.insert(.public);
+        flags.insert(.abstract);
+        flags.insert(.final);
+
+        // TODO faster lookup
+        const java_lang_Object = self.getLoadedBootstrapClass("java/lang/Object") orelse unreachable;
+
+        // TODO interfaces cloneable and serializable
+        const elem_dims = if (elem_class.name[0] == '[') elem_class.u.array.dims else 0;
+
+        var class = try vm_alloc.allocClass();
+        class.get().* = .{
+            .flags = flags,
+            .name = try self.alloc.dupe(u8, name),
+            .u = .{ .array = .{ .elem_cls = elem_class_ref, .dims = elem_dims + 1, .layout = undefined } }, // TODO array layout
+            .constant_pool = undefined,
+            .super_cls = java_lang_Object,
+            .interfaces = &.{}, // TODO
+            .attributes = &.{},
+        };
+
+        // TODO storage for array elems
+        // TODO storage for array elems
+        // TODO storage for array elems
+        // TODO storage for array elems
+        // TODO storage for array elems
+        // TODO storage for array elems
+
+        return class;
+    }
+
     // TODO cached/better lookup for known bootstrap classes
     fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?object.VmClassRef {
         return switch (self.getLoadState(name, .bootstrap)) {
@@ -160,7 +223,7 @@ pub const ClassLoader = struct {
     }
 
     pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!object.VmClassRef {
-        const ty = vm_type.DataType.fromName(name, true) orelse std.debug.panic("invalid primitive {s}", name);
+        const ty = vm_type.DataType.fromType(name) orelse std.debug.panic("invalid primitive {s}", .{name});
         return self.loadPrimitiveWithType(name, ty);
     }
 
@@ -173,22 +236,21 @@ pub const ClassLoader = struct {
 
         var class = try vm_alloc.allocClass();
         class.get().* = .{
-            .constant_pool = undefined,
             .flags = std.EnumSet(cafebabe.ClassFile.Flags).init(.{ .public = true, .final = true, .abstract = true }),
             .name = name, // static
-            .super_cls = undefined,
-            .interfaces = undefined,
-            .fields = undefined,
-            .attributes = undefined,
-            .layout = .{ .primitive = ty },
+            .u = .{ .primitive = ty },
+            .constant_pool = undefined, // unused
+            .super_cls = null,
+            .interfaces = &.{},
+            .attributes = &.{},
         };
 
         entry.* = class.clone();
-
         return class;
     }
 
     /// Class bytes are the callers responsiblity to clean up.
+    /// Not an array or primitive
     fn defineClass(self: *Self, arena: *std.heap.ArenaAllocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !object.VmClassRef {
         var stream = std.io.fixedBufferStream(class_bytes);
         var classfile = try cafebabe.ClassFile.parse(arena, self.alloc, &stream);
@@ -207,28 +269,29 @@ pub const ClassLoader = struct {
             .flags = classfile.flags,
             .name = try self.alloc.dupe(u8, classfile.this_cls),
             .super_cls = super_class,
-            .interfaces = undefined, // TODO
-            .fields = blk: {
-                const slice = classfile.fields.allocatedSlice();
-                classfile.fields = .{}; // take ownership
-                break :blk slice;
+            .interfaces = &.{}, // TODO
+            .u = .{
+                .obj = .{
+                    .fields = blk: {
+                        const slice = classfile.fields.allocatedSlice();
+                        classfile.fields = .{}; // take ownership
+                        break :blk slice;
+                    },
+                    .layout = undefined, // set next in preparation stage
+                },
             },
             .attributes = blk: {
                 const slice = classfile.attributes.allocatedSlice();
                 classfile.attributes = .{}; // take ownership
                 break :blk slice;
             },
-            .layout = undefined, // set soon in preparation stage
         };
 
         // preparation
-        // not a primitive, could be an array TODO
-        const is_array = false;
-        if (!is_array) {
-            var layout: object.ObjectLayout = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class) |super| super.get().layout.fields else .{};
-            try object.defineObjectLayout(arena.allocator(), class.get().fields, &layout);
-            class.get().layout = .{ .fields = layout };
-        }
+        var layout: object.ObjectLayout = if (!classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class) |super| super.get().u.obj.layout else .{};
+        try object.defineObjectLayout(arena.allocator(), class.get().u.obj.fields, &layout);
+        class.get().u.obj.layout = layout;
+        std.log.debug("{s} has layout {any}", .{ name, layout });
 
         return class;
     }

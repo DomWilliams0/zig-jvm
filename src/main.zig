@@ -11,6 +11,7 @@ pub const JvmError = error{
 pub const log_level: std.log.Level = .debug;
 
 pub fn main() !void {
+    // TODO add limit to test oom
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 

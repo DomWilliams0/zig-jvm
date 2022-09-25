@@ -6,7 +6,7 @@ const Preload = struct {
     // TODO native method bindings. use comptime reflection to link up
 };
 
-const preload_classes: [1]Preload = .{.{ .cls = "java/lang/String" }};
+const preload_classes: [2]Preload = .{ .{ .cls = "java/lang/String" }, .{ .cls = "[I" } };
 
 fn load(preload: Preload, loader: *classloader.ClassLoader) !void {
     // TODO check for array
@@ -30,4 +30,6 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader) !void {
     // TODO fix up class vmdata pointers now
 
     try loadPrimitives(loader);
+    inline for (preload_classes) |preload|
+        try load(preload, loader);
 }
