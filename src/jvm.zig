@@ -74,7 +74,8 @@ pub const JvmHandle = struct {
         thread_env = undefined;
         inited = false;
 
-        // just free memory now
+        // destroy global context
+        self.global.classloader.deinit();
         const alloc = self.global.allocator.inner;
         alloc.destroy(self.global);
         var self_mut = self;

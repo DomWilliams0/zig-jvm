@@ -4,10 +4,31 @@ const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
 const object = @import("object.zig");
 const Allocator = std.mem.Allocator;
+const Thread = std.Thread;
 
 pub const WhichLoader = union(enum) {
     bootstrap,
     user: object.VmObjectRef,
+
+    fn eq(a: @This(), b: @This()) bool {
+        return switch (a) {
+            .bootstrap => switch (b) {
+                .bootstrap => true,
+                else => false,
+            },
+            .user => |obj_a| switch (b) {
+                .user => |obj_b| obj_a.cmpPtr(obj_b),
+                else => false,
+            },
+        };
+    }
+
+    fn clone(self: @This()) @This() {
+        return switch (self) {
+            .bootstrap => .bootstrap,
+            .user => |obj| .{ .user = obj.clone() },
+        };
+    }
 };
 pub const E = error{
     ClassNotFound, // TODO exception instead
@@ -19,8 +40,44 @@ pub const ClassLoader = struct {
 
     alloc: Allocator,
 
+    /// Protects classes map
+    lock: Thread.RwLock,
+    classes: std.ArrayHashMapUnmanaged(Key, LoadState, ClassesContext, true),
+
+    const ClassesContext = struct {
+        pub fn hash(_: @This(), key: Key) u32 {
+            var hasher = std.hash.Wyhash.init(4);
+            hasher.update(key.name);
+            std.hash.autoHash(&hasher, key.loader);
+            return @truncate(u32, hasher.final());
+        }
+
+        pub fn eql(_: @This(), a: Key, b: Key, _: usize) bool {
+            return a.loader.eq(b.loader) and std.mem.eql(u8, a.name, b.name);
+        }
+    };
+
+    const LoadState = union(enum) {
+        unloaded,
+        loading: Thread.Id,
+        loaded: object.VmClassRef,
+        failed,
+    };
+
+    const Key = struct { name: []const u8, loader: WhichLoader };
+
     pub fn new(alloc: Allocator) !ClassLoader {
-        return ClassLoader{ .alloc = alloc };
+        var cl = ClassLoader{ .alloc = alloc, .lock = .{}, .classes = .{} };
+        try cl.classes.ensureTotalCapacity(alloc, 1024);
+        return cl;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        self.classes.deinit(self.alloc);
+        self.classes = .{};
     }
 
     // TODO return exception
@@ -30,17 +87,59 @@ pub const ClassLoader = struct {
         // TODO helper wrapper type around type names like java/lang/String and [[C ?
         std.debug.assert(name.len > 0 and name[0] != '['); // TODO array classes
 
-        // TODO return already loaded instance
+        switch (self.getLoadState(name, loader)) {
+            .loading => unreachable, // TODO other threads
+            .loaded => |cls| return cls,
+            else => {},
+        }
 
-        return switch (loader) {
+        // loading time
+        // TODO native error to exception?
+        try self.setLoadState(name, loader, .{ .loading = Thread.getCurrentId() });
+
+        const loaded_res = switch (loader) {
             .bootstrap => self.loadBootstrapClass(name),
-            .user => |_| unreachable, // TODO
+            .user => |_| unreachable, // TODO user loader
         };
+
+        if (loaded_res) |cls| {
+            self.setLoadState(name, loader, .{ .loaded = cls.clone() }) catch unreachable; // already in there
+            return cls;
+        } else |err| {
+            self.setLoadState(name, loader, .failed) catch unreachable; // already in there
+            return err;
+        }
+    }
+
+    fn getLoadState(self: *Self, name: []const u8, loader: WhichLoader) LoadState {
+        self.lock.lockShared();
+        defer self.lock.unlockShared();
+
+        const key = Key{ .name = name, .loader = loader };
+        return self.classes.get(key) orelse .unloaded;
+    }
+
+    /// name and loader are owned by the caller, and cloned on first addition (owned by the loader).
+    /// Only fails on allocating when adding new entry
+    fn setLoadState(self: *Self, name: []const u8, loader: WhichLoader, state: LoadState) !void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const key = Key{ .name = name, .loader = loader };
+        const entry = try self.classes.getOrPut(self.alloc, key);
+        if (entry.found_existing)
+            entry.value_ptr.* = state
+        else {
+            entry.key_ptr.name = try self.alloc.dupe(u8, name);
+            entry.key_ptr.loader = loader.clone();
+        }
+
+        std.log.debug("set {s} state for {s}", .{ @tagName(state), name });
     }
 
     /// Name is the file name of the class
     // TODO set exception
-    pub fn loadBootstrapClass(self: *Self, name: []const u8) !object.VmClassRef {
+    fn loadBootstrapClass(self: *Self, name: []const u8) !object.VmClassRef {
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         errdefer arena.deinit();
 

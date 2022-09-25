@@ -85,6 +85,10 @@ pub fn VmRef(comptime T: type) type {
             const implicit_weak = Weak{ .ptr = self.ptr };
             implicit_weak.drop();
         }
+
+        pub fn cmpPtr(self: Strong, other: Strong) bool {
+            return self.ptr == other.ptr;
+        }
         // }; // end of Strong
 
         const InnerBlock = struct {

@@ -12,7 +12,8 @@ fn load(preload: Preload, loader: *classloader.ClassLoader) !void {
     // TODO handle user loader
 
     // TODO comptime check '[' and call another func. but check that all the many preload funcs share the same generated code
-    _ = try loader.loadBootstrapClass(preload.cls);
+    // TODO variant with comptime bootstrap loader
+    _ = try loader.loadClass(preload.cls, .bootstrap);
 }
 
 pub fn initBootstrapClasses(loader: *classloader.ClassLoader) !void {
