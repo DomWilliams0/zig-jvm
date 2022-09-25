@@ -2,6 +2,7 @@ const std = @import("std");
 const jvm = @import("jvm.zig");
 const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
+const vm_type = @import("type.zig");
 const object = @import("object.zig");
 const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
@@ -43,6 +44,9 @@ pub const ClassLoader = struct {
     /// Protects classes map
     lock: Thread.RwLock,
     classes: std.ArrayHashMapUnmanaged(Key, LoadState, ClassesContext, true),
+
+    /// Initialised during startup so not mutex protected
+    primitives: [vm_type.primitives.len]?object.VmClassRef = [_]?object.VmClassRef{null} ** vm_type.primitives.len,
 
     const ClassesContext = struct {
         pub fn hash(_: @This(), key: Key) u32 {
@@ -147,6 +151,43 @@ pub const ClassLoader = struct {
         return try self.defineClass(&arena, name, file_bytes, .bootstrap);
     }
 
+    // TODO cached/better lookup for known bootstrap classes
+    fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?object.VmClassRef {
+        return switch (self.getLoadState(name, .bootstrap)) {
+            .loaded => |cls| cls,
+            else => null,
+        };
+    }
+
+    pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!object.VmClassRef {
+        const ty = vm_type.DataType.fromName(name, true) orelse std.debug.panic("invalid primitive {s}", name);
+        return self.loadPrimitiveWithType(name, ty);
+    }
+
+    /// Name should be static if lodaing for the first time (during startup)
+    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.DataType) anyerror!object.VmClassRef {
+        var entry = &self.primitives[@enumToInt(ty)];
+        if (entry.*) |cls| return cls;
+
+        std.log.debug("loading primitive {s}", .{name});
+
+        var class = try vm_alloc.allocClass();
+        class.get().* = .{
+            .constant_pool = undefined,
+            .flags = std.EnumSet(cafebabe.ClassFile.Flags).init(.{ .public = true, .final = true, .abstract = true }),
+            .name = name, // static
+            .super_cls = undefined,
+            .interfaces = undefined,
+            .fields = undefined,
+            .attributes = undefined,
+            .layout = .{ .primitive = ty },
+        };
+
+        entry.* = class.clone();
+
+        return class;
+    }
+
     /// Class bytes are the callers responsiblity to clean up.
     fn defineClass(self: *Self, arena: *std.heap.ArenaAllocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !object.VmClassRef {
         var stream = std.io.fixedBufferStream(class_bytes);
@@ -180,15 +221,16 @@ pub const ClassLoader = struct {
             .layout = undefined, // set soon in preparation stage
         };
 
+        // preparation
+        // not a primitive, could be an array TODO
+        const is_array = false;
+        if (!is_array) {
+            var layout: object.ObjectLayout = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class) |super| super.get().layout.fields else .{};
+            try object.defineObjectLayout(arena.allocator(), class.get().fields, &layout);
+            class.get().layout = .{ .fields = layout };
+        }
+
         return class;
-
-        // TODO class does not need static storage, just put value in the Field in the class instance
-        // calculate class and object layouts
-        // var base = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) null else {
-
-        // };
-        // const layout = object.defineObjectLayout(arena, &classfile.fields.items)
-        // var class = vm_alloc.allocClass()
     }
 
     /// Arena is only used for the successfully read class file bytes

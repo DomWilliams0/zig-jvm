@@ -1,6 +1,7 @@
 const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
+const vm_type = @import("type.zig");
 const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
 
@@ -13,14 +14,22 @@ pub const VmClass = struct {
     // /// Owned copy
     // super_name: ?[]const u8,
     super_cls: ?VmClassRef,
-    interfaces: []*VmClass,
+    interfaces: []*VmClass, // TODO class refs
+
     /// Only fields for this class
     fields: []Field,
     // TODO methods
     attributes: []const cafebabe.Attribute,
+    // TODO vmdata field
 
-    /// Exact size of the object, including all headers and storage
-    layout: ObjectLayout,
+    layout: union {
+        /// Exact size of the object, including all headers and storage
+        fields: ObjectLayout,
+
+        primitive: vm_type.DataType,
+
+        // TODO array elem type
+    },
 
     // ---------- VmRef interface
     pub fn vmRefSize(_: *const VmClass) usize {
@@ -71,7 +80,7 @@ pub const WhichLoader = union(enum) {
 };
 
 /// Updates layout_offset in each field, offset from the given base. Updates to the offset after these fields
-pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) !void {
+pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) error{OutOfMemory}!void {
     // TODO pass class loading arena alloc in instead
 
     // sort types into reverse size order

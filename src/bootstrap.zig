@@ -1,4 +1,5 @@
 const classloader = @import("classloader.zig");
+const vm_type = @import("type.zig");
 
 const Preload = struct {
     cls: []const u8,
@@ -16,7 +17,17 @@ fn load(preload: Preload, loader: *classloader.ClassLoader) !void {
     _ = try loader.loadClass(preload.cls, .bootstrap);
 }
 
+fn loadPrimitives(loader: *classloader.ClassLoader) !void {
+    inline for (vm_type.primitives) |prim| {
+        _ = try loader.loadPrimitiveWithType(prim.name, prim.ty);
+    }
+}
+
 pub fn initBootstrapClasses(loader: *classloader.ClassLoader) !void {
     try load(.{ .cls = "java/lang/Object" }, loader);
     try load(.{ .cls = "java/lang/Class" }, loader);
+
+    // TODO fix up class vmdata pointers now
+
+    try loadPrimitives(loader);
 }
