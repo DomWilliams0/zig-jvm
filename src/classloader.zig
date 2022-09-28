@@ -46,7 +46,7 @@ pub const ClassLoader = struct {
     classes: std.ArrayHashMapUnmanaged(Key, LoadState, ClassesContext, true),
 
     /// Initialised during startup so not mutex protected
-    primitives: [vm_type.primitives.len]?object.VmClassRef = [_]?object.VmClassRef{null} ** vm_type.primitives.len,
+    primitives: [vm_type.primitives.len]object.VmClassRef.Nullable = [_]object.VmClassRef.Nullable{null} ** vm_type.primitives.len,
 
     const ClassesContext = struct {
         pub fn hash(_: @This(), key: Key) u32 {
@@ -82,6 +82,10 @@ pub const ClassLoader = struct {
 
         self.classes.deinit(self.alloc);
         self.classes = .{};
+
+        for (self.primitives) |prim| {
+            if (prim) |p| object.VmClassRef.fromRaw(p).drop();
+        }
     }
 
     /// Main entrypoint - name can be array or class name. Loads now if not already
@@ -230,7 +234,7 @@ pub const ClassLoader = struct {
     /// Name should be static if lodaing for the first time (during startup)
     pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.DataType) anyerror!object.VmClassRef {
         var entry = &self.primitives[@enumToInt(ty)];
-        if (entry.*) |cls| return cls;
+        if (entry.*) |cls| return object.VmClassRef.fromRaw(cls).clone();
 
         std.log.debug("loading primitive {s}", .{name});
 
@@ -245,7 +249,7 @@ pub const ClassLoader = struct {
             .attributes = &.{},
         };
 
-        entry.* = class.clone();
+        entry.* = class.clone().intoRaw();
         return class;
     }
 

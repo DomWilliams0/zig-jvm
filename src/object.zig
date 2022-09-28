@@ -39,7 +39,7 @@ pub const VmClass = struct {
     pub fn vmRefSize(_: *const VmClass) usize {
         return 0; // nothing extra
     }
-    pub fn vmRefDrop(_: @This()) void {
+    pub fn vmRefDrop(_: *@This()) void {
         // TODO release owned memory
     }
 

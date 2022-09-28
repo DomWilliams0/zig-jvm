@@ -18,9 +18,9 @@ pub fn VmRef(comptime T: type) type {
         }
 
         pub const Weak = struct {
-            ptr: *Inner,
+            ptr: *InnerRef,
 
-            const dangle_ptr: *Inner = @intToPtr(*Inner, std.mem.alignBackwardGeneric(usize, std.math.maxInt(usize), @alignOf(Inner)));
+            const dangle_ptr: *InnerRef = @intToPtr(*InnerRef, std.mem.alignBackwardGeneric(usize, std.math.maxInt(usize), @alignOf(InnerRef)));
 
             fn new_dangling() Weak {
                 return .{ .ptr = dangle_ptr };
@@ -42,9 +42,11 @@ pub fn VmRef(comptime T: type) type {
                     if (logging) std.log.debug("{*}: dropping inner", .{self.ptr});
 
                     const alloc = global_allocator();
-                    const alloc_size = @sizeOf(InnerBlock) + T.vmRefSize(&self.ptr.data);
+                    const alloc_size =
+                        std.mem.alignForward(@sizeOf(InnerBlock), @alignOf(T)) + @sizeOf(T) + T.vmRefSize(self.ptr.get());
 
                     var destroy_slice = @ptrCast([*]u8, self.ptr)[0..alloc_size];
+                    // if (logging) std.log.debug("{*}: freeing {*} len {d}", .{ self.ptr, destroy_slice.ptr, destroy_slice.len });
                     alloc.inner.free(destroy_slice);
                 }
             }
@@ -52,11 +54,11 @@ pub fn VmRef(comptime T: type) type {
 
         // Strong reference (i.e. the VmRef itself)
         // pub const Strong = {
-        ptr: *Inner,
+        ptr: *InnerRef,
 
         const Strong = @This();
         pub fn get(self: Strong) *T {
-            return &self.ptr.data;
+            return self.ptr.get();
         }
 
         pub fn clone(self: Strong) Strong {
@@ -79,7 +81,7 @@ pub fn VmRef(comptime T: type) type {
             self.ptr.block.strong.fence(.Acquire);
 
             // destroy data
-            T.vmRefDrop(self.ptr.data);
+            T.vmRefDrop(self.get());
 
             // destroy implicit shared weak
             const implicit_weak = Weak{ .ptr = self.ptr };
@@ -89,30 +91,56 @@ pub fn VmRef(comptime T: type) type {
         pub fn cmpPtr(self: Strong, other: Strong) bool {
             return self.ptr == other.ptr;
         }
+
+        pub fn intoRaw(self: Strong) Nullable {
+            return self.ptr;
+        }
+
+        pub fn fromRawMaybe(ptr: Nullable) ?Strong {
+            return if (ptr) |p| Strong{ .ptr = p } else null;
+        }
+
+        pub fn fromRaw(ptr: *InnerRef) Strong {
+            return .{ .ptr = ptr };
+        }
+
         // }; // end of Strong
 
-        const InnerBlock = struct {
+        pub const Nullable = ?*InnerRef;
+
+        const InnerBlock = extern struct {
             weak: Counter,
             strong: Counter,
+            padding: u8, // between block and start of data
         };
 
-        const Inner = struct {
+        const InnerRef = extern struct {
             block: InnerBlock,
-            data: T,
+            // data: T,
+
+            fn get(self: *InnerRef) *T {
+                var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+                const offset = @sizeOf(InnerBlock) + self.block.padding;
+                return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+            }
         };
 
         /// Data is undefined
         fn new_uninit(size: usize, comptime alignment: u29) !Strong {
             const alloc = global_allocator();
-            const alloc_size = @sizeOf(InnerBlock) + size;
+            const padding = std.mem.alignForward(@sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
+            const alloc_size = @sizeOf(InnerBlock) + padding + @sizeOf(T) + size;
+
             const buf = try alloc.inner.allocAdvanced(u8, alignment, alloc_size, .exact);
-            const inner = @ptrCast(*Inner, buf);
+            // if (logging) std.log.debug("allocated {*} len {d} with align={d}, size={d}", .{ buf.ptr, buf.len, alignment, alloc_size });
+            const inner = @ptrCast(*InnerRef, buf);
             inner.* = .{
                 .block = .{
                     .weak = Counter.init(1),
                     .strong = Counter.init(1),
+                    .padding = @truncate(u8, padding),
                 },
-                .data = undefined,
+                // padding and data follows immediately
             };
             return Strong{ .ptr = inner };
         }
@@ -156,11 +184,12 @@ test "vmref" {
         };
 
         // interface for VmRef
-        fn vmRefDrop(_: @This()) void {}
+        fn vmRefDrop(_: *@This()) void {}
         fn vmRefSize(self: *const @This()) usize {
             return self.actual_count;
         }
     };
+
     const IntRef = VmRef(VmInt);
 
     // init global allocator
