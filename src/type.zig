@@ -43,6 +43,32 @@ pub const DataType = enum(u4) {
             else => null,
         };
     }
+
+    pub fn size(self: @This()) u8 {
+        return switch (self) {
+            .boolean, .byte => 1,
+            .char, .short => 2,
+            .float, .int => 4,
+            .double, .long => 8,
+            .reference => @sizeOf(usize),
+            else => 0,
+        };
+    }
+
+    pub fn asType(comptime self: @This()) type {
+        return switch (self) {
+            .boolean => bool,
+            .byte => i8,
+            .short => i16,
+            .int => i32,
+            .long => i64,
+            .char => i16,
+            .float => f32,
+            .double => f64,
+            .reference => *void,
+            else => @compileError("no corresponding type"),
+        };
+    }
 };
 
 const Primitive = struct {

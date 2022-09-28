@@ -4,6 +4,7 @@ const vm_alloc = @import("alloc.zig");
 const vm_type = @import("type.zig");
 const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
+const Method = cafebabe.Method;
 
 /// Always allocated on GC heap
 pub const VmClass = struct {
@@ -21,18 +22,18 @@ pub const VmClass = struct {
         /// Object class with fields
         obj: struct {
             fields: []Field,
+            methods: []Method,
             layout: ObjectLayout,
         },
         primitive: vm_type.DataType,
         array: struct {
             elem_cls: VmClassRef,
             dims: u8,
-            layout: ObjectLayout,
         },
     },
 
     // TODO methods
-    attributes: []const cafebabe.Attribute,
+    // attributes: []const cafebabe.Attribute,
     // TODO vmdata field
 
     // ---------- VmRef interface
@@ -48,14 +49,50 @@ pub const VmClass = struct {
     pub fn getField(self: *@This(), comptime T: type, field: FieldId) *T {
         switch (field) {
             .instance_offset => |offset| {
-                var byte_ptr: [*]u8 = @ptrCast([*]align(@alignOf(T)) u8, self);
-                return @ptrCast(*T, byte_ptr + offset);
+                var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+                return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
             },
             .static_index => |idx| {
                 const ptr = &self.u.obj.fields[idx].u.value;
-                return @ptrCast(*T, ptr);
+                return @ptrCast(*T, @alignCast(@alignOf(T), ptr));
             },
         }
+    }
+
+    /// Looks in super classes too
+    // pub fn findMethodRecursive(
+    //     self: *@This(),
+    //     name: []const u8,
+    //     desc: []const u8,
+    //     flags: std.enums.EnumFieldStruct(cafebabe.Method.Flags, bool, false),
+    // ) !void {
+
+    //     var cls = self;
+    //     while (cls) {
+
+    //     }
+
+    //     _ = name;
+    //     _ = desc;
+    //     _ = self;
+    //     _ = flags;
+    // }
+
+    pub fn findMethodInThisOnly(
+        self: *@This(),
+        name: []const u8,
+        desc: []const u8,
+        flags: anytype,
+    ) ?*const Method {
+        const pls = makeFlagsAndAntiFlags(Method.Flags, flags);
+        return for (self.u.obj.methods) |m| {
+            if ((m.flags.bits.mask & pls.flags.bits.mask) == pls.flags.bits.mask and
+                (m.flags.bits.mask & ~(pls.antiflags.bits.mask)) == m.flags.bits.mask and
+                std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
+            {
+                break &m;
+            }
+        } else null;
     }
 };
 
@@ -77,6 +114,25 @@ pub const FieldId = union(enum) {
 pub const ObjectLayout = struct {
     /// Exact offset to start of fields from start of object
     instance_offset: u16 = @sizeOf(VmObject),
+};
+
+/// Implicitly lives at the end of an object allocation that is an array
+pub const ArrayStorageRef = extern struct {
+    len: u32,
+    // `len` elements go here
+
+    fn elementsStart(self: *@This(), comptime T: type) []T {
+        std.debug.assert(@sizeOf(T) != 0);
+        // const padding = 0; // TODO
+
+        const ptr: [*]u32 = &self.len;
+        _ = ptr;
+        unreachable;
+    }
+
+    pub fn getElementsShorts(self: *@This()) []i16 {
+        _ = self;
+    }
 };
 
 pub const WhichLoader = union(enum) {
@@ -130,10 +186,16 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
     }
 }
 
-fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, flags: std.EnumSet(Field.Flags), antiflags: std.EnumSet(Field.Flags)) ?FieldId {
+// fn defineArrayLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) error{OutOfMemory}!void {
+//         // TODO multidim - nah ignore
+//     }
+
+// TODO pass enum field map instead of 2 sets
+fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
+    const flags = makeFlagsAndAntiFlags(Field.Flags, input_flags);
     for (fields) |f, i| {
-        if ((f.flags.bits.mask & flags.bits.mask) == flags.bits.mask and
-            (f.flags.bits.mask & ~(antiflags.bits.mask)) == f.flags.bits.mask and
+        if ((f.flags.bits.mask & flags.flags.bits.mask) == flags.flags.bits.mask and
+            (f.flags.bits.mask & ~(flags.antiflags.bits.mask)) == f.flags.bits.mask and
             std.mem.eql(u8, desc, f.descriptor.str) and std.mem.eql(u8, name, f.name))
         {
             return if (f.flags.contains(.static)) .{ .static_index = @intCast(u16, i) } else .{ .instance_offset = f.u.layout_offset };
@@ -161,12 +223,7 @@ fn test_helper() type {
                 .name = ctx.name,
                 .flags = flags,
                 .descriptor = @import("descriptor.zig").FieldDescriptor.new(ctx.desc) orelse unreachable,
-                .attributes = std.ArrayListUnmanaged(cafebabe.Attribute).initCapacity(std.testing.allocator, 0) catch unreachable,
             };
-        }
-
-        fn mkFlags(flags: std.enums.EnumFieldStruct(Field.Flags, bool, false)) std.EnumSet(Field.Flags) {
-            return std.EnumSet(Field.Flags).init(flags);
         }
 
         var fields = [_]cafebabe.Field{
@@ -197,14 +254,14 @@ test "layout" {
     // try std.testing.expectEqual(layout.static_offset, 9);
 
     // instance
-    try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "J", .{}, .{}) == null); // wrong type
-    try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "I", helper.mkFlags(.{ .private = true }), .{}) == null); // wrong visiblity
-    try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "I", .{}, helper.mkFlags(.{ .public = true })) == null); // antiflag
-    const int3 = lookupFieldId(&helper.fields, "myInt3", "I", helper.mkFlags(.{ .public = true }), helper.mkFlags(.{ .private = true })) orelse unreachable;
+    try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "J", .{}) == null); // wrong type
+    try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "I", .{ .private = true }) == null); // wrong visiblity
+    try std.testing.expect(lookupFieldId(&helper.fields, "myInt3", "I", .{ .public = false }) == null); // antiflag
+    const int3 = lookupFieldId(&helper.fields, "myInt3", "I", .{ .public = true, .private = false }) orelse unreachable;
     try std.testing.expectEqual(@as(u16, 48 + @sizeOf(VmObject)), int3.instance_offset);
 
     // static
-    _ = lookupFieldId(&helper.fields, "myBoolStatic", "Z", .{}, .{}) orelse unreachable;
+    _ = lookupFieldId(&helper.fields, "myBoolStatic", "Z", .{}) orelse unreachable;
 }
 
 test "allocate class" {
@@ -223,7 +280,7 @@ test "allocate class" {
     // now init class with this as its super
     try defineObjectLayout(alloc, &helper.fields, &layout);
 
-    const int3 = lookupFieldId(&helper.fields, "myInt3", "I", helper.mkFlags(.{ .public = true }), helper.mkFlags(.{ .private = true })) orelse unreachable;
+    const int3 = lookupFieldId(&helper.fields, "myInt3", "I", .{ .public = true, .private = false }) orelse unreachable;
     try std.testing.expect(int3.instance_offset > 0 and int3.instance_offset % @alignOf(i32) == 0);
 
     // init global allocator
@@ -232,14 +289,60 @@ test "allocate class" {
 
     // allocate class with static storage
     const cls = try vm_alloc.allocClass();
-    cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout } }; // only instance fields, need to concat super and this fields together
+    cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined } }; // only instance fields, need to concat super and this fields together
     defer cls.drop();
 
-    const static_int_val = cls.get().getField(i32, lookupFieldId(cls.get().u.obj.fields, "myIntStatic", "I", .{}, .{}) orelse unreachable);
+    const static_int_val = cls.get().getField(i32, lookupFieldId(cls.get().u.obj.fields, "myIntStatic", "I", .{}) orelse unreachable);
     static_int_val.* = 0x12345678;
 }
 
 test "vmref size" {
     try std.testing.expectEqual(@sizeOf(*u8), @sizeOf(VmObjectRef));
     try std.testing.expectEqual(@sizeOf(*u8), @sizeOf(VmObjectRef.Weak));
+}
+
+test "array" {
+    // var allocation: [32]u8 = .{0} ** 32;
+    // // const backing = [6]i16{1,2,3,4,5,6};
+    // var untyped_ref = @ptrCast(*ArrayStorageRef, &allocation[0]);
+    // untyped_ref.len = 4;
+
+    // const typed = ArrayStorageRef.specialised(.short);
+    // var typed_ref = @ptrCast(*typed, &untyped_ref);
+
+    // try std.testing.expectEqual(4, typed_ref.len);
+}
+
+fn makeFlagsAndAntiFlags(comptime E: type, comptime flags: anytype) struct {
+    flags: std.EnumSet(E),
+    antiflags: std.EnumSet(E),
+} {
+    const yes = std.EnumSet(E).init(flags);
+
+    var no: std.EnumSet(E) = .{};
+    inline for (@typeInfo(@TypeOf(flags)).Struct.fields) |f| {
+        if (@field(flags, f.name) == false)
+            no.insert(@field(E, f.name));
+    }
+
+    return .{ .flags = yes, .antiflags = no };
+}
+
+test "flags and antifalgs" {
+    const Flags = enum { private, public, static, final };
+    const input = .{ .public = true, .static = false };
+
+    const ret = makeFlagsAndAntiFlags(Flags, input);
+    const yes = ret.flags;
+    const no = ret.antiflags;
+
+    try std.testing.expect(yes.contains(.public));
+    try std.testing.expect(!yes.contains(.static));
+    try std.testing.expect(!yes.contains(.private));
+    try std.testing.expect(!yes.contains(.final));
+
+    try std.testing.expect(no.contains(.static));
+    try std.testing.expect(!no.contains(.public));
+    try std.testing.expect(!no.contains(.private));
+    try std.testing.expect(!no.contains(.final));
 }

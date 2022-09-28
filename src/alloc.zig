@@ -203,7 +203,7 @@ test "vmref" {
     const strong2 = strong1.clone();
 
     const u32_ref = strong1.get();
-    const actual_ref = @ptrCast(*VmInt.ActualInt, u32_ref);
+    const actual_ref = @ptrCast(*VmInt.ActualInt, @alignCast(@alignOf(*VmInt.ActualInt), u32_ref));
     {
         var i = runtime_sz;
         while (i > 0) {

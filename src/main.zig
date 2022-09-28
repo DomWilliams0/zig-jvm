@@ -37,5 +37,17 @@ pub fn main() !void {
         &jvm_handle.global.classloader,
     );
 
+    //  TODO get system classloader
+
+    // find main class
+    const main_cls = try jvm_handle.global.classloader.loadClass(jvm_args.main_class, .bootstrap);
+    // TODO init it (run static constructor)
+
+    // find main method
+    const main_method = main_cls.get().findMethodInThisOnly("main", "([Ljava/lang/String;)V", .{ .public = true, .static = true }) orelse unreachable;
+
+    // invoke main
+    _ = main_method;
+
     std.log.info("done", .{});
 }

@@ -12,6 +12,8 @@ pub const CafebabeError = error{
     MalformedConstantPool,
     BadConstantPoolIndex,
     InvalidDescriptor,
+    DuplicateAttribute,
+    UnexpectedCodeOrLackThereof,
 };
 
 pub const ClassFile = struct {
@@ -22,8 +24,6 @@ pub const ClassFile = struct {
     interfaces: std.ArrayListUnmanaged([]const u8),
     fields: std.ArrayListUnmanaged(Field),
     methods: std.ArrayListUnmanaged(Method),
-    /// Persistently allocated
-    attributes: std.ArrayListUnmanaged(Attribute),
 
     arena: std.heap.ArenaAllocator.State,
 
@@ -102,31 +102,32 @@ pub const ClassFile = struct {
             }
         }
 
-        const fields = try parseFieldsOrMethods(Field, arena.allocator(), persistent, &constant_pool, &reader);
-        const methods = try parseFieldsOrMethods(Method, arena.allocator(), persistent, &constant_pool, &reader);
-        const attributes = try parseAttributes(persistent, &constant_pool, &reader);
-
-        return ClassFile{ .constant_pool = constant_pool, .flags = flags, .this_cls = this_cls, .super_cls = super_cls, .interfaces = ifaces, .fields = fields, .methods = methods, .attributes = attributes, .arena = arena.state };
+        const fields = try parseFieldsOrMethods(Field, arena.allocator(), persistent, &constant_pool, &reader, buf);
+        const methods = try parseFieldsOrMethods(Method, arena.allocator(), persistent, &constant_pool, &reader, buf);
+        const attributes = try parseAttributes(arena.allocator(), &constant_pool, &reader, buf);
+        _ = attributes; // TODO use class attributes
+        return ClassFile{ .constant_pool = constant_pool, .flags = flags, .this_cls = this_cls, .super_cls = super_cls, .interfaces = ifaces, .fields = fields, .methods = methods, .arena = arena.state };
     }
     // TODO errdefer release list
-    fn parseAttributes(persistent: Allocator, cp: *const ConstantPool, reader: *Reader) !std.ArrayListUnmanaged(Attribute) {
+
+    /// Collects into arena map of name->bytes
+    fn parseAttributes(arena: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) !std.StringHashMapUnmanaged([]const u8) {
         var attr_count = try reader.readIntBig(u16);
-        var attrs = try std.ArrayListUnmanaged(Attribute).initCapacity(persistent, attr_count);
+        var attrs: std.StringHashMapUnmanaged([]const u8) = .{};
+        try attrs.ensureTotalCapacity(arena, attr_count);
         while (attr_count > 0) {
             const attr_name_idx = try reader.readIntBig(u16);
             const attr_name = cp.lookupUtf8(attr_name_idx) orelse return CafebabeError.BadConstantPoolIndex;
 
             const attr_len = try reader.readIntBig(u32);
+            const body_start = buf.pos;
+            try reader.skipBytes(attr_len, .{});
+            const attr_bytes = buf.buffer[body_start..buf.pos];
 
-            // TODO perfect hash
-            // TODO comptime check of allowed values for field/method/class
-            if (std.mem.eql(u8, attr_name, "Code")) {
-                const bytes_dst = try persistent.alloc(u8, attr_len);
-                const n = try reader.read(bytes_dst);
-                std.debug.assert(n == attr_len);
-                attrs.appendAssumeCapacity(Attribute{ .code = bytes_dst });
-            } else {
-                try reader.skipBytes(attr_len, .{});
+            const existing = attrs.fetchPutAssumeCapacity(attr_name, attr_bytes);
+            if (existing) |kv| {
+                std.log.warn("duplicate attribute {s}", .{kv.key});
+                return error.DuplicateAttribute;
             }
 
             attr_count -= 1;
@@ -135,7 +136,7 @@ pub const ClassFile = struct {
         return attrs;
     }
 
-    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader) !std.ArrayListUnmanaged(T) {
+    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) !std.ArrayListUnmanaged(T) {
         var count = try reader.readIntBig(u16);
         var list = try std.ArrayListUnmanaged(T).initCapacity(arena, count);
 
@@ -153,10 +154,11 @@ pub const ClassFile = struct {
                 std.log.warn("invalid descriptor '{s}'", .{desc_str});
                 return CafebabeError.InvalidDescriptor;
             };
-            // log.debug("field/method {s} {s}", .{ name, desc });
+            // log.debug("field/method {s} {s}", .{ name, desc.str });
 
-            const attributes = try parseAttributes(persistent, cp, reader);
-            list.appendAssumeCapacity(.{ .flags = flags, .name = name, .descriptor = desc, .attributes = attributes });
+            const attributes = try parseAttributes(arena, cp, reader, buf);
+            const instance = try T.new(persistent, arena, cp, flags, name, desc, attributes);
+            list.appendAssumeCapacity(instance);
 
             count -= 1;
         }
@@ -165,32 +167,10 @@ pub const ClassFile = struct {
     }
 
     pub fn deinit(self: @This(), persistent: Allocator) void {
-        const helper = struct {
-            fn destroyAttributes(alloc: Allocator, attributes: *std.ArrayListUnmanaged(Attribute)) void {
-                for (attributes.items) |x| {
-                    var attr = x;
-                    switch (attr) {
-                        Attribute.code => |bytes| alloc.destroy(bytes.ptr),
-                    }
-                }
-
-                attributes.deinit(alloc);
-            }
-        };
-
-        for (self.fields.items) |x| {
-            var field = x;
-            helper.destroyAttributes(persistent, &field.attributes);
+        // TODO put this in method.deinit
+        for (self.methods.items) |method| {
+            if (method.code.code) |c| persistent.free(c);
         }
-
-        for (self.methods.items) |x| {
-            var method = x;
-            helper.destroyAttributes(persistent, &method.attributes);
-        }
-
-        var class = self;
-        helper.destroyAttributes(persistent, &class.attributes);
-
         // we own the arena too
         const arena = self.arena.promote(persistent);
         arena.deinit();
@@ -227,9 +207,9 @@ pub const Field = struct {
     flags: std.EnumSet(Flags),
     name: []const u8, // TODO decide where this lives, who owns it, how to share/intern
     descriptor: FieldDescriptor,
-    /// This list and its elems are NOT allocated in arena, rather in a persistent
-    /// allocator that JVM will keep around
-    attributes: std.ArrayListUnmanaged(Attribute),
+    // / This list and its elems are NOT allocated in arena, rather in a persistent
+    // / allocator that JVM will keep around
+    // attributes: std.ArrayListUnmanaged(Attribute),
     // TODO ^ store slice instead, or just specifically the attrs needed like ConstantValue
 
     u: union {
@@ -254,6 +234,15 @@ pub const Field = struct {
     };
 
     const enumFromInt = enumFromIntField; // temporary
+
+    /// Everything passed in is arena allocated
+    fn new(persistent: Allocator, _: Allocator, _: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+        _ = attributes;
+        _ = persistent;
+
+        // TODO consume needed field attributes
+        return Field{ .name = name, .descriptor = desc, .flags = flags };
+    }
 };
 
 pub const Method = struct {
@@ -262,12 +251,14 @@ pub const Method = struct {
     descriptor: MethodDescriptor,
     /// This list and its elems are NOT allocated in arena, rather in a persistent
     /// allocator that JVM will keep around
-    attributes: std.ArrayListUnmanaged(Attribute),
+    // attributes: std.ArrayListUnmanaged(Attribute),
     // TODO ^ store slice instead, or just specifically the attrs needed like Code
+
+    code: Code,
 
     const descriptor = MethodDescriptor;
 
-    const Flags = enum(u16) {
+    pub const Flags = enum(u16) {
         public = 0x0001,
         private = 0x0002,
         protected = 0x0004,
@@ -282,6 +273,55 @@ pub const Method = struct {
         synthetic = 0x1000,
     };
     const enumFromInt = enumFromIntMethod; // temporary
+
+    pub const Code = struct {
+        max_stack: u16,
+        max_locals: u16,
+        /// Persistently allocated (or null if abstract/native)
+        code: ?[]const u8,
+    };
+
+    /// Everything passed in is arena allocated
+    fn new(persistent: Allocator, arena: Allocator, cp: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+        var code = Code{
+            .max_stack = 0,
+            .max_locals = 0,
+            .code = null,
+        };
+        if (attributes.get("Code")) |attr| {
+            var buf = std.io.fixedBufferStream(attr);
+            var reader = buf.reader();
+
+            code.max_stack = try reader.readIntBig(u16);
+            code.max_locals = try reader.readIntBig(u16);
+            const code_len = try reader.readIntBig(u32);
+            // TODO align code to 4
+            const code_buf = try persistent.allocWithOptions(u8, code_len, 4, null);
+            errdefer persistent.free(code_buf);
+
+            const n = try reader.read(code_buf);
+            if (n != code_len) return error.MalformedConstantPool;
+
+            const exc_len = try reader.readIntBig(u16);
+            // TODO parse exception table
+            try reader.skipBytes(exc_len * 8, .{});
+
+            const code_attributes = try ClassFile.parseAttributes(arena, cp, &reader, &buf);
+            _ = code_attributes; // TODO use code attributes
+
+            code.code = code_buf;
+        }
+        errdefer if (code.code) |c| persistent.free(c);
+
+        const has_code = code.code != null;
+        const should_have_code = !(flags.contains(.abstract) or flags.contains(.native));
+        if (has_code != should_have_code) {
+            log.warn("method {s} code mismatch, has={any}, should_have={any}", .{ name, has_code, should_have_code });
+            return error.UnexpectedCodeOrLackThereof;
+        }
+
+        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code };
+    }
 };
 
 // TODO return type due to https://github.com/ziglang/zig/issues/12949 :(

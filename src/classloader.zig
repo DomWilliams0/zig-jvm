@@ -201,19 +201,11 @@ pub const ClassLoader = struct {
         class.get().* = .{
             .flags = flags,
             .name = try self.alloc.dupe(u8, name),
-            .u = .{ .array = .{ .elem_cls = elem_class_ref, .dims = elem_dims + 1, .layout = undefined } }, // TODO array layout
+            .u = .{ .array = .{ .elem_cls = elem_class_ref, .dims = elem_dims + 1 } },
             .constant_pool = undefined,
             .super_cls = java_lang_Object,
             .interfaces = &.{}, // TODO
-            .attributes = &.{},
         };
-
-        // TODO storage for array elems
-        // TODO storage for array elems
-        // TODO storage for array elems
-        // TODO storage for array elems
-        // TODO storage for array elems
-        // TODO storage for array elems
 
         return class;
     }
@@ -246,7 +238,6 @@ pub const ClassLoader = struct {
             .constant_pool = undefined, // unused
             .super_cls = null,
             .interfaces = &.{},
-            .attributes = &.{},
         };
 
         entry.* = class.clone().intoRaw();
@@ -281,13 +272,13 @@ pub const ClassLoader = struct {
                         classfile.fields = .{}; // take ownership
                         break :blk slice;
                     },
+                    .methods = blk: {
+                        const slice = classfile.methods.allocatedSlice();
+                        classfile.methods = .{}; // take ownership
+                        break :blk slice;
+                    },
                     .layout = undefined, // set next in preparation stage
                 },
-            },
-            .attributes = blk: {
-                const slice = classfile.attributes.allocatedSlice();
-                classfile.attributes = .{}; // take ownership
-                break :blk slice;
             },
         };
 
