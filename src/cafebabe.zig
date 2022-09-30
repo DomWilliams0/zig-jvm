@@ -25,8 +25,8 @@ pub const ClassFile = struct {
     this_cls: []const u8, // constant pool
     super_cls: ?[]const u8, // constant pool
     interfaces: std.ArrayListUnmanaged([]const u8), // point into constant pool
-    fields: std.ArrayListUnmanaged(Field),
-    methods: std.ArrayListUnmanaged(Method),
+    fields: []Field,
+    methods: []Method,
 
     pub const Flags = enum(u16) {
         public = 0x0001,
@@ -144,11 +144,12 @@ pub const ClassFile = struct {
     }
 
     /// Arena is just for temporary attribute storage (TODO redo this)
-    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) !std.ArrayListUnmanaged(T) {
-        var count = try reader.readIntBig(u16);
-        var list = try std.ArrayListUnmanaged(T).initCapacity(persistent, count);
+    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) ![]T {
+        const count = try reader.readIntBig(u16);
+        var slice = try persistent.alloc(T, count);
+        var cursor: usize = 0;
 
-        while (count > 0) {
+        while (cursor < count) {
             const access_flags = try reader.readIntBig(u16);
             const flags = T.enumFromInt(T.Flags, access_flags) orelse return CafebabeError.BadFlags;
             const name_idx = try reader.readIntBig(u16);
@@ -166,22 +167,21 @@ pub const ClassFile = struct {
 
             const attributes = try parseAttributes(arena, cp, reader, buf);
             const instance = try T.new(persistent, arena, cp, flags, name, desc, attributes);
-            list.appendAssumeCapacity(instance);
-
-            count -= 1;
+            slice[cursor] = instance;
+            cursor += 1;
         }
 
-        return list;
+        return slice;
     }
 
     /// Only call on error, throws away persistently allocated things needed at runtime
     pub fn deinit(self: *@This(), persistent: Allocator) void {
-        for (self.methods.items) |method| {
+        for (self.methods) |method| {
             method.deinit(persistent);
         }
 
-        self.methods.deinit(persistent);
-        self.fields.deinit(persistent);
+        persistent.free(self.methods);
+        persistent.free(self.fields);
         self.interfaces.deinit(persistent);
         self.constant_pool.deinit(persistent);
     }
@@ -415,6 +415,7 @@ pub const ConstantPool = struct {
     };
 
     indices: []u16,
+    /// Persistent copy from classfile
     slice: []const u8,
 
     fn parse(alloc: Allocator, buf: *std.io.FixedBufferStream([]const u8), count: u16) !ConstantPool {
@@ -462,8 +463,9 @@ pub const ConstantPool = struct {
             }
         }
 
-        const slice = buf.buffer[start_idx..buf.pos];
-        return .{ .indices = indices, .slice = slice };
+        // copy from arena into persistent
+        var copy_buf = try alloc.dupe(u8, buf.buffer[start_idx..buf.pos]);
+        return .{ .indices = indices, .slice = copy_buf };
     }
 
     pub fn lookupConstant(self: Self, idx_cp: u16) ?[]const u8 {

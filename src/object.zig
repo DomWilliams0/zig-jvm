@@ -8,12 +8,9 @@ const Method = cafebabe.Method;
 
 /// Always allocated on GC heap
 pub const VmClass = struct {
-    constant_pool: cafebabe.ConstantPool, // TODO will be tweaked at runtime when refs are resolved
+    constant_pool: cafebabe.ConstantPool,
     flags: std.EnumSet(cafebabe.ClassFile.Flags),
-    /// Owned copy
-    name: []const u8,
-    // /// Owned copy
-    // super_name: ?[]const u8,
+    name: []const u8, // constant pool reference
     super_cls: ?VmClassRef,
     interfaces: []*VmClass, // TODO class refs
 

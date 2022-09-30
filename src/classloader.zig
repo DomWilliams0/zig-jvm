@@ -176,7 +176,7 @@ pub const ClassLoader = struct {
         defer arena.deinit();
 
         const file_bytes = try findBootstrapClassFile(arena.allocator(), self.alloc, name) orelse return E.ClassNotFound;
-        return try self.defineClass(arena.allocator(), name, file_bytes, .bootstrap);
+        return self.defineClass(arena.allocator(), name, file_bytes, .bootstrap);
     }
 
     // TODO set exception
@@ -261,23 +261,15 @@ pub const ClassLoader = struct {
 
         var class = try vm_alloc.allocClass();
         class.get().* = .{
-            .constant_pool = classfile.constant_pool, // TODO dont put into arena then
+            .constant_pool = classfile.constant_pool,
             .flags = classfile.flags,
-            .name = try self.alloc.dupe(u8, classfile.this_cls),
+            .name = classfile.this_cls,
             .super_cls = super_class,
             .interfaces = &.{}, // TODO
             .u = .{
                 .obj = .{
-                    .fields = blk: {
-                        const slice = classfile.fields.allocatedSlice();
-                        classfile.fields = .{}; // take ownership
-                        break :blk slice;
-                    },
-                    .methods = blk: {
-                        const slice = classfile.methods.allocatedSlice();
-                        classfile.methods = .{}; // take ownership
-                        break :blk slice;
-                    },
+                    .fields = classfile.fields,
+                    .methods = classfile.methods,
                     .layout = undefined, // set next in preparation stage
                 },
             },
