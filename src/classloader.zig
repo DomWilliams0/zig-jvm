@@ -171,11 +171,12 @@ pub const ClassLoader = struct {
     /// Name is the file name of the class
     // TODO set exception
     fn loadBootstrapClass(self: *Self, name: []const u8) !object.VmClassRef {
+        // TODO should allocate in big blocks rather than using gpa for all tiny allocs
         var arena = std.heap.ArenaAllocator.init(self.alloc);
-        errdefer arena.deinit();
+        defer arena.deinit();
 
-        const file_bytes = try findBootstrapClassFile(&arena, self.alloc, name) orelse return E.ClassNotFound;
-        return try self.defineClass(&arena, name, file_bytes, .bootstrap);
+        const file_bytes = try findBootstrapClassFile(arena.allocator(), self.alloc, name) orelse return E.ClassNotFound;
+        return try self.defineClass(arena.allocator(), name, file_bytes, .bootstrap);
     }
 
     // TODO set exception
@@ -245,8 +246,8 @@ pub const ClassLoader = struct {
     }
 
     /// Class bytes are the callers responsiblity to clean up.
-    /// Not an array or primitive
-    fn defineClass(self: *Self, arena: *std.heap.ArenaAllocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !object.VmClassRef {
+    /// Not an array or primitive.
+    fn defineClass(self: *Self, arena: Allocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !object.VmClassRef {
         var stream = std.io.fixedBufferStream(class_bytes);
         var classfile = try cafebabe.ClassFile.parse(arena, self.alloc, &stream);
         errdefer classfile.deinit(self.alloc);
@@ -284,7 +285,7 @@ pub const ClassLoader = struct {
 
         // preparation
         var layout: object.ObjectLayout = if (!classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class) |super| super.get().u.obj.layout else .{};
-        try object.defineObjectLayout(arena.allocator(), class.get().u.obj.fields, &layout);
+        try object.defineObjectLayout(arena, class.get().u.obj.fields, &layout);
         class.get().u.obj.layout = layout;
         std.log.debug("{s} has layout {any}", .{ name, layout });
 
@@ -294,7 +295,7 @@ pub const ClassLoader = struct {
     /// Arena is only used for the successfully read class file bytes
     // TODO error set and proper exception returning
     // TODO class name to path encoding
-    fn findBootstrapClassFile(arena: *std.heap.ArenaAllocator, alloc: Allocator, name: []const u8) std.mem.Allocator.Error!?[]const u8 {
+    fn findBootstrapClassFile(arena: Allocator, alloc: Allocator, name: []const u8) std.mem.Allocator.Error!?[]const u8 {
         const thread = jvm.thread_state();
 
         var buf_backing = try alloc.alloc(u8, std.fs.MAX_PATH_BYTES * 2);
@@ -327,7 +328,7 @@ pub const ClassLoader = struct {
             const path = std.fmt.bufPrint(candidate_rel, "{s}/{s}.class", .{ entry, name }) catch continue;
             // TODO why cant we open files by relative path?
 
-            break io.readFile(arena.allocator(), path, candidate_abs) catch continue;
+            break io.readFile(arena, path, candidate_abs) catch continue;
         } else return null;
     }
 };

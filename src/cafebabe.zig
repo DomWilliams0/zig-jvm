@@ -5,6 +5,8 @@ const Allocator = std.mem.Allocator;
 const FieldDescriptor = @import("descriptor.zig").FieldDescriptor;
 const MethodDescriptor = @import("descriptor.zig").MethodDescriptor;
 
+// constant pool should be persistent but stay the same. when resolving things, change insn to lookup from a separate runtime area
+
 pub const CafebabeError = error{
     BadMagic,
     BadFlags,
@@ -16,16 +18,15 @@ pub const CafebabeError = error{
     UnexpectedCodeOrLackThereof,
 };
 
+/// Mostly allocated persistently with everything moved out of this instance into a runtime type
 pub const ClassFile = struct {
     constant_pool: ConstantPool,
     flags: std.EnumSet(Flags),
-    this_cls: []const u8,
-    super_cls: ?[]const u8,
-    interfaces: std.ArrayListUnmanaged([]const u8),
+    this_cls: []const u8, // constant pool
+    super_cls: ?[]const u8, // constant pool
+    interfaces: std.ArrayListUnmanaged([]const u8), // point into constant pool
     fields: std.ArrayListUnmanaged(Field),
     methods: std.ArrayListUnmanaged(Method),
-
-    arena: std.heap.ArenaAllocator.State,
 
     pub const Flags = enum(u16) {
         public = 0x0001,
@@ -59,14 +60,9 @@ pub const ClassFile = struct {
         return parse(arena, persistent, &stream);
     }
 
-    /// Takes ownership of arena (deinits it in this.deinit(), but arena must live as long as this).
-    /// Mostly allocated into the given arena, will be thrown away when class is linked EXCEPT
-    /// * field, method and class attributes (arraylist and the contents of each attribute)
-    pub fn parse(arena: *std.heap.ArenaAllocator, persistent: Allocator, buf: *std.io.FixedBufferStream([]const u8)) !ClassFile {
+    pub fn parse(arena: Allocator, persistent: Allocator, buf: *std.io.FixedBufferStream([]const u8)) !ClassFile {
         // TODO could some of this be done with a packed struct? how does that work with unaligned ints.
         //  would need to convert from big to native endian anyway
-
-        errdefer arena.deinit();
 
         var reader = buf.reader();
         if (try reader.readIntBig(u32) != 0xcafebabe) return CafebabeError.BadMagic;
@@ -81,7 +77,8 @@ pub const ClassFile = struct {
         }
 
         const cp_len = try reader.readIntBig(u16);
-        const constant_pool = try ConstantPool.parse(arena.allocator(), buf, cp_len);
+        var constant_pool = try ConstantPool.parse(persistent, buf, cp_len);
+        errdefer constant_pool.deinit(persistent);
 
         const access_flags = try reader.readIntBig(u16);
         const flags = enumFromIntClass(ClassFile.Flags, access_flags) orelse return CafebabeError.BadFlags;
@@ -92,7 +89,7 @@ pub const ClassFile = struct {
         const super_cls = if (super_cls_idx == 0 and std.mem.eql(u8, this_cls, "java/lang/Object")) null else constant_pool.lookupConstant(super_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
 
         var iface_count = try reader.readIntBig(u16);
-        var ifaces = try std.ArrayListUnmanaged([]const u8).initCapacity(arena.allocator(), iface_count);
+        var ifaces = try std.ArrayListUnmanaged([]const u8).initCapacity(persistent, iface_count);
         {
             while (iface_count > 0) {
                 const idx = try reader.readIntBig(u16);
@@ -102,15 +99,25 @@ pub const ClassFile = struct {
             }
         }
 
-        const fields = try parseFieldsOrMethods(Field, arena.allocator(), persistent, &constant_pool, &reader, buf);
-        const methods = try parseFieldsOrMethods(Method, arena.allocator(), persistent, &constant_pool, &reader, buf);
-        const attributes = try parseAttributes(arena.allocator(), &constant_pool, &reader, buf);
+        const fields = try parseFieldsOrMethods(Field, arena, persistent, &constant_pool, &reader, buf);
+        const methods = try parseFieldsOrMethods(Method, arena, persistent, &constant_pool, &reader, buf);
+        const attributes = try parseAttributes(arena, &constant_pool, &reader, buf);
         _ = attributes; // TODO use class attributes
-        return ClassFile{ .constant_pool = constant_pool, .flags = flags, .this_cls = this_cls, .super_cls = super_cls, .interfaces = ifaces, .fields = fields, .methods = methods, .arena = arena.state };
+        return ClassFile{
+            .constant_pool = constant_pool,
+            .flags = flags,
+            .this_cls = this_cls,
+            .super_cls = super_cls,
+            .interfaces = ifaces,
+            .fields = fields,
+            .methods = methods,
+        };
     }
     // TODO errdefer release list
 
     /// Collects into arena map of name->bytes
+    // TODO dont do this, pass the name+reader to T who can read it into persistent
+    // alloc or just skip it
     fn parseAttributes(arena: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) !std.StringHashMapUnmanaged([]const u8) {
         var attr_count = try reader.readIntBig(u16);
         var attrs: std.StringHashMapUnmanaged([]const u8) = .{};
@@ -136,9 +143,10 @@ pub const ClassFile = struct {
         return attrs;
     }
 
+    /// Arena is just for temporary attribute storage (TODO redo this)
     fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) !std.ArrayListUnmanaged(T) {
         var count = try reader.readIntBig(u16);
-        var list = try std.ArrayListUnmanaged(T).initCapacity(arena, count);
+        var list = try std.ArrayListUnmanaged(T).initCapacity(persistent, count);
 
         while (count > 0) {
             const access_flags = try reader.readIntBig(u16);
@@ -166,14 +174,16 @@ pub const ClassFile = struct {
         return list;
     }
 
-    pub fn deinit(self: @This(), persistent: Allocator) void {
-        // TODO put this in method.deinit
+    /// Only call on error, throws away persistently allocated things needed at runtime
+    pub fn deinit(self: *@This(), persistent: Allocator) void {
         for (self.methods.items) |method| {
-            if (method.code.code) |c| persistent.free(c);
+            method.deinit(persistent);
         }
-        // we own the arena too
-        const arena = self.arena.promote(persistent);
-        arena.deinit();
+
+        self.methods.deinit(persistent);
+        self.fields.deinit(persistent);
+        self.interfaces.deinit(persistent);
+        self.constant_pool.deinit(persistent);
     }
 };
 
@@ -205,12 +215,9 @@ const ClassAccessibility = enum(u16) {
 
 pub const Field = struct {
     flags: std.EnumSet(Flags),
-    name: []const u8, // TODO decide where this lives, who owns it, how to share/intern
+    name: []const u8, // points into constant pool
     descriptor: FieldDescriptor,
-    // / This list and its elems are NOT allocated in arena, rather in a persistent
-    // / allocator that JVM will keep around
-    // attributes: std.ArrayListUnmanaged(Attribute),
-    // TODO ^ store slice instead, or just specifically the attrs needed like ConstantValue
+    // TODO attributes
 
     u: union {
         /// Non static: offset of this field in object storage, calculated after cafebabe load
@@ -235,7 +242,6 @@ pub const Field = struct {
 
     const enumFromInt = enumFromIntField; // temporary
 
-    /// Everything passed in is arena allocated
     fn new(persistent: Allocator, _: Allocator, _: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         _ = attributes;
         _ = persistent;
@@ -247,13 +253,8 @@ pub const Field = struct {
 
 pub const Method = struct {
     flags: std.EnumSet(Flags),
-    name: []const u8,
+    name: []const u8, // points into constant pool
     descriptor: MethodDescriptor,
-    /// This list and its elems are NOT allocated in arena, rather in a persistent
-    /// allocator that JVM will keep around
-    // attributes: std.ArrayListUnmanaged(Attribute),
-    // TODO ^ store slice instead, or just specifically the attrs needed like Code
-
     code: Code,
 
     const descriptor = MethodDescriptor;
@@ -277,11 +278,10 @@ pub const Method = struct {
     pub const Code = struct {
         max_stack: u16,
         max_locals: u16,
-        /// Persistently allocated (or null if abstract/native)
+        /// null if abstract/native
         code: ?[]const u8,
     };
 
-    /// Everything passed in is arena allocated
     fn new(persistent: Allocator, arena: Allocator, cp: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         var code = Code{
             .max_stack = 0,
@@ -321,6 +321,10 @@ pub const Method = struct {
         }
 
         return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code };
+    }
+
+    pub fn deinit(self: @This(), persistent: Allocator) void {
+        if (self.code.code) |c| persistent.free(c);
     }
 };
 
@@ -410,20 +414,21 @@ pub const ConstantPool = struct {
         package = 20,
     };
 
-    /// Allocated in the arena
-    indices: []const (u16),
+    indices: []u16,
     slice: []const u8,
 
-    fn parse(arena: Allocator, buf: *std.io.FixedBufferStream([]const u8), count: u16) !ConstantPool {
-        var indices = try std.ArrayListUnmanaged(u16).initCapacity(arena, count + 1);
-        _ = indices.addOneAssumeCapacity(); // idx 0 is never accessed
+    fn parse(alloc: Allocator, buf: *std.io.FixedBufferStream([]const u8), count: u16) !ConstantPool {
+        var indices = try alloc.alloc(u16, count + 1);
+        errdefer alloc.free(indices);
+        var next_idx: usize = 1; // idx 0 is never accessed
 
         const start_idx = buf.pos;
 
         var i: u16 = 1;
         const reader = buf.reader();
         while (i < count) {
-            indices.appendAssumeCapacity(@intCast(u16, buf.pos - start_idx));
+            indices[next_idx] = @intCast(u16, buf.pos - start_idx);
+            next_idx += 1;
 
             const tag = reader.readEnum(Tag, std.builtin.Endian.Big) catch return CafebabeError.MalformedConstantPool;
             const len = switch (tag) {
@@ -449,7 +454,8 @@ pub const ConstantPool = struct {
             try reader.skipBytes(len, .{ .buf_size = 64 });
 
             if (tag == Tag.long or tag == Tag.double) {
-                indices.appendAssumeCapacity(65535); // invalid slot
+                indices[next_idx] = 65535; // invalid slot
+                next_idx += 1;
                 i += 2;
             } else {
                 i += 1;
@@ -457,8 +463,7 @@ pub const ConstantPool = struct {
         }
 
         const slice = buf.buffer[start_idx..buf.pos];
-        // no need for toOwnedSlice, list is fully initialised and in arena
-        return .{ .indices = indices.allocatedSlice(), .slice = slice };
+        return .{ .indices = indices, .slice = slice };
     }
 
     pub fn lookupConstant(self: Self, idx_cp: u16) ?[]const u8 {
@@ -495,6 +500,10 @@ pub const ConstantPool = struct {
             return self.slice[slice_idx + 1 ..];
         }
     }
+
+    fn deinit(self: *@This(), persistent: Allocator) void {
+        persistent.free(self.indices);
+    }
 };
 
 test "parse class" {
@@ -504,9 +513,10 @@ test "parse class" {
     const alloc = std.testing.allocator;
 
     var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
 
     var buf = std.io.fixedBufferStream(bytes);
-    const classfile = ClassFile.parse(&arena, alloc, &buf) catch unreachable;
+    var classfile = ClassFile.parse(arena.allocator(), alloc, &buf) catch unreachable;
 
     classfile.deinit(alloc);
 }
@@ -518,9 +528,10 @@ test "no leaks on invalid class" {
     const alloc = std.testing.allocator;
 
     var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
 
     var buf = std.io.fixedBufferStream(bytes);
-    _ = ClassFile.parse(&arena, alloc, &buf) catch {};
+    _ = ClassFile.parse(arena.allocator(), alloc, &buf) catch {};
 }
 
 test "parse flags" {
