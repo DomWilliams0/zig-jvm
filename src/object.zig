@@ -82,16 +82,14 @@ pub const VmClass = struct {
         flags: anytype,
     ) ?*const Method {
         const pls = makeFlagsAndAntiFlags(Method.Flags, flags);
-        var idx: usize = 0;
-        return for (self.u.obj.methods) |m| {
+        return for (self.u.obj.methods) |m, i| {
             if ((m.flags.bits.mask & pls.flags.bits.mask) == pls.flags.bits.mask and
                 (m.flags.bits.mask & ~(pls.antiflags.bits.mask)) == m.flags.bits.mask and
                 std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
             {
                 // seems like returning &m is returning a function local...
-                break &self.u.obj.methods[idx];
+                break &self.u.obj.methods[i];
             }
-            idx += 1;
         } else null;
     }
 };

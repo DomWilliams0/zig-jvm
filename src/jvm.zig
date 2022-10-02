@@ -1,6 +1,7 @@
 const std = @import("std");
 const classloader = @import("classloader.zig");
 const vm_alloc = @import("alloc.zig");
+const interp = @import("interpreter/interpreter.zig");
 const JvmArgs = @import("arg.zig").JvmArgs;
 const Allocator = std.mem.Allocator;
 
@@ -20,9 +21,14 @@ pub const GlobalState = struct {
 /// Each thread owns one
 pub const ThreadEnv = struct {
     global: *GlobalState,
+    interpreter: interp.Interpreter,
 
     fn init(global: *GlobalState) ThreadEnv {
         return ThreadEnv{ .global = global };
+    }
+
+    fn deinit(self: *@This()) void {
+        self.interpreter.deinit();
     }
 
     pub fn initMainThread(alloc: Allocator, args: *const JvmArgs) !JvmHandle {
@@ -37,7 +43,7 @@ pub const ThreadEnv = struct {
             .args = args,
         };
 
-        _ = initThread(global);
+        _ = try initThread(global);
         return .{
             .global = global,
             .main_thread = std.Thread.getCurrentId(),
@@ -45,10 +51,11 @@ pub const ThreadEnv = struct {
     }
 
     /// Inits threadlocal
-    pub fn initThread(global: *GlobalState) *ThreadEnv {
+    pub fn initThread(global: *GlobalState) !*ThreadEnv {
         if (inited) @panic("init once only");
         thread_env = .{
             .global = global,
+            .interpreter = try interp.Interpreter.new(global.allocator.inner),
         };
         inited = true;
 
@@ -68,6 +75,8 @@ pub const JvmHandle = struct {
 
         if (self.global.daemon_threads != 0 or self.global.non_daemon_threads != 1)
             std.debug.panic("TODO join threads", .{});
+
+        thread_env.deinit();
 
         // all other threads should be dead now, clear threadlocals
         std.log.info("destroying main thread", .{});

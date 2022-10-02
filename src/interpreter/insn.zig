@@ -1,5 +1,5 @@
 const std = @import("std");
-const insns = [_]Insn{
+pub const insns = [_]Insn{
     .{
         .name = "i2b",
         .id = 145,
@@ -410,7 +410,7 @@ const insns = [_]Insn{
         .name = "monitorexit",
         .id = 195,
     },
-    .{ .name = "lookupswitch", .id = 171, .sz = 13 },
+    // .{ .name = "lookupswitch", .id = 171, .sz = 13 },
     .{
         .name = "nop",
         .id = 0,
@@ -658,14 +658,65 @@ const insns = [_]Insn{
     },
 };
 
-comptime {
-    // ensure no duplicates
+pub const maxInsnSize: usize = blk: {
+    // also ensure no duplicates
     var seen = [_]bool{false} ** 256;
+    var max_size = 0;
     for (insns) |i| {
         if (seen[i.id]) @compileError("duplicate insn");
         seen[i.id] = true;
+        max_size = @maximum(max_size, i.sz);
     }
+
+    break :blk max_size;
+};
+
+const handler_fn = fn ([*]const u8) void;
+
+pub const debug_logging = true;
+
+pub const Handler = struct {
+    handler: *const handler_fn,
+    insn_size: usize,
+    insn_name: if (debug_logging) []const u8 else void,
+
+    fn resolve(comptime insn: Insn) Handler {
+        const name = "handle_" ++ insn.name;
+        return .{
+            .handler = if (@hasField(handlers, name)) @field(handlers, name) else nop_handler(insn),
+            .insn_size = insn.sz,
+            .insn_name = if (debug_logging) insn.name else {},
+        };
+    }
+
+    const unknown: Handler = .{
+        .handler = unknown_handler,
+        .insn_name = "unknown",
+        .insn_size = 0,
+    };
+};
+
+fn nop_handler(comptime insn: Insn) handler_fn {
+    const S = struct {
+        fn nop_handler(_: [*]const u8) void {
+            std.debug.panic("unimplemented insn {s}", .{insn.name});
+        }
+    };
+
+    return S.nop_handler;
 }
+
+fn unknown_handler(_: [*]const u8) void {
+    std.debug.panic("unknown instruction!!", .{});
+}
+
+pub const handler_lookup: [256]Handler = blk: {
+    var array: [256]Handler = .{Handler.unknown} ** 256;
+    for (insns) |i| {
+        array[i.id] = Handler.resolve(i);
+    }
+    break :blk array;
+};
 
 pub const Insn = struct {
     name: []const u8,
@@ -673,6 +724,5 @@ pub const Insn = struct {
     sz: u8 = 0,
 };
 
-test "insns" {
-    _ = insns;
-}
+/// Instruction implementations, resolved in `handler_lookup`
+pub const handlers = struct {};

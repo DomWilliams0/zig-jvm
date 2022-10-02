@@ -147,6 +147,7 @@ pub const ClassFile = struct {
     fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) ![]T {
         const count = try reader.readIntBig(u16);
         var slice = try persistent.alloc(T, count);
+        errdefer persistent.free(slice);
         var cursor: usize = 0;
 
         while (cursor < count) {
@@ -505,6 +506,7 @@ pub const ConstantPool = struct {
 
     fn deinit(self: *@This(), persistent: Allocator) void {
         persistent.free(self.indices);
+        persistent.free(self.slice);
     }
 };
 
