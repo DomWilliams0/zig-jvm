@@ -1,6 +1,6 @@
 const std = @import("std");
 const frame = @import("frame.zig");
-const cafebabe = @import("../cafebabe.zig");
+const cafebabe = @import("cafebabe.zig");
 const insn = @import("insn.zig");
 
 pub const Interpreter = struct {

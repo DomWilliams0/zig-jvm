@@ -1,7 +1,7 @@
 const std = @import("std");
 const classloader = @import("classloader.zig");
 const vm_alloc = @import("alloc.zig");
-const interp = @import("interpreter/interpreter.zig");
+const interp = @import("interpreter.zig");
 const JvmArgs = @import("arg.zig").JvmArgs;
 const Allocator = std.mem.Allocator;
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-const cafebabe = @import("../cafebabe.zig");
+const cafebabe = @import("cafebabe.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Frame = struct {
