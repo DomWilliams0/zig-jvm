@@ -2,6 +2,7 @@ const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
 const vm_type = @import("type.zig");
+const classloader = @import("classloader.zig");
 const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
 const Method = cafebabe.Method;
@@ -13,6 +14,9 @@ pub const VmClass = struct {
     name: []const u8, // constant pool reference
     super_cls: ?VmClassRef,
     interfaces: []*VmClass, // TODO class refs
+    loader: classloader.WhichLoader,
+    init_state: InitState = .uninitialised,
+    monitor: Monitor = .{}, // TODO put into java.lang.Class object instance instead
 
     /// Only fields for this class
     u: union {
@@ -28,6 +32,13 @@ pub const VmClass = struct {
             dims: u8,
         },
     },
+
+    const InitState = union(enum) {
+        uninitialised,
+        initialising: std.Thread.Id,
+        initialised,
+        failed,
+    };
 
     // TODO methods
     // attributes: []const cafebabe.Attribute,
@@ -76,7 +87,7 @@ pub const VmClass = struct {
     // }
 
     pub fn findMethodInThisOnly(
-        self: *@This(),
+        self: @This(),
         name: []const u8,
         desc: []const u8,
         flags: anytype,
@@ -91,6 +102,81 @@ pub const VmClass = struct {
                 break &self.u.obj.methods[i];
             }
         } else null;
+    }
+
+    pub fn ensureInitialised(self: VmClassRef) void {
+        var self_mut = self.get();
+        {
+            self_mut.monitor.mutex.lock();
+            defer self_mut.monitor.mutex.unlock();
+
+            const current_state = self_mut.init_state;
+            switch (current_state) {
+                .failed => {
+                    // TODO exception
+                    @panic("failed init");
+                },
+                .initialised => return,
+                .initialising => |t| {
+                    const this_thread = std.Thread.getCurrentId();
+                    if (this_thread == t) {
+                        // recursive
+                        return;
+                    }
+
+                    // another thread is initialising, block
+                    std.log.debug("another thread is already initialising {s}, blocking thread {d}", .{ self_mut.name, std.Thread.getCurrentId() });
+                    while (self_mut.init_state != .initialising) {
+                        self_mut.monitor.condition.wait(&self_mut.monitor.mutex);
+                    }
+
+                    std.log.debug("unblocked thread {d}", .{std.Thread.getCurrentId()});
+                    return ensureInitialised(self); // recurse
+                },
+                .uninitialised => {
+                    // do it now
+                    self_mut.init_state = .{ .initialising = std.Thread.getCurrentId() };
+                    std.log.debug("initialising class {s} on thread {d}", .{ self_mut.name, std.Thread.getCurrentId() });
+                },
+            }
+        } // monitor dropped here
+
+        // TODO set static field values from ConstantValue attrs
+
+        // ensure superclass is initialised already
+        if (!self_mut.flags.contains(.interface)) {
+            if (self_mut.super_cls) |super| {
+                // std.log.debug("initialising super class {s} on thread {d}", .{ super.get().name, std.Thread.getCurrentId() });
+                ensureInitialised(super);
+            }
+
+            // TODO init super interfaces too
+        }
+
+        // run class constructor
+        // TODO exception
+        if (self_mut.findMethodInThisOnly("<clinit>", "()V", .{ .static = true })) |clinit| {
+            @import("jvm.zig").thread_state().interpreter.executeUntilReturn(self, clinit) catch std.debug.panic("clinit failed", .{});
+        }
+
+        // set init state
+        self_mut.monitor.mutex.lock();
+        std.log.debug("initialised class {s}", .{self_mut.name});
+        defer self_mut.monitor.mutex.unlock();
+
+        // TODO might have errored
+        self_mut.init_state = .initialised;
+        self_mut.monitor.notifyAll();
+    }
+};
+
+const Monitor = struct {
+    mutex: std.Thread.Mutex = .{},
+    condition: std.Thread.Condition = .{},
+
+    pub fn notifyAll(self: @This()) void {
+        // TODO
+        _ = self;
     }
 };
 
@@ -131,11 +217,6 @@ pub const ArrayStorageRef = extern struct {
     pub fn getElementsShorts(self: *@This()) []i16 {
         _ = self;
     }
-};
-
-pub const WhichLoader = union(enum) {
-    bootstrap,
-    user: VmObjectRef,
 };
 
 /// Updates layout_offset in each field, offset from the given base. Updates to the offset after these fields

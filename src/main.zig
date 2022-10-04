@@ -47,7 +47,7 @@ pub fn main() !void {
     const main_method = main_cls.get().findMethodInThisOnly("main", "([Ljava/lang/String;)V", .{ .public = true, .static = true }) orelse unreachable;
 
     // invoke main
-    try jvm.thread_state().interpreter.executeUntilReturn(main_method);
+    try jvm.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
 
     std.log.info("done", .{});
 }

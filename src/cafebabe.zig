@@ -84,16 +84,16 @@ pub const ClassFile = struct {
         const flags = enumFromIntClass(ClassFile.Flags, access_flags) orelse return CafebabeError.BadFlags;
 
         const this_cls_idx = try reader.readIntBig(u16);
-        const this_cls = constant_pool.lookupConstant(this_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
+        const this_cls = constant_pool.lookupClass(this_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
         const super_cls_idx = try reader.readIntBig(u16);
-        const super_cls = if (super_cls_idx == 0 and std.mem.eql(u8, this_cls, "java/lang/Object")) null else constant_pool.lookupConstant(super_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
+        const super_cls = if (super_cls_idx == 0 and std.mem.eql(u8, this_cls, "java/lang/Object")) null else constant_pool.lookupClass(super_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
 
         var iface_count = try reader.readIntBig(u16);
         var ifaces = try std.ArrayListUnmanaged([]const u8).initCapacity(persistent, iface_count);
         {
             while (iface_count > 0) {
                 const idx = try reader.readIntBig(u16);
-                const iface = constant_pool.lookupConstant(idx) orelse return CafebabeError.BadConstantPoolIndex;
+                const iface = constant_pool.lookupClass(idx) orelse return CafebabeError.BadConstantPoolIndex;
                 ifaces.appendAssumeCapacity(iface);
                 iface_count -= 1;
             }
@@ -469,7 +469,10 @@ pub const ConstantPool = struct {
         return .{ .indices = indices, .slice = copy_buf };
     }
 
-    pub fn lookupConstant(self: Self, idx_cp: u16) ?[]const u8 {
+    // TODO infallible versions of these functions (or comptime magic) for fast runtime lookups. maybe a view abstraction over a constantpool
+    // TODO special case of `this` class reference, already resolved
+
+    pub fn lookupClass(self: Self, idx_cp: u16) ?[]const u8 {
         const cls = self.lookup(idx_cp, Tag.class) orelse return null;
 
         const name_idx = std.mem.readInt(u16, &cls[0], std.builtin.Endian.Big);

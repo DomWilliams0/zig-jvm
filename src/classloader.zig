@@ -88,8 +88,9 @@ pub const ClassLoader = struct {
         }
     }
 
-    /// Main entrypoint - name can be array or class name. Loads now if not already
-    // TODO return exception
+    /// Main entrypoint - name can be array or class name. Loads now if not already.
+    /// Loader is cloned if needed for loading
+    // TODO return exception or error type
     pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) anyerror!object.VmClassRef {
         // TODO exception
         if (name.len < 2) std.debug.panic("class name too short {s}", .{name});
@@ -206,6 +207,7 @@ pub const ClassLoader = struct {
             .constant_pool = undefined,
             .super_cls = java_lang_Object,
             .interfaces = &.{}, // TODO
+            .loader = loader.clone(),
         };
 
         return class;
@@ -239,6 +241,7 @@ pub const ClassLoader = struct {
             .constant_pool = undefined, // unused
             .super_cls = null,
             .interfaces = &.{},
+            .loader = .bootstrap,
         };
 
         entry.* = class.clone().intoRaw();
@@ -273,6 +276,7 @@ pub const ClassLoader = struct {
                     .layout = undefined, // set next in preparation stage
                 },
             },
+            .loader = loader.clone(),
         };
 
         // preparation

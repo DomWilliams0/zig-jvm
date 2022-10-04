@@ -1,4 +1,13 @@
 const std = @import("std");
+const jvm = @import("jvm.zig");
+const cafebabe = @import("cafebabe.zig");
+const object = @import("object.zig");
+const frame = @import("frame.zig");
+const classloader = @import("classloader.zig");
+
+const VmClassRef = object.VmClassRef;
+const VmObjectRef = object.VmObjectRef;
+
 pub const insns = [_]Insn{
     .{
         .name = "i2b",
@@ -671,20 +680,35 @@ pub const maxInsnSize: usize = blk: {
     break :blk max_size;
 };
 
-const handler_fn = fn ([*]const u8) void;
+/// Points at insn byte, i.e. body starts at +1
+const insn_body = *[*]const u8;
+const handler_fn = fn (insn_body, *InsnContext) void;
 
 pub const debug_logging = true;
 
 pub const Handler = struct {
     handler: *const handler_fn,
-    insn_size: usize,
+    // insn_size: usize,
     insn_name: if (debug_logging) []const u8 else void,
 
+    fn handler_wrapper(comptime insn: Insn) handler_fn {
+        const S = struct {
+            fn handler(body: insn_body, ctxt: *InsnContext) void {
+                const name = "_" ++ insn.name;
+                const func = if (@hasDecl(handlers, name)) @field(handlers, name) else nop_handler(insn);
+                @call(.{ .modifier = .always_inline }, func, .{ body, ctxt });
+
+                body.* += @as(usize, insn.sz) + 1;
+            }
+        };
+
+        return S.handler;
+    }
+
     fn resolve(comptime insn: Insn) Handler {
-        const name = "handle_" ++ insn.name;
         return .{
-            .handler = if (@hasField(handlers, name)) @field(handlers, name) else nop_handler(insn),
-            .insn_size = insn.sz,
+            .handler = handler_wrapper(insn),
+            // .insn_size = insn.sz,
             .insn_name = if (debug_logging) insn.name else {},
         };
     }
@@ -692,13 +716,13 @@ pub const Handler = struct {
     const unknown: Handler = .{
         .handler = unknown_handler,
         .insn_name = "unknown",
-        .insn_size = 0,
+        // .insn_size = 0,
     };
 };
 
 fn nop_handler(comptime insn: Insn) handler_fn {
     const S = struct {
-        fn nop_handler(_: [*]const u8) void {
+        fn nop_handler(_: insn_body, _: *InsnContext) void {
             std.debug.panic("unimplemented insn {s}", .{insn.name});
         }
     };
@@ -706,7 +730,7 @@ fn nop_handler(comptime insn: Insn) handler_fn {
     return S.nop_handler;
 }
 
-fn unknown_handler(_: [*]const u8) void {
+fn unknown_handler(_: insn_body, _: *InsnContext) void {
     std.debug.panic("unknown instruction!!", .{});
 }
 
@@ -724,5 +748,70 @@ pub const Insn = struct {
     sz: u8 = 0,
 };
 
+/// Context passed to instruction handlers
+pub const InsnContext = struct {
+    thread: *jvm.ThreadEnv,
+    constant_pool: *cafebabe.ConstantPool,
+    loader: classloader.WhichLoader,
+
+    operands: frame.Frame.OperandStack,
+    local_vars: frame.Frame.LocalVars,
+
+    fn readU16(body: insn_body) u16 {
+        const b = body.*;
+        return @as(u16, b[1]) << 8 | @as(u16, b[2]);
+    }
+
+    fn readU8(body: insn_body) u16 {
+        return body.*[1];
+    }
+
+    // TODO exception
+    fn resolveClass(self: @This(), idx: u16) VmClassRef {
+        const name = self.constant_pool.lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
+
+        // resolve
+        std.log.debug("resolving class {s}", .{name});
+        const loaded = self.thread.global.classloader.loadClass(name, self.loader) catch std.debug.panic("cant load", .{});
+        // TODO cache in constant pool
+        return loaded;
+    }
+
+    fn pushOperand(self: @This(), val: anytype) void {
+        var stack = self.operands;
+        stack.push(val);
+    }
+};
+
 /// Instruction implementations, resolved in `handler_lookup`
-pub const handlers = struct {};
+pub const handlers = struct {
+    pub fn _new(body: insn_body, ctxt: *InsnContext) void {
+        const idx = InsnContext.readU16(body);
+        const cls = ctxt.resolveClass(idx);
+        object.VmClass.ensureInitialised(cls);
+    }
+
+    pub fn _bipush(body: insn_body, ctxt: *InsnContext) void {
+        const val = InsnContext.readU8(body);
+        ctxt.pushOperand(@as(i32, val));
+    }
+
+    pub fn _putstatic(body: insn_body, ctxt: *InsnContext) void {
+        // TODO
+        _ = body;
+        _ = ctxt;
+    }
+    pub fn _return(body: insn_body, ctxt: *InsnContext) void {
+        _ = ctxt;
+        _ = body;
+        @panic("return!");
+    }
+};
+
+test "sign extend" {
+    const b: i8 = 16;
+    try std.testing.expectEqual(@as(i32, 16), @as(i32, b));
+
+    const c: i8 = -20;
+    try std.testing.expectEqual(@as(i32, -20), @as(i32, c));
+}
