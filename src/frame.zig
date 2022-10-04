@@ -2,10 +2,15 @@ const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const Allocator = std.mem.Allocator;
 
+pub const logging = std.log.level == .debug;
+
 pub const Frame = struct {
     operands: OperandStack,
     local_vars: LocalVars,
     method: *const cafebabe.Method,
+
+    parent_frame_ret_fn: *const fn (*anyopaque, u64) void,
+    parent_frame_ctx: *anyopaque, // passed to ret_fn
 
     pub const OperandStack = struct {
         /// Points to UNINITIALISED NEXT value on stack. When full will point out of allocation
@@ -18,21 +23,39 @@ pub const Frame = struct {
         ///             top of stack
         stack: [*]usize,
 
+        /// Used for logging only, set on first use
+        bottom_of_stack: if (logging) usize else void = if (logging) 0 else {},
+
         pub fn push(self: *@This(), value: anytype) void {
+
             // cast to usize
             // TODO this wont work with longs on 32 bit so disallow that for now
             if (@sizeOf(usize) != 8) @compileError("32 bit not supported");
-            const val = @as(usize, value);
+            const val = convert(@TypeOf(value)).to(value);
 
-            self.stack += 1;
             self.stack[0] = val;
+            self.stack += 1;
+
+            // TODO format input type better, e.g. dont show all fields on an object ref. but that should be the object's falut
+            if (logging) {
+                // set bottom on first call
+                if (self.bottom_of_stack == 0)
+                    self.bottom_of_stack = @ptrToInt(self.stack - 1);
+                std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ (@ptrToInt(self.stack - 1) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value });
+            }
         }
 
         pub fn pop(self: *@This(), comptime T: type) T {
             // decrement to last value on stack
             self.stack -= 1;
             const val_usize = self.stack[0];
-            return @truncate(T, val_usize);
+            const value = convert(T).from(val_usize);
+
+            if (logging) {
+                if (self.bottom_of_stack == 0) unreachable; // should be set in push
+                std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ (@ptrToInt(self.stack) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value });
+            }
+            return value;
         }
     };
 
@@ -42,10 +65,66 @@ pub const Frame = struct {
 
         pub fn get(self: *@This(), comptime T: type, idx: u16) *T {
             return @ptrCast(*T, &self.vars[idx]);
-
         }
     };
 };
+
+fn convert(comptime T: type) type {
+    const u = union {
+        int: usize,
+        any: T,
+    };
+    if (@sizeOf(T) > @sizeOf(usize)) @compileError("can't be bigger than usize");
+
+    return struct {
+        fn to(val: T) usize {
+            @setRuntimeSafety(false);
+            const x = u{ .any = val };
+            return x.int;
+        }
+        fn from(val: usize) T {
+            @setRuntimeSafety(false);
+            const x = u{ .int = val };
+            return x.any;
+        }
+    };
+}
+
+test "convert" {
+    const help = struct {
+        fn check(
+            comptime T: type,
+            val: anytype,
+        ) void {
+            const conv = convert(T).to(@as(T, val));
+            const res = convert(T).from(conv);
+            std.log.debug("{s}: {any} -> {any} -> {any}", .{ @typeName(T), val, conv, res });
+            std.testing.expectEqual(res, val) catch unreachable;
+        }
+    };
+
+    // int smaller than u64
+    help.check(i8, -20);
+    help.check(i8, 100);
+    help.check(i16, -20);
+    help.check(i16, 200);
+    help.check(i32, -20);
+    help.check(i32, 200);
+    help.check(u8, 200);
+    help.check(u16, 200);
+    help.check(u32, 200);
+
+    // int same size as u64
+    help.check(i64, 200);
+    help.check(i64, -200);
+    help.check(u64, 200);
+
+    // object ptr
+    const s: []const u8 = "awesome";
+    const conv = convert([*]const u8).to(s.ptr);
+    const res = convert([*]const u8).from(conv);
+    try std.testing.expectEqual(res, s.ptr);
+}
 
 // for both operands and localvars, alloc in big chunks
 // new frame(local vars=5,)
@@ -175,4 +254,16 @@ test "contiguous bufs pop wrong order" {
     const b = try buffers.reserve(50);
     try std.testing.expectError(error.WrongPopOrder, buffers.drop(a)); // should pop b first
     _ = b;
+}
+
+test "operand stack" {
+    std.testing.log_level = .debug;
+    var backing = [_]usize{0} ** 8;
+    var stack = Frame.OperandStack{ .stack = &backing };
+
+    stack.push(@as(i32, -50));
+    stack.push(@as(u16, 123));
+
+    try std.testing.expectEqual(@as(u16, 123), stack.pop(u16));
+    try std.testing.expectEqual(@as(i32, -50), stack.pop(i32));
 }
