@@ -5,18 +5,10 @@ const insn = @import("insn.zig");
 const jvm = @import("jvm.zig");
 const object = @import("object.zig");
 
-const DummyReturnValue = struct {
-    returned: u64 = undefined,
-
-    fn return_fn(self: *anyopaque, val: u64) void {
-        var self_mut = @ptrCast(*@This(), @alignCast(@alignOf(@This()), self));
-        self_mut.returned = val;
-        std.log.debug("dummy frame received return value {x}", .{val});
-    }
-};
-
+/// Each thread owns one
 pub const Interpreter = struct {
     frames_alloc: frame.ContiguousBufferStack,
+    top_frame: ?*frame.Frame = null,
 
     pub fn new(alloc: std.mem.Allocator) !Interpreter {
         return .{
@@ -35,17 +27,9 @@ pub const Interpreter = struct {
 
         if (method.code.code == null) @panic("TODO native method");
 
-        // alloc frame with dummy return slot
-        var dummy_return = DummyReturnValue{};
-        var f = try self.frames_alloc.bufs.allocator.create(frame.Frame);
-        errdefer self.frames_alloc.bufs.allocator.destroy(f);
-        f.* = .{
-            .method = method,
-            .parent_frame_ret_fn = DummyReturnValue.return_fn,
-            .parent_frame_ctx = &dummy_return,
-            .operands = undefined, // set next
-            .local_vars = undefined, // set next
-        };
+        // alloc local var and operand stack storage
+        var operands: frame.Frame.OperandStack = undefined; // set next
+        var local_vars: frame.Frame.LocalVars = undefined; // set next
         {
             const n_locals = method.code.max_locals;
             const n_operands = method.code.max_stack;
@@ -54,51 +38,96 @@ pub const Interpreter = struct {
             var local_vars_buf = alloc[0..n_locals];
             var operands_buf = alloc[n_locals .. n_locals + n_operands];
 
-            f.operands = .{ .stack = operands_buf.ptr };
-            f.local_vars = .{ .vars = local_vars_buf.ptr };
+            operands = .{ .stack = operands_buf.ptr };
+            local_vars = .{ .vars = local_vars_buf.ptr };
         }
-        errdefer self.frames_alloc.drop(f.local_vars.vars) catch unreachable;
+        errdefer self.frames_alloc.drop(local_vars.vars) catch unreachable;
+
+        // for java only
+        const code_window = method.code.code.?.ptr;
+
+        const alloc = self.frameAllocator();
+        var f = try alloc.create(frame.Frame);
+        errdefer alloc.destroy(f);
+        f.* = .{
+            .method = method,
+            .class = class.get(),
+            .operands = operands,
+            .local_vars = local_vars,
+            .code_window = code_window,
+            .parent_frame = self.top_frame,
+        };
+
+        // cant fail now, link up frame
+        self.top_frame = f;
 
         // go go go
-        var interp = BytecodeInterpreter{ .method = f.method, .class = class, .frame = f };
-        interp.go();
+        std.log.debug("{?}", .{self.callstack()});
+        interpreterLoop();
+    }
+
+    fn frameAllocator(self: @This()) std.mem.Allocator {
+        return self.frames_alloc.bufs.allocator;
+    }
+
+    const PrintableCallStack = struct {
+        top: ?*frame.Frame,
+        pub fn format(self_: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            var top = self_.top;
+
+            var i: u32 = 0;
+            try std.fmt.formatBuf("call stack: ", options, writer);
+            while (top) |f| {
+                try std.fmt.format(writer, "\n * {d}) {s}.{s}", .{ i, f.class.name, f.method.name });
+                top = f.parent_frame;
+                i += 1;
+            }
+
+            _ = fmt;
+        }
+    };
+    fn callstack(self: @This()) PrintableCallStack {
+        return PrintableCallStack{ .top = self.top_frame };
     }
 };
 
 // TODO second interpreter type that generates threaded machine code for the method e.g. `call ins1 call ins2 call ins3`
-const BytecodeInterpreter = struct {
-    method: *const cafebabe.Method,
-    class: object.VmClassRef,
-    frame: *frame.Frame,
+fn interpreterLoop() void {
+    const thread = jvm.thread_state();
+    var ctxt_mut = insn.InsnContextMut{};
+    var ctxt = insn.InsnContext{ .thread = thread, .frame = undefined, .mutable = &ctxt_mut };
 
-    fn go(self: *@This()) void {
-        const code = self.method.code.code orelse @panic("null code?");
-        var code_window: [*]const u8 = code.ptr;
+    // code is verified to be correct, right? yeah...
+    while (ctxt_mut.control_flow == .continue_) {
+        // refetch on every insn, method might have changed
+        const f = if (thread.interpreter.top_frame) |f| f else break;
+        ctxt.frame = f;
 
-        var state = insn.InsnContext{
-            .thread = jvm.thread_state(),
-            .constant_pool = &self.class.get().constant_pool,
-            .loader = self.class.get().loader,
-            .operands = self.frame.operands,
-            .local_vars = self.frame.local_vars,
-        };
+        const next_insn = f.code_window.?[0];
 
-        // code is verified to be correct, right? yeah...
-        while (true) {
-            const next_insn = code_window[0];
+        // lookup handler func
+        const handler = insn.handler_lookup[next_insn];
+        if (insn.debug_logging) std.log.debug("pc={d}: {s}", .{ ctxt.currentPc(), handler.insn_name });
 
-            // lookup handler func
-            const handler = insn.handler_lookup[next_insn];
-            if (insn.debug_logging) std.log.debug("pc={d}: {s}", .{ self.calculatePc(code_window), handler.insn_name });
-
-            // invoke
-            handler.handler(&code_window, &state);
-        }
+        // invoke
+        handler.handler(ctxt);
     }
 
-    fn calculatePc(self: @This(), window: [*]const u8) u32 {
-        const base = self.method.code.code.?;
-        const offset = @ptrToInt(window) - @ptrToInt(base.ptr);
-        return @truncate(u32, offset);
+    switch (ctxt_mut.control_flow) {
+        .return_ => {
+            // TODO copy out return value before freeing operand stack
+            if (ctxt.frame.method.descriptor.isNotVoid()) @panic("TODO return value");
+
+            // clean up this frame
+            const this_frame = thread.interpreter.top_frame.?;
+            const caller_frame = this_frame.parent_frame;
+            std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.name, this_frame.method.name });
+            thread.interpreter.frameAllocator().destroy(this_frame);
+
+            // pass execution back to caller
+            thread.interpreter.top_frame = caller_frame;
+        },
+
+        .continue_ => unreachable,
     }
-};
+}

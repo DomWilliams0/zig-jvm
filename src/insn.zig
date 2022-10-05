@@ -680,25 +680,22 @@ pub const maxInsnSize: usize = blk: {
     break :blk max_size;
 };
 
-/// Points at insn byte, i.e. body starts at +1
-const insn_body = *[*]const u8;
-const handler_fn = fn (insn_body, *InsnContext) void;
+const handler_fn = fn (InsnContext) void;
 
 pub const debug_logging = true;
 
 pub const Handler = struct {
     handler: *const handler_fn,
-    // insn_size: usize,
     insn_name: if (debug_logging) []const u8 else void,
 
     fn handler_wrapper(comptime insn: Insn) handler_fn {
         const S = struct {
-            fn handler(body: insn_body, ctxt: *InsnContext) void {
+            fn handler(ctxt: InsnContext) void {
                 const name = "_" ++ insn.name;
                 const func = if (@hasDecl(handlers, name)) @field(handlers, name) else nop_handler(insn);
-                @call(.{ .modifier = .always_inline }, func, .{ body, ctxt });
+                @call(.{ .modifier = .always_inline }, func, .{ctxt});
 
-                body.* += @as(usize, insn.sz) + 1;
+                ctxt.frame.code_window.? += @as(usize, insn.sz) + 1;
             }
         };
 
@@ -708,7 +705,6 @@ pub const Handler = struct {
     fn resolve(comptime insn: Insn) Handler {
         return .{
             .handler = handler_wrapper(insn),
-            // .insn_size = insn.sz,
             .insn_name = if (debug_logging) insn.name else {},
         };
     }
@@ -716,13 +712,12 @@ pub const Handler = struct {
     const unknown: Handler = .{
         .handler = unknown_handler,
         .insn_name = "unknown",
-        // .insn_size = 0,
     };
 };
 
 fn nop_handler(comptime insn: Insn) handler_fn {
     const S = struct {
-        fn nop_handler(_: insn_body, _: *InsnContext) void {
+        fn nop_handler(_: InsnContext) void {
             std.debug.panic("unimplemented insn {s}", .{insn.name});
         }
     };
@@ -730,7 +725,7 @@ fn nop_handler(comptime insn: Insn) handler_fn {
     return S.nop_handler;
 }
 
-fn unknown_handler(_: insn_body, _: *InsnContext) void {
+fn unknown_handler(_: InsnContext) void {
     std.debug.panic("unknown instruction!!", .{});
 }
 
@@ -748,63 +743,102 @@ pub const Insn = struct {
     sz: u8 = 0,
 };
 
-/// Context passed to instruction handlers
+/// Context passed to instruction handlers that is expected to be mutated, kept
+/// in a separate struct to keep the size of Insncontext smaller enough to
+/// copy
+pub const InsnContextMut = struct {
+    control_flow: ControlFlow = .continue_,
+
+    pub const ControlFlow = enum {
+        continue_,
+        return_,
+        // TODO exception
+    };
+};
+
+/// Context passed to instruction handlers, preferably copied
 pub const InsnContext = struct {
+    const Self = @This();
+
     thread: *jvm.ThreadEnv,
-    constant_pool: *cafebabe.ConstantPool,
-    loader: classloader.WhichLoader,
+    frame: *frame.Frame,
+    mutable: *InsnContextMut,
 
-    operands: frame.Frame.OperandStack,
-    local_vars: frame.Frame.LocalVars,
+    pub fn currentPc(self: @This()) u32 {
+        const base = self.frame.method.code.code.?;
+        const offset = @ptrToInt(self.frame.code_window.?) - @ptrToInt(base.ptr);
+        return @truncate(u32, offset);
+    }
 
-    fn readU16(body: insn_body) u16 {
-        const b = body.*;
+    fn body(self: Self) [*]const u8 {
+        return self.frame.code_window.?;
+    }
+
+    fn constantPool(self: Self) *cafebabe.ConstantPool {
+        return &self.frame.class.constant_pool;
+    }
+
+    fn readU16(self: Self) u16 {
+        const b = self.body();
         return @as(u16, b[1]) << 8 | @as(u16, b[2]);
     }
 
-    fn readU8(body: insn_body) u16 {
-        return body.*[1];
+    fn readU8(self: Self) u16 {
+        const b = self.body();
+        return b[1];
     }
 
     // TODO exception
     fn resolveClass(self: @This(), idx: u16) VmClassRef {
-        const name = self.constant_pool.lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
+        const name = self.constantPool().lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
 
         // resolve
         std.log.debug("resolving class {s}", .{name});
-        const loaded = self.thread.global.classloader.loadClass(name, self.loader) catch std.debug.panic("cant load", .{});
+        const loaded = self.thread.global.classloader.loadClass(name, self.frame.class.loader) catch std.debug.panic("cant load", .{});
         // TODO cache in constant pool
         return loaded;
     }
 
-    fn pushOperand(self: @This(), val: anytype) void {
-        var stack = self.operands;
-        stack.push(val);
+    fn operandStack(self: @This()) *frame.Frame.OperandStack {
+        return &self.frame.operands;
+    }
+
+    /// If method returns not void, takes return value from top of stack
+    fn returnToCaller(self: @This()) void {
+        self.mutable.control_flow = .return_;
     }
 };
 
 /// Instruction implementations, resolved in `handler_lookup`
 pub const handlers = struct {
-    pub fn _new(body: insn_body, ctxt: *InsnContext) void {
-        const idx = InsnContext.readU16(body);
+    pub fn _new(ctxt: InsnContext) void {
+        const idx = ctxt.readU16();
+
+        // resolve and init class
         const cls = ctxt.resolveClass(idx);
         object.VmClass.ensureInitialised(cls);
+        // TODO store in some constant pool flags that this class is initialised too
+
+        unreachable; // TODO instantiate object and push onto stack
     }
 
-    pub fn _bipush(body: insn_body, ctxt: *InsnContext) void {
-        const val = InsnContext.readU8(body);
-        ctxt.pushOperand(@as(i32, val));
+    pub fn _bipush(ctxt: InsnContext) void {
+        const val = ctxt.readU8();
+        ctxt.operandStack().push(@as(i32, val));
     }
 
-    pub fn _putstatic(body: insn_body, ctxt: *InsnContext) void {
+    pub fn _putstatic(ctxt: InsnContext) void {
         // TODO
-        _ = body;
         _ = ctxt;
     }
-    pub fn _return(body: insn_body, ctxt: *InsnContext) void {
-        _ = ctxt;
-        _ = body;
-        @panic("return!");
+
+    pub fn _return(ctxt: InsnContext) void {
+        ctxt.returnToCaller();
+    }
+
+    pub fn _dup(ctxt: InsnContext) void {
+        var stack = ctxt.operandStack();
+        stack.pushRaw(stack.peekRaw());
     }
 };
 

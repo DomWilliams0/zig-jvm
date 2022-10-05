@@ -72,6 +72,10 @@ pub const MethodDescriptor = struct {
         // TODO
         return .{ .str = str };
     }
+
+    pub fn isNotVoid(self: @This()) bool {
+        return self.str[self.str.len - 1] != 'V';
+    }
 };
 
 test "valid field descriptors" {

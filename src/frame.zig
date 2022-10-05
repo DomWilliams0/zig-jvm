@@ -1,5 +1,6 @@
 const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
+const object = @import("object.zig");
 const Allocator = std.mem.Allocator;
 
 pub const logging = std.log.level == .debug;
@@ -8,9 +9,12 @@ pub const Frame = struct {
     operands: OperandStack,
     local_vars: LocalVars,
     method: *const cafebabe.Method,
+    class: *object.VmClass,
 
-    parent_frame_ret_fn: *const fn (*anyopaque, u64) void,
-    parent_frame_ctx: *anyopaque, // passed to ret_fn
+    /// Null if not java method
+    code_window: ?[*]const u8,
+
+    parent_frame: ?*Frame,
 
     pub const OperandStack = struct {
         /// Points to UNINITIALISED NEXT value on stack. When full will point out of allocation
@@ -27,10 +31,16 @@ pub const Frame = struct {
         bottom_of_stack: if (logging) usize else void = if (logging) 0 else {},
 
         pub fn push(self: *@This(), value: anytype) void {
+            self.pushAndLog(value, true);
+        }
 
-            // cast to usize
-            // TODO this wont work with longs on 32 bit so disallow that for now
-            if (@sizeOf(usize) != 8) @compileError("32 bit not supported");
+        pub fn pushRaw(self: *@This(), value: usize) void {
+            self.pushAndLog(value, false);
+        }
+
+        fn pushAndLog(self: *@This(), value: anytype, comptime log: bool) void {
+            // convert to usize
+            // TODO check usize->usize=nop
             const val = convert(@TypeOf(value)).to(value);
 
             self.stack[0] = val;
@@ -41,8 +51,22 @@ pub const Frame = struct {
                 // set bottom on first call
                 if (self.bottom_of_stack == 0)
                     self.bottom_of_stack = @ptrToInt(self.stack - 1);
-                std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ (@ptrToInt(self.stack - 1) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value });
+
+                if (log)
+                    std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ (@ptrToInt(self.stack - 1) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value })
+                else
+                    std.log.debug("operand stack: pushed #{d} (opaque)", .{(@ptrToInt(self.stack - 1) - self.bottom_of_stack) / 8});
             }
+        }
+
+        pub fn peekRaw(self: @This()) usize {
+            if (logging) std.debug.assert(!self.isEmpty());
+            return (self.stack - 1)[0];
+        }
+
+        fn isEmpty(self: @This()) bool {
+            if (!logging) @compileError("cant check");
+            return self.bottom_of_stack == 0 or self.bottom_of_stack >= @ptrToInt(self.stack);
         }
 
         pub fn pop(self: *@This(), comptime T: type) T {
@@ -74,7 +98,7 @@ fn convert(comptime T: type) type {
         int: usize,
         any: T,
     };
-    if (@sizeOf(T) > @sizeOf(usize)) @compileError("can't be bigger than usize");
+    if (@sizeOf(T) > @sizeOf(usize)) @compileError(std.fmt.comptimePrint("can't be bigger than usize ({d} > {d})", .{ @sizeOf(T), @sizeOf(usize) }));
 
     return struct {
         fn to(val: T) usize {
@@ -257,13 +281,17 @@ test "contiguous bufs pop wrong order" {
 }
 
 test "operand stack" {
-    std.testing.log_level = .debug;
     var backing = [_]usize{0} ** 8;
     var stack = Frame.OperandStack{ .stack = &backing };
 
+    try std.testing.expect(stack.isEmpty());
     stack.push(@as(i32, -50));
+    try std.testing.expect(!stack.isEmpty());
     stack.push(@as(u16, 123));
+    try std.testing.expect(!stack.isEmpty());
 
     try std.testing.expectEqual(@as(u16, 123), stack.pop(u16));
+    try std.testing.expect(!stack.isEmpty());
     try std.testing.expectEqual(@as(i32, -50), stack.pop(i32));
+    try std.testing.expect(stack.isEmpty());
 }
