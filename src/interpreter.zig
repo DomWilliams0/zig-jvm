@@ -21,6 +21,11 @@ pub const Interpreter = struct {
     }
 
     pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !void {
+        return self.executeUntilReturnWithCallerFrame(class, method, null);
+    }
+
+    pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) !void {
+
         // TODO format on method to show class.method
         std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
         defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
@@ -43,8 +48,18 @@ pub const Interpreter = struct {
         }
         errdefer self.frames_alloc.drop(local_vars.vars) catch unreachable;
 
-        // for java only
+        // TODO handle native differently
         const code_window = method.code.code.?.ptr;
+
+        // push args on from calling frame
+        var param_count = method.descriptor.param_count;
+        if (!method.flags.contains(.static)) param_count += 1; // this param
+        if (param_count > 0) {
+            // TODO panic/unreachable if caller stack/args not passed
+            if (caller) |caller_stack| {
+                caller_stack.transferToCallee(&local_vars, method.descriptor);
+            }
+        }
 
         const alloc = self.frameAllocator();
         var f = try alloc.create(frame.Frame);
@@ -92,6 +107,7 @@ pub const Interpreter = struct {
 };
 
 // TODO second interpreter type that generates threaded machine code for the method e.g. `call ins1 call ins2 call ins3`
+//   in generated code, local var lookup should reference the caller's stack when i<param count, to avoid copying
 fn interpreterLoop() void {
     const thread = jvm.thread_state();
     var ctxt_mut = insn.InsnContextMut{};
@@ -115,11 +131,18 @@ fn interpreterLoop() void {
 
     switch (ctxt_mut.control_flow) {
         .return_ => {
+            const this_frame = thread.interpreter.top_frame.?;
+
             // TODO copy out return value before freeing operand stack
-            if (ctxt.frame.method.descriptor.isNotVoid()) @panic("TODO return value");
+            if (ctxt.frame.method.descriptor.isNotVoid()) {
+                const ret_value = this_frame.operands.popRaw();
+                if (ctxt.frame.method.descriptor.returnType().?[0] == 'I')
+                    std.log.debug("returned i32 {d}", .{frame.convert(i32).from(ret_value)});
+
+                std.debug.panic("TODO return value {d}", .{ret_value});
+            }
 
             // clean up this frame
-            const this_frame = thread.interpreter.top_frame.?;
             const caller_frame = this_frame.parent_frame;
             std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.name, this_frame.method.name });
             thread.interpreter.frameAllocator().destroy(this_frame);

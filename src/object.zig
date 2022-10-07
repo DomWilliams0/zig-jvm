@@ -67,24 +67,29 @@ pub const VmClass = struct {
         }
     }
 
-    /// Looks in super classes too
-    // pub fn findMethodRecursive(
-    //     self: *@This(),
-    //     name: []const u8,
-    //     desc: []const u8,
-    //     flags: std.enums.EnumFieldStruct(cafebabe.Method.Flags, bool, false),
-    // ) !void {
+    /// Looks in superclasses and interfaces (5.4.3.3. Method Resolution)
+    pub fn findMethodRecursive(self: @This(), name: []const u8, desc: []const u8) ?*const Method {
 
-    //     var cls = self;
-    //     while (cls) {
+        // TODO if signature polymorphic, resolve class names mentioned in descriptor too
 
-    //     }
+        // check self and supers recursively first
+        if (self.findMethodInSelfOrSupers(name, desc)) |m| return m;
 
-    //     _ = name;
-    //     _ = desc;
-    //     _ = self;
-    //     _ = flags;
-    // }
+        // check superinterfaces
+        @panic("TODO find method in super interfaces");
+    }
+
+    fn findMethodInSelfOrSupers(
+        self: @This(),
+        name: []const u8,
+        desc: []const u8,
+    ) ?*const Method {
+        // check self
+        if (self.findMethodInThisOnly(name, desc, .{})) |m| return m;
+
+        // check super recursively
+        return if (self.super_cls) |super| super.get().findMethodRecursive(name, desc) else null;
+    }
 
     pub fn findMethodInThisOnly(
         self: @This(),

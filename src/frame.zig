@@ -1,6 +1,7 @@
 const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const object = @import("object.zig");
+const desc = @import("descriptor.zig");
 const Allocator = std.mem.Allocator;
 
 pub const logging = std.log.level == .debug;
@@ -70,6 +71,14 @@ pub const Frame = struct {
         }
 
         pub fn pop(self: *@This(), comptime T: type) T {
+            return self.popAndLog(T, true);
+        }
+
+        pub fn popRaw(self: *@This()) usize {
+            return self.popAndLog(usize, false);
+        }
+
+        fn popAndLog(self: *@This(), comptime T: type, comptime log: bool) T {
             // decrement to last value on stack
             self.stack -= 1;
             const val_usize = self.stack[0];
@@ -77,9 +86,41 @@ pub const Frame = struct {
 
             if (logging) {
                 if (self.bottom_of_stack == 0) unreachable; // should be set in push
-                std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ (@ptrToInt(self.stack) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value });
+
+                if (log)
+                    std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ (@ptrToInt(self.stack) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value })
+                else
+                    std.log.debug("operand stack: popped #{d} (opaque)", .{(@ptrToInt(self.stack) - self.bottom_of_stack) / 8});
             }
             return value;
+        }
+
+        pub fn transferToCallee(self: *@This(), callee: *LocalVars, method: desc.MethodDescriptor) void {
+            // TODO cache u8 indices of wide args in method
+            var src: u16 = 0;
+            var dst: u16 = 0;
+            var last_copy: u16 = 0;
+
+            const src_base = self.stack - method.param_count;
+
+            var params = method.iterateParamTypes();
+            while (params.next()) |param_type| {
+                if (param_type[0] == 'D' or param_type[0] == 'J') {
+                    // wide, copy everything up to here including this double
+                    const n = src - last_copy + 1;
+                    std.mem.copy(usize, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+                    dst += n + 1;
+                    src += 1;
+                    last_copy = src;
+                } else {
+                    // keep advancing
+                    src += 1;
+                }
+            }
+
+            // copy final args
+            const n = src - last_copy;
+            std.mem.copy(usize, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
         }
     };
 
@@ -93,7 +134,7 @@ pub const Frame = struct {
     };
 };
 
-fn convert(comptime T: type) type {
+pub fn convert(comptime T: type) type {
     const u = union {
         int: usize,
         any: T,
@@ -101,12 +142,13 @@ fn convert(comptime T: type) type {
     if (@sizeOf(T) > @sizeOf(usize)) @compileError(std.fmt.comptimePrint("can't be bigger than usize ({d} > {d})", .{ @sizeOf(T), @sizeOf(usize) }));
 
     return struct {
-        fn to(val: T) usize {
+        pub fn to(val: T) usize {
             @setRuntimeSafety(false);
             const x = u{ .any = val };
             return x.int;
         }
-        fn from(val: usize) T {
+
+        pub fn from(val: usize) T {
             @setRuntimeSafety(false);
             const x = u{ .int = val };
             return x.any;
@@ -294,4 +336,50 @@ test "operand stack" {
     try std.testing.expect(!stack.isEmpty());
     try std.testing.expectEqual(@as(i32, -50), stack.pop(i32));
     try std.testing.expect(stack.isEmpty());
+}
+
+test "operands to callee local vars" {
+    const method = desc.MethodDescriptor.new("(IDFJZS)V").?;
+
+    // setup stack
+    var o_backing = [_]usize{0} ** 8;
+    var stack = Frame.OperandStack{ .stack = &o_backing };
+    stack.push(@as(i32, 10)); // bottom of stack
+    stack.push(@as(f64, 44.4));
+    stack.push(@as(f32, 0.25));
+    stack.push(@as(i64, 500_000));
+    stack.push(@as(bool, true));
+    stack.push(@as(i16, 666)); // top of stack
+
+    // setup local vars
+    var o_lvars = [_]usize{0} ** 8;
+    var vars = Frame.LocalVars{ .vars = &o_lvars };
+
+    stack.transferToCallee(&vars, method);
+
+    try std.testing.expectEqual(@as(i32, 10), vars.get(i32, 0).*);
+    try std.testing.expectEqual(@as(f64, 44.4), vars.get(f64, 1).*);
+    try std.testing.expectEqual(@as(f32, 0.25), vars.get(f32, 3).*); // skip
+    try std.testing.expectEqual(@as(i64, 500_000), vars.get(i64, 4).*);
+    try std.testing.expectEqual(@as(bool, true), vars.get(bool, 6).*); // skip
+    try std.testing.expectEqual(@as(i16, 666), vars.get(i16, 7).*);
+}
+
+test "operands to callee local vars II" {
+    const method = desc.MethodDescriptor.new("(II)V").?;
+
+    // setup stack
+    var o_backing = [_]usize{0} ** 8;
+    var stack = Frame.OperandStack{ .stack = &o_backing };
+    stack.push(@as(i32, 10)); // bottom of stack
+    stack.push(@as(i32, 25)); // top of stack
+
+    // setup local vars
+    var o_lvars = [_]usize{0} ** 8;
+    var vars = Frame.LocalVars{ .vars = &o_lvars };
+
+    stack.transferToCallee(&vars, method);
+
+    try std.testing.expectEqual(@as(i32, 10), vars.get(i32, 0).*);
+    try std.testing.expectEqual(@as(i32, 25), vars.get(i32, 1).*);
 }

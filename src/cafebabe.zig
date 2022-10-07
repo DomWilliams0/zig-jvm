@@ -342,7 +342,7 @@ fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.En
     if ((input | all) != all) return null;
 
     var set: std.EnumSet(T) = undefined;
-    set.bits.mask = @intCast(@TypeOf(set.bits.mask), input);
+    set.bits.mask = @truncate(@TypeOf(set.bits.mask), input);
     return set;
 }
 
@@ -376,7 +376,7 @@ fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.En
     if ((input | all) != all) return null;
 
     var set: std.EnumSet(T) = undefined;
-    set.bits.mask = @intCast(@TypeOf(set.bits.mask), input);
+    set.bits.mask = @truncate(@TypeOf(set.bits.mask), input);
     return set;
 }
 
@@ -469,7 +469,8 @@ pub const ConstantPool = struct {
         return .{ .indices = indices, .slice = copy_buf };
     }
 
-    // TODO infallible versions of these functions (or comptime magic) for fast runtime lookups. maybe a view abstraction over a constantpool
+    // TODO infallible versions of these functions (or comptime magic) for fast runtime lookups. maybe a view abstraction over a constantpool.
+    //   return an error but in infallible declare errorset as error{}, should be optimised out
     // TODO special case of `this` class reference, already resolved
 
     pub fn lookupClass(self: Self, idx_cp: u16) ?[]const u8 {
@@ -477,6 +478,27 @@ pub const ConstantPool = struct {
 
         const name_idx = std.mem.readInt(u16, &cls[0], std.builtin.Endian.Big);
         return self.lookupUtf8(name_idx);
+    }
+
+    pub fn lookupMethodOrInterfaceMethod(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8, is_interface: bool } {
+        const method = self.lookupMany(idx_cp, .{ Tag.methodRef, Tag.interfaceMethodRef }) orelse return null;
+        const cls_idx = std.mem.readInt(u16, &method.body[0], std.builtin.Endian.Big);
+        const name_and_type_idx = std.mem.readInt(u16, &method.body[2], std.builtin.Endian.Big);
+
+        const cls = self.lookupClass(cls_idx) orelse return null;
+        const name_and_type = self.lookupNameAndType(name_and_type_idx) orelse return null;
+        return .{ .name = name_and_type.name, .ty = name_and_type.ty, .cls = cls, .is_interface = method.tag == Tag.interfaceMethodRef };
+    }
+
+    fn lookupNameAndType(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8 } {
+        const body = self.lookup(idx_cp, Tag.nameAndType) orelse return null;
+        const name_idx = std.mem.readInt(u16, &body[0], std.builtin.Endian.Big);
+        const ty_idx = std.mem.readInt(u16, &body[2], std.builtin.Endian.Big);
+
+        return .{
+            .name = self.lookupUtf8(name_idx) orelse return null,
+            .ty = self.lookupUtf8(ty_idx) orelse return null,
+        };
     }
 
     pub fn lookupUtf8(self: Self, idx_cp: u16) ?[]const u8 {
@@ -494,6 +516,20 @@ pub const ConstantPool = struct {
         }
 
         return self.indices[idx_cp];
+    }
+
+    /// Checks one-based index. Returns slice starting at body of element
+    fn lookupMany(self: Self, index: u16, comptime tags: anytype) ?struct { body: []const u8, tag: Tag } {
+        const slice_idx = self.validateIndexCp(index) orelse return null;
+        inline for (@typeInfo(@TypeOf(tags)).Struct.fields) |decl| {
+            const enum_value = @ptrCast(*const Tag, decl.default_value.?).*;
+
+            if (self.slice[slice_idx] == @enumToInt(enum_value))
+                return .{ .body = self.slice[slice_idx + 1 ..], .tag = enum_value };
+        }
+
+        std.log.err("constant pool index {d} is a {d}, not one of expected {any}", .{ index, self.slice[slice_idx], tags });
+        return null;
     }
 
     /// Checks one-based index. Returns slice starting at body of element

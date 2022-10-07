@@ -788,24 +788,79 @@ pub const InsnContext = struct {
         return b[1];
     }
 
+    const ClassResolution = enum {
+        resolve_only,
+        ensure_initialised,
+    };
+
     // TODO exception
-    fn resolveClass(self: @This(), idx: u16) VmClassRef {
+    fn resolveClass(self: @This(), idx: u16, comptime resolution: ClassResolution) VmClassRef {
         const name = self.constantPool().lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
 
         // resolve
         std.log.debug("resolving class {s}", .{name});
         const loaded = self.thread.global.classloader.loadClass(name, self.frame.class.loader) catch std.debug.panic("cant load", .{});
         // TODO cache in constant pool
+
+        switch (resolution) {
+            .resolve_only => {},
+            .ensure_initialised => {
+                object.VmClass.ensureInitialised(loaded);
+                // TODO cache initialised state in constant pool too
+
+            },
+        }
+
         return loaded;
+    }
+
+    /// * looks for both method and interface method constants
+    /// * resolves the class
+    /// * ensures static
+    fn resolveStaticMethod(self: @This(), idx: u16) void {
+        // lookup method name/type/class
+        const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
+
+        // resolve class
+        const class_ref = self.thread.global.classloader.loadClass(info.cls, self.frame.class.loader) catch std.debug.panic("cant load", .{}); // TODO
+        const class = class_ref.get();
+
+        if (class.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
+
+        // find method in class/superclasses/interfaces
+        const method = class.findMethodRecursive(info.name, info.ty) orelse @panic("NoSuchMethodError");
+
+        // ensure callable
+        if (!method.flags.contains(.static)) @panic("IncompatibleClassChangeError"); // TODO
+        if (method.flags.contains(.abstract)) @panic("NoSuchMethodError"); // TODO
+        // TODO check access control?
+
+        // invoke with args
+        self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack()) catch std.debug.panic("clinit failed", .{});
+
+        // push args onto new frame stack
+
+        // invoke new frame
+
+        @panic("TODO resolve static");
     }
 
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
         return &self.frame.operands;
     }
 
+    fn localVars(self: @This()) *frame.Frame.LocalVars {
+        return &self.frame.local_vars;
+    }
+
     /// If method returns not void, takes return value from top of stack
     fn returnToCaller(self: @This()) void {
         self.mutable.control_flow = .return_;
+    }
+
+    fn loadLocalVar(self: @This(), idx: u16) void {
+        const value = self.localVars().get(usize, idx).*;
+        self.operandStack().pushRaw(value);
     }
 };
 
@@ -815,9 +870,8 @@ pub const handlers = struct {
         const idx = ctxt.readU16();
 
         // resolve and init class
-        const cls = ctxt.resolveClass(idx);
-        object.VmClass.ensureInitialised(cls);
-        // TODO store in some constant pool flags that this class is initialised too
+        const cls = ctxt.resolveClass(idx, .ensure_initialised);
+        _ = cls;
 
         unreachable; // TODO instantiate object and push onto stack
     }
@@ -835,10 +889,43 @@ pub const handlers = struct {
     pub fn _return(ctxt: InsnContext) void {
         ctxt.returnToCaller();
     }
+    pub fn _ireturn(ctxt: InsnContext) void {
+        ctxt.returnToCaller();
+    }
+    pub fn _lreturn(ctxt: InsnContext) void {
+        ctxt.returnToCaller();
+    }
+    pub fn _freturn(ctxt: InsnContext) void {
+        ctxt.returnToCaller();
+    }
+    pub fn _dreturn(ctxt: InsnContext) void {
+        ctxt.returnToCaller();
+    }
+    pub fn _areturn(ctxt: InsnContext) void {
+        ctxt.returnToCaller();
+    }
 
     pub fn _dup(ctxt: InsnContext) void {
         var stack = ctxt.operandStack();
         stack.pushRaw(stack.peekRaw());
+    }
+
+    pub fn _invokestatic(ctxt: InsnContext) void {
+        const method = ctxt.resolveStaticMethod(ctxt.readU16());
+        _ = method;
+    }
+
+    pub fn _iload_0(ctxt: InsnContext) void {
+        ctxt.loadLocalVar(0);
+    }
+    pub fn _iload_1(ctxt: InsnContext) void {
+        ctxt.loadLocalVar(1);
+    }
+    pub fn _iload_2(ctxt: InsnContext) void {
+        ctxt.loadLocalVar(2);
+    }
+    pub fn _iload_3(ctxt: InsnContext) void {
+        ctxt.loadLocalVar(3);
     }
 };
 
