@@ -125,8 +125,11 @@ pub fn VmRef(comptime T: type) type {
             }
         };
 
-        /// Data is undefined
-        fn new_uninit(size: usize, comptime alignment: u29) !Strong {
+        /// Size is extra size on top of base object size, must be consistent with vmRefSize.
+        /// Alignment is that of the actual stored inner type, not T
+        /// Returned data is undefined
+        pub fn new_uninit(size: usize, comptime override_alignment: ?u29) !Strong {
+            const alignment = override_alignment orelse @alignOf(T);
             const alloc = global_allocator();
             const padding = std.mem.alignForward(@sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
             const alloc_size = @sizeOf(InnerBlock) + padding + @sizeOf(T) + size;
@@ -147,7 +150,7 @@ pub fn VmRef(comptime T: type) type {
 
         /// Data is undefined
         fn new() !Strong {
-            return new_uninit(0, @alignOf(T));
+            return new_uninit(0, null);
         }
     };
 }

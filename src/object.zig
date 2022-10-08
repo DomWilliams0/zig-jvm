@@ -7,6 +7,11 @@ const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
 const Method = cafebabe.Method;
 
+// TODO merge these with cafebabe class flags? merge at comptime possible?
+pub const ClassStatus = packed struct {
+    ty: enum(u2) { object, array, primitive },
+};
+
 /// Always allocated on GC heap
 pub const VmClass = struct {
     constant_pool: cafebabe.ConstantPool,
@@ -17,6 +22,7 @@ pub const VmClass = struct {
     loader: classloader.WhichLoader,
     init_state: InitState = .uninitialised,
     monitor: Monitor = .{}, // TODO put into java.lang.Class object instance instead
+    status: ClassStatus,
 
     /// Only fields for this class
     u: union {
@@ -53,12 +59,15 @@ pub const VmClass = struct {
     }
 
     // ---------- field accessors
+    fn findStaticField(self: @This(), name: []const u8, desc: []const u8) ?FieldId {
+        return lookupFieldId(self.u.obj.fields, name, desc, .{ .static = true });
+    }
+
     // TODO expose generic versions for each type instead
-    pub fn getField(self: *@This(), comptime T: type, field: FieldId) *T {
+    pub fn getStaticField(self: *@This(), comptime T: type, field: FieldId) *T {
         switch (field) {
-            .instance_offset => |offset| {
-                var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
-                return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+            .instance_offset => {
+                @panic("not a static field ID");
             },
             .static_index => |idx| {
                 const ptr = &self.u.obj.fields[idx].u.value;
@@ -107,6 +116,16 @@ pub const VmClass = struct {
                 break &self.u.obj.methods[i];
             }
         } else null;
+    }
+
+    pub fn isObject(self: @This()) bool {
+        return self.status.ty == .object;
+    }
+    pub fn isPrimitive(self: @This()) bool {
+        return self.status.ty == .primitive;
+    }
+    pub fn isArray(self: @This()) bool {
+        return self.status.ty == .array;
     }
 
     pub fn ensureInitialised(self: VmClassRef) void {
@@ -173,6 +192,26 @@ pub const VmClass = struct {
         self_mut.init_state = .initialised;
         self_mut.monitor.notifyAll();
     }
+
+    /// Self is cloned to pass to object
+    pub fn instantiateObject(self: VmClassRef) VmObjectRef {
+        const cls = self.get();
+        std.log.debug("instantiating object of class {s}", .{cls.name});
+
+        // allocate
+        const layout = cls.u.obj.layout;
+        var obj_ref = VmObjectRef.new_uninit(layout.instance_offset, null) catch @panic("out of memory");
+        obj_ref.get().* = VmObject{
+            .class = self.clone(),
+            .storage = {},
+        };
+
+        // set default field values, luckily all zero bits is +0.0 for floats+doubles, and null ptrs (TODO really for objects?)
+        var field_bytes = @ptrCast([*]u8, @alignCast(1, &obj_ref.get().storage));
+        std.mem.set(u8, field_bytes[0..layout.instance_offset], 0);
+
+        return obj_ref;
+    }
 };
 
 const Monitor = struct {
@@ -187,14 +226,36 @@ const Monitor = struct {
 
 /// Header for objects, variable sized based on class (array, fields, etc)
 pub const VmObject = struct {
-    class: *VmClass,
+    class: VmClassRef,
+    /// Where variable data storage begins
+    storage: void,
 
     // ---------- VmRef interface
-    pub fn vmRefSize(_: *const VmObject) usize {
-        return 0; // TODO
+    pub fn vmRefSize(self: *const VmObject) usize {
+        const cls = self.class.get();
+        return if (cls.isObject())
+            cls.u.obj.layout.instance_offset
+        else if (cls.isArray()) @panic("TODO array instantiation") else 0;
     }
-    pub fn vmRefDrop(_: *@This()) void {
-        // TODO
+    pub fn vmRefDrop(self: *@This()) void {
+        self.class.drop();
+    }
+
+    /// Instance field
+    pub fn getField(self: *@This(), comptime T: type, field: FieldId) *T {
+        switch (field) {
+            .instance_offset => |offset| {
+                var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+                return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+            },
+            .static_index => {
+                @panic("not an instance field ID");
+            },
+        }
+    }
+
+    fn findInstanceField(self: @This(), name: []const u8, desc: []const u8) ?FieldId {
+        return lookupFieldId(self.class.get().u.obj.fields, name, desc, .{ .static = false });
     }
 };
 
@@ -209,7 +270,7 @@ pub const FieldId = union(enum) {
 };
 
 pub const ObjectLayout = struct {
-    /// Exact offset to start of fields from start of object
+    /// Exact offset from start of object to end of field storage
     instance_offset: u16 = @sizeOf(VmObject),
 };
 
@@ -282,7 +343,6 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
 //         // TODO multidim - nah ignore
 //     }
 
-// TODO pass enum field map instead of 2 sets
 fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
     const flags = makeFlagsAndAntiFlags(Field.Flags, input_flags);
     for (fields) |f, i| {
@@ -296,8 +356,6 @@ fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, inpu
 
     return null;
 }
-
-// -- tests
 
 fn test_helper() type {
     return struct {
@@ -333,6 +391,15 @@ fn test_helper() type {
             mkTestField(.{ .name = "myArray", .desc = "[Ljava/lang/Object;" }),
             mkTestField(.{ .name = "myArrayPrivate", .desc = "[Ljava/lang/Object;", .public = false }),
         };
+
+        fn checkFieldValue(comptime T: type, obj: VmObjectRef, name: []const u8, desc: []const u8, val: T) !void {
+            return std.testing.expectEqual(val, obj.get().getField(T, obj.get().findInstanceField(name, desc) orelse unreachable).*);
+        }
+
+        fn setFieldValue(value: anytype, obj: VmObjectRef, name: []const u8, desc: []const u8) void {
+            const f = obj.get().getField(@TypeOf(value), obj.get().findInstanceField(name, desc) orelse unreachable);
+            f.* = value;
+        }
     };
 }
 
@@ -384,8 +451,79 @@ test "allocate class" {
     cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined } }; // only instance fields, need to concat super and this fields together
     defer cls.drop();
 
-    const static_int_val = cls.get().getField(i32, lookupFieldId(cls.get().u.obj.fields, "myIntStatic", "I", .{}) orelse unreachable);
+    const static_int_val = cls.get().getStaticField(i32, cls.get().findStaticField("myIntStatic", "I") orelse unreachable);
     static_int_val.* = 0x12345678;
+}
+
+test "allocate object" {
+    // std.testing.log_level = .debug;
+    const helper = test_helper();
+    var alloc = std.testing.allocator;
+
+    var layout = ObjectLayout{};
+    try defineObjectLayout(alloc, &helper.fields, &layout);
+
+    // init global allocator
+    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    defer handle.deinit();
+
+    // allocate class with static storage
+    const cls = try vm_alloc.allocClass();
+    cls.get().name = "Dummy";
+    cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined } }; // only instance fields
+    defer cls.drop();
+
+    // allocate object
+    const obj = VmClass.instantiateObject(cls);
+    defer obj.drop();
+
+    // check default field values
+    try helper.checkFieldValue(i64, obj, "myLong", "J", 0);
+    try helper.checkFieldValue(f64, obj, "myDouble", "D", 0.0);
+    try helper.checkFieldValue(i32, obj, "myInt", "I", 0);
+    try helper.checkFieldValue(i32, obj, "myInt2", "I", 0);
+    try helper.checkFieldValue(bool, obj, "myBool", "Z", false);
+
+    // set values and ensure no overlap
+    helper.setFieldValue(@as(i64, 1234_5678_1234), obj, "myLong", "J");
+
+    try helper.checkFieldValue(i64, obj, "myLong", "J", 1234_5678_1234);
+    try helper.checkFieldValue(f64, obj, "myDouble", "D", 0.0);
+    try helper.checkFieldValue(i32, obj, "myInt", "I", 0);
+    try helper.checkFieldValue(i32, obj, "myInt2", "I", 0);
+    try helper.checkFieldValue(bool, obj, "myBool", "Z", false);
+
+    helper.setFieldValue(@as(f64, -123.45), obj, "myDouble", "D");
+
+    try helper.checkFieldValue(i64, obj, "myLong", "J", 1234_5678_1234);
+    try helper.checkFieldValue(f64, obj, "myDouble", "D", -123.45);
+    try helper.checkFieldValue(i32, obj, "myInt", "I", 0);
+    try helper.checkFieldValue(i32, obj, "myInt2", "I", 0);
+    try helper.checkFieldValue(bool, obj, "myBool", "Z", false);
+
+    helper.setFieldValue(true, obj, "myBool", "Z"); // change the order a bit
+
+    try helper.checkFieldValue(i64, obj, "myLong", "J", 1234_5678_1234);
+    try helper.checkFieldValue(f64, obj, "myDouble", "D", -123.45);
+    try helper.checkFieldValue(i32, obj, "myInt", "I", 0);
+    try helper.checkFieldValue(i32, obj, "myInt2", "I", 0);
+    try helper.checkFieldValue(bool, obj, "myBool", "Z", true);
+
+    helper.setFieldValue(@as(i32, 123456), obj, "myInt", "I");
+
+    try helper.checkFieldValue(i64, obj, "myLong", "J", 1234_5678_1234);
+    try helper.checkFieldValue(f64, obj, "myDouble", "D", -123.45);
+    try helper.checkFieldValue(i32, obj, "myInt", "I", 123456);
+    try helper.checkFieldValue(i32, obj, "myInt2", "I", 0);
+    try helper.checkFieldValue(bool, obj, "myBool", "Z", true);
+
+    helper.setFieldValue(@as(i32, 789012), obj, "myInt2", "I");
+
+    try helper.checkFieldValue(i64, obj, "myLong", "J", 1234_5678_1234);
+    try helper.checkFieldValue(f64, obj, "myDouble", "D", -123.45);
+    try helper.checkFieldValue(i32, obj, "myInt", "I", 123456);
+    try helper.checkFieldValue(i32, obj, "myInt2", "I", 789012);
+    try helper.checkFieldValue(bool, obj, "myBool", "Z", true);
 }
 
 test "vmref size" {
@@ -420,7 +558,7 @@ fn makeFlagsAndAntiFlags(comptime E: type, comptime flags: anytype) struct {
     return .{ .flags = yes, .antiflags = no };
 }
 
-test "flags and antifalgs" {
+test "flags and antiflags" {
     const Flags = enum { private, public, static, final };
     const input = .{ .public = true, .static = false };
 

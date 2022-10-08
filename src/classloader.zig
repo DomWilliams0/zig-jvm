@@ -115,6 +115,7 @@ pub const ClassLoader = struct {
         // TODO exception
         if (name.len < 2) std.debug.panic("class name too short {s}", .{name});
 
+        // TODO reuse classstatus enum
         const ArrayType = enum {
             not,
             primitive,
@@ -225,7 +226,8 @@ pub const ClassLoader = struct {
             .name = try self.alloc.dupe(u8, name),
             .u = .{ .array = .{ .elem_cls = elem_class_ref, .dims = elem_dims + 1 } },
             .constant_pool = undefined,
-            .super_cls = java_lang_Object,
+            .status = .{ .ty = .array },
+            .super_cls = java_lang_Object.clone(),
             .interfaces = &.{}, // TODO
             .loader = loader.clone(),
         };
@@ -234,6 +236,7 @@ pub const ClassLoader = struct {
     }
 
     // TODO cached/better lookup for known bootstrap classes
+    /// Returns BORROWED reference
     fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?object.VmClassRef {
         return switch (self.getLoadState(name, .bootstrap)) {
             .loaded => |cls| cls,
@@ -260,6 +263,7 @@ pub const ClassLoader = struct {
             .u = .{ .primitive = ty },
             .constant_pool = undefined, // unused
             .super_cls = null,
+            .status = .{ .ty = .primitive },
             .interfaces = &.{},
             .loader = .bootstrap,
         };
@@ -289,6 +293,7 @@ pub const ClassLoader = struct {
             .name = classfile.this_cls,
             .super_cls = super_class,
             .interfaces = &.{}, // TODO
+            .status = .{ .ty = .object },
             .u = .{
                 .obj = .{
                     .fields = classfile.fields,

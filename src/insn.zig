@@ -869,9 +869,11 @@ pub const handlers = struct {
         // resolve and init class
         const name = ctxt.constantPool().lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
         const cls = ctxt.resolveClass(name, .ensure_initialised);
-        _ = cls;
 
-        unreachable; // TODO instantiate object and push onto stack
+        // instantiate object and push onto stack
+        const obj = object.VmClass.instantiateObject(cls);
+
+        ctxt.operandStack().push(obj);
     }
 
     pub fn _bipush(ctxt: InsnContext) void {
