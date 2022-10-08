@@ -892,15 +892,17 @@ pub const InsnContext = struct {
         self.mutable.control_flow = .return_;
     }
 
-    fn loadLocalVar(self: @This(), idx: u16) void {
-        const value = self.localVars().getRaw(idx).*;
-        self.operandStack().pushRaw(value);
-    }
-
     fn store(self: @This(), comptime T: type, idx: u16) void {
         _ = T; // TODO use for verification/debug checking
         const val = self.operandStack().popRaw();
         self.localVars().getRaw(idx).* = val;
+    }
+
+    fn load(self: @This(), comptime T: type, idx: u16) void {
+        _ = T; // TODO use for verification/debug checking
+        // TODO need to bump ref count?
+        const val = self.localVars().getRaw(idx).*;
+        self.operandStack().pushRaw(val);
     }
 };
 
@@ -922,6 +924,86 @@ pub const handlers = struct {
     pub fn _bipush(ctxt: InsnContext) void {
         const val = ctxt.readU8();
         ctxt.operandStack().push(@as(i32, val));
+    }
+
+    pub fn _iload(ctxt: InsnContext) void {
+        ctxt.load(i32, ctxt.readU8());
+    }
+    pub fn _iload_0(ctxt: InsnContext) void {
+        ctxt.load(i32, 0);
+    }
+    pub fn _iload_1(ctxt: InsnContext) void {
+        ctxt.load(i32, 1);
+    }
+    pub fn _iload_2(ctxt: InsnContext) void {
+        ctxt.load(i32, 2);
+    }
+    pub fn _iload_3(ctxt: InsnContext) void {
+        ctxt.load(i32, 3);
+    }
+
+    pub fn _fload(ctxt: InsnContext) void {
+        ctxt.load(f32, ctxt.readU8());
+    }
+    pub fn _fload_0(ctxt: InsnContext) void {
+        ctxt.load(f32, 0);
+    }
+    pub fn _fload_1(ctxt: InsnContext) void {
+        ctxt.load(f32, 1);
+    }
+    pub fn _fload_2(ctxt: InsnContext) void {
+        ctxt.load(f32, 2);
+    }
+    pub fn _fload_3(ctxt: InsnContext) void {
+        ctxt.load(f32, 3);
+    }
+
+    pub fn _lload(ctxt: InsnContext) void {
+        ctxt.load(i64, ctxt.readU8());
+    }
+    pub fn _lload_0(ctxt: InsnContext) void {
+        ctxt.load(i64, 0);
+    }
+    pub fn _lload_1(ctxt: InsnContext) void {
+        ctxt.load(i64, 1);
+    }
+    pub fn _lload_2(ctxt: InsnContext) void {
+        ctxt.load(i64, 2);
+    }
+    pub fn _lload_3(ctxt: InsnContext) void {
+        ctxt.load(i64, 3);
+    }
+
+    pub fn _dload(ctxt: InsnContext) void {
+        ctxt.load(f64, ctxt.readU8());
+    }
+    pub fn _dload_0(ctxt: InsnContext) void {
+        ctxt.load(f64, 0);
+    }
+    pub fn _dload_1(ctxt: InsnContext) void {
+        ctxt.load(f64, 1);
+    }
+    pub fn _dload_2(ctxt: InsnContext) void {
+        ctxt.load(f64, 2);
+    }
+    pub fn _dload_3(ctxt: InsnContext) void {
+        ctxt.load(f64, 3);
+    }
+
+    pub fn _aload(ctxt: InsnContext) void {
+        ctxt.load(VmObjectRef, ctxt.readU8());
+    }
+    pub fn _aload_0(ctxt: InsnContext) void {
+        ctxt.load(VmObjectRef, 0);
+    }
+    pub fn _aload_1(ctxt: InsnContext) void {
+        ctxt.load(VmObjectRef, 1);
+    }
+    pub fn _aload_2(ctxt: InsnContext) void {
+        ctxt.load(VmObjectRef, 2);
+    }
+    pub fn _aload_3(ctxt: InsnContext) void {
+        ctxt.load(VmObjectRef, 3);
     }
 
     pub fn _istore(ctxt: InsnContext) void {
@@ -988,6 +1070,22 @@ pub const handlers = struct {
         ctxt.store(f64, 3);
     }
 
+    pub fn _astore(ctxt: InsnContext) void {
+        ctxt.store(VmObjectRef, ctxt.readU8());
+    }
+    pub fn _astore_0(ctxt: InsnContext) void {
+        ctxt.store(VmObjectRef, 0);
+    }
+    pub fn _astore_1(ctxt: InsnContext) void {
+        ctxt.store(VmObjectRef, 1);
+    }
+    pub fn _astore_2(ctxt: InsnContext) void {
+        ctxt.store(VmObjectRef, 2);
+    }
+    pub fn _astore_3(ctxt: InsnContext) void {
+        ctxt.store(VmObjectRef, 3);
+    }
+
     pub fn _putstatic(ctxt: InsnContext) void {
         // TODO
         _ = ctxt;
@@ -1022,19 +1120,6 @@ pub const handlers = struct {
     }
     pub fn _invokespecial(ctxt: InsnContext) void {
         ctxt.invokeSpecialMethod(ctxt.readU16());
-    }
-
-    pub fn _iload_0(ctxt: InsnContext) void {
-        ctxt.loadLocalVar(0);
-    }
-    pub fn _iload_1(ctxt: InsnContext) void {
-        ctxt.loadLocalVar(1);
-    }
-    pub fn _iload_2(ctxt: InsnContext) void {
-        ctxt.loadLocalVar(2);
-    }
-    pub fn _iload_3(ctxt: InsnContext) void {
-        ctxt.loadLocalVar(3);
     }
 };
 
