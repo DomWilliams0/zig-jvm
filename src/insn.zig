@@ -774,8 +774,12 @@ pub const InsnContext = struct {
         return self.frame.code_window.?;
     }
 
+    fn class(self: Self) *object.VmClass {
+        return self.frame.class.get();
+    }
+
     fn constantPool(self: Self) *cafebabe.ConstantPool {
-        return &self.frame.class.constant_pool;
+        return &self.class().constant_pool;
     }
 
     fn readU16(self: Self) u16 {
@@ -794,10 +798,11 @@ pub const InsnContext = struct {
     };
 
     // TODO exception
+    /// Returns BORROWED reference
     fn resolveClass(self: @This(), name: []const u8, comptime resolution: ClassResolution) VmClassRef {
         // resolve
         std.log.debug("resolving class {s}", .{name});
-        const loaded = self.thread.global.classloader.loadClass(name, self.frame.class.loader) catch std.debug.panic("cant load", .{});
+        const loaded = self.thread.global.classloader.loadClass(name, self.class().loader) catch std.debug.panic("cant load", .{});
         // TODO cache in constant pool
 
         switch (resolution) {
@@ -811,21 +816,19 @@ pub const InsnContext = struct {
         return loaded;
     }
 
-    /// * looks for both method and interface method constants
-    /// * resolves the class
-    /// * ensures static
     fn invokeStaticMethod(self: @This(), idx: u16) void {
         // lookup method name/type/class
         const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
+        if (info.is_interface) @panic("TODO interface method resolution");
 
         // resolve class and ensure initialised
         const class_ref = self.resolveClass(info.cls, .ensure_initialised);
-        const class = class_ref.get();
+        const cls = class_ref.get();
 
-        if (class.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
+        if (cls.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
 
         // find method in class/superclasses/interfaces
-        const method = class.findMethodRecursive(info.name, info.ty) orelse @panic("NoSuchMethodError");
+        const method = cls.findMethodRecursive(info.name, info.ty) orelse @panic("NoSuchMethodError");
 
         // ensure callable
         if (!method.flags.contains(.static)) @panic("IncompatibleClassChangeError"); // TODO
@@ -834,6 +837,46 @@ pub const InsnContext = struct {
 
         // invoke with caller frame
         self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack()) catch std.debug.panic("clinit failed", .{});
+    }
+
+    fn invokeSpecialMethod(self: @This(), idx: u16) void {
+        // lookup method name/type/class
+        const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
+        if (info.is_interface) @panic("TODO interface method resolution");
+
+        // resolve referenced class
+        const referenced_cls_ref = self.resolveClass(info.cls, .resolve_only);
+        const current_supercls = self.class().super_cls;
+
+        // decide which class to use
+        // ignore ACC_SUPER
+        const cls = if (!std.mem.eql(u8, info.name, "<init>") and !referenced_cls_ref.get().flags.contains(.interface) and current_supercls != null and current_supercls.?.cmpPtr(referenced_cls_ref)) //
+            current_supercls.? // checked
+        else
+            referenced_cls_ref;
+
+        // resolve method on this class
+        const method: *const cafebabe.Method = blk: {
+            const c = cls.get();
+
+            // check self and supers
+            if (c.findMethodInSelfOrSupers(info.name, info.ty)) |m| break :blk m;
+
+            // special case for invokespecial: check Object
+            if (c.flags.contains(.interface)) {
+                const java_lang_Object = self.thread.global.classloader.getLoadedBootstrapClass("java/lang/Object") orelse unreachable; // TODO faster lookup
+                if (java_lang_Object.get().findMethodInThisOnly(info.name, info.ty, .{ .public = true })) |m| break :blk m;
+            }
+
+            // check for maximally-specific in superinterfaces
+            @panic("TODO search superinterfaces"); // and throw the right exceptions
+            // break :blk null;
+        }; // orelse @panic("no such method exception?");
+
+        std.log.debug("resolved method to {s}.{s}", .{ cls.get().name, method.name });
+
+        // invoke with caller frame
+        self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack()) catch std.debug.panic("invokespecial failed", .{});
     }
 
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
@@ -976,6 +1019,9 @@ pub const handlers = struct {
 
     pub fn _invokestatic(ctxt: InsnContext) void {
         ctxt.invokeStaticMethod(ctxt.readU16());
+    }
+    pub fn _invokespecial(ctxt: InsnContext) void {
+        ctxt.invokeSpecialMethod(ctxt.readU16());
     }
 
     pub fn _iload_0(ctxt: InsnContext) void {

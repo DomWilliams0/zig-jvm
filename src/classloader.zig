@@ -109,7 +109,8 @@ pub const ClassLoader = struct {
     }
 
     /// Main entrypoint - name can be array or class name. Loads now if not already.
-    /// Loader is cloned if needed for loading
+    /// Loader is cloned if needed for loading.
+    /// Returns BORROWED reference
     // TODO return exception or error type
     pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) anyerror!object.VmClassRef {
         // TODO exception
@@ -237,7 +238,7 @@ pub const ClassLoader = struct {
 
     // TODO cached/better lookup for known bootstrap classes
     /// Returns BORROWED reference
-    fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?object.VmClassRef {
+    pub fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?object.VmClassRef {
         return switch (self.getLoadState(name, .bootstrap)) {
             .loaded => |cls| cls,
             else => null,

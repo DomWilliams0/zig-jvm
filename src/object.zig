@@ -76,7 +76,8 @@ pub const VmClass = struct {
         }
     }
 
-    /// Looks in superclasses and interfaces (5.4.3.3. Method Resolution)
+    /// Looks in superclasses and interfaces (5.4.3.3. Method Resolution).
+    /// Does NOT check if class is not an interface, the caller should do this if needed
     pub fn findMethodRecursive(self: @This(), name: []const u8, desc: []const u8) ?*const Method {
 
         // TODO if signature polymorphic, resolve class names mentioned in descriptor too
@@ -88,7 +89,8 @@ pub const VmClass = struct {
         @panic("TODO find method in super interfaces");
     }
 
-    fn findMethodInSelfOrSupers(
+    /// Checks self and super classes only
+    pub fn findMethodInSelfOrSupers(
         self: @This(),
         name: []const u8,
         desc: []const u8,

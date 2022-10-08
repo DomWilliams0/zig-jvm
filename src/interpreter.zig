@@ -25,7 +25,6 @@ pub const Interpreter = struct {
     }
 
     pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) !void {
-
         // TODO format on method to show class.method
         std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
         defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
@@ -53,11 +52,25 @@ pub const Interpreter = struct {
 
         // push args on from calling frame
         var param_count = method.descriptor.param_count;
-        if (!method.flags.contains(.static)) param_count += 1; // this param
-        if (param_count > 0) {
-            // TODO panic/unreachable if caller stack/args not passed
+        const is_instance_method = !method.flags.contains(.static);
+
+        if (is_instance_method or param_count > 0) {
+            // needs args
+            // TODO panic/unreachable if caller stack/args not passed, but temporarily not because main(String[] args) is not implemented
             if (caller) |caller_stack| {
+                if (is_instance_method) {
+                    // null check `this` param
+                    const this_obj = caller_stack.peekAt(object.VmObjectRef, param_count);
+                    if (this_obj.isNull()) @panic("NPE");
+
+                    // include in count
+                    param_count += 1;
+                }
+
+                // copy args from caller to callee local vars
                 caller_stack.transferToCallee(&local_vars, method.descriptor);
+            } else {
+                std.log.warn("not passing expected args!", .{});
             }
         }
 
@@ -68,7 +81,7 @@ pub const Interpreter = struct {
         errdefer alloc.destroy(f);
         f.* = .{
             .method = method,
-            .class = class.get(),
+            .class = class.clone(),
             .operands = operands,
             .local_vars = local_vars,
             .code_window = code_window,
@@ -96,7 +109,7 @@ pub const Interpreter = struct {
             var i: u32 = 0;
             try std.fmt.formatBuf("call stack: ", options, writer);
             while (top) |f| {
-                try std.fmt.format(writer, "\n * {d}) {s}.{s}", .{ i, f.class.name, f.method.name });
+                try std.fmt.format(writer, "\n * {d}) {s}.{s}", .{ i, f.class.get().name, f.method.name });
                 top = f.parent_frame;
                 i += 1;
             }
@@ -136,7 +149,7 @@ fn interpreterLoop() void {
         .return_ => {
             const this_frame = thread.interpreter.top_frame.?;
             const caller_frame = this_frame.parent_frame;
-            std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.name, this_frame.method.name });
+            std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.get().name, this_frame.method.name });
 
             if (ctxt.frame.method.descriptor.isNotVoid()) {
                 const ret_value = this_frame.operands.popRaw();

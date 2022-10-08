@@ -104,6 +104,11 @@ pub fn VmRef(comptime T: type) type {
             return .{ .ptr = ptr };
         }
 
+        pub fn isNull(self: Strong) bool {
+            // TODO use a singleton ptr comparison instead of real null
+            return @ptrToInt(self.ptr) == 0;
+        }
+
         // }; // end of Strong
 
         pub const Nullable = ?*InnerRef;

@@ -10,7 +10,7 @@ pub const Frame = struct {
     operands: OperandStack,
     local_vars: LocalVars,
     method: *const cafebabe.Method,
-    class: *object.VmClass,
+    class: object.VmClassRef,
 
     /// Null if not java method
     code_window: ?[*]const u8,
@@ -65,6 +65,13 @@ pub const Frame = struct {
         pub fn peekRaw(self: @This()) usize {
             if (logging) std.debug.assert(!self.isEmpty());
             return (self.stack - 1)[0];
+        }
+
+        /// 0 = current top, 1 = next under top
+        pub fn peekAt(self: @This(), comptime T: type, idx: u16) T {
+            if (logging) std.debug.assert(!self.isEmpty());
+            const val = (self.stack - 1 - idx)[0];
+            return convert(T).from(val);
         }
 
         fn isEmpty(self: @This()) bool {
@@ -337,9 +344,13 @@ test "operand stack" {
 
     try std.testing.expect(stack.isEmpty());
     stack.push(@as(i32, -50));
+
     try std.testing.expect(!stack.isEmpty());
+    try std.testing.expectEqual(@as(i32, -50), stack.peekAt(i32, 0));
     stack.push(@as(u16, 123));
     try std.testing.expect(!stack.isEmpty());
+    try std.testing.expectEqual(@as(u16, 123), stack.peekAt(u16, 0));
+    try std.testing.expectEqual(@as(i32, -50), stack.peekAt(i32, 1));
 
     try std.testing.expectEqual(@as(u16, 123), stack.pop(u16));
     try std.testing.expect(!stack.isEmpty());
