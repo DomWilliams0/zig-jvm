@@ -188,6 +188,14 @@ const Monitor = struct {
 /// Header for objects, variable sized based on class (array, fields, etc)
 pub const VmObject = struct {
     class: *VmClass,
+
+    // ---------- VmRef interface
+    pub fn vmRefSize(_: *const VmObject) usize {
+        return 0; // TODO
+    }
+    pub fn vmRefDrop(_: *@This()) void {
+        // TODO 
+    }
 };
 
 pub const VmClassRef = vm_alloc.VmRef(VmClass);

@@ -50,4 +50,7 @@ pub fn main() !void {
     try jvm.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
 
     std.log.info("done", .{});
+
+    // TODO fix leaks
+    defer _ = gpa.detectLeaks(); // run after other defers
 }

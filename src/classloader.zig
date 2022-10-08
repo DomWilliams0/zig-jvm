@@ -30,6 +30,13 @@ pub const WhichLoader = union(enum) {
             .user => |obj| .{ .user = obj.clone() },
         };
     }
+
+    fn deinit(self: @This()) void {
+        switch (self) {
+            .user => |obj| obj.drop(),
+            .bootstrap => {},
+        }
+    }
 };
 pub const E = error{
     ClassNotFound, // TODO exception instead
@@ -79,6 +86,19 @@ pub const ClassLoader = struct {
     pub fn deinit(self: *@This()) void {
         self.lock.lock();
         defer self.lock.unlock();
+
+        // drop all class references
+        var it = self.classes.iterator();
+        while (it.next()) |entry| {
+            const key = entry.key_ptr.*;
+            self.alloc.free(key.name);
+            key.loader.deinit();
+            switch(entry.value_ptr.*) {
+                .loaded => |cls| cls.drop(),
+                .failed => {}, // TODO drop exception
+                else => {},
+            }
+        }
 
         self.classes.deinit(self.alloc);
         self.classes = .{};
