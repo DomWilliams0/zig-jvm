@@ -52,5 +52,5 @@ pub fn main() !void {
     std.log.info("done", .{});
 
     // TODO fix leaks
-    defer _ = gpa.detectLeaks(); // run after other defers
+    // defer _ = gpa.detectLeaks(); // run after other defers
 }

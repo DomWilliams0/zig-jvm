@@ -93,7 +93,7 @@ pub const ClassLoader = struct {
             const key = entry.key_ptr.*;
             self.alloc.free(key.name);
             key.loader.deinit();
-            switch(entry.value_ptr.*) {
+            switch (entry.value_ptr.*) {
                 .loaded => |cls| cls.drop(),
                 .failed => {}, // TODO drop exception
                 else => {},

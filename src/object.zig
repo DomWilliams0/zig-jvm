@@ -194,7 +194,7 @@ pub const VmObject = struct {
         return 0; // TODO
     }
     pub fn vmRefDrop(_: *@This()) void {
-        // TODO 
+        // TODO
     }
 };
 
