@@ -893,16 +893,14 @@ pub const InsnContext = struct {
     }
 
     fn store(self: @This(), comptime T: type, idx: u16) void {
-        _ = T; // TODO use for verification/debug checking
-        const val = self.operandStack().popRaw();
-        self.localVars().getRaw(idx).* = val;
+        const val = self.operandStack().pop(T);
+        self.localVars().get(T, idx).* = val;
     }
 
     fn load(self: @This(), comptime T: type, idx: u16) void {
-        _ = T; // TODO use for verification/debug checking
-        // TODO need to bump ref count?
-        const val = self.localVars().getRaw(idx).*;
-        self.operandStack().pushRaw(val);
+        // TODO need to bump ref count for objects?
+        const val = self.localVars().get(T, idx).*;
+        self.operandStack().push(val);
     }
 };
 

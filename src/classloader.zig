@@ -246,7 +246,7 @@ pub const ClassLoader = struct {
     }
 
     pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!object.VmClassRef {
-        const ty = vm_type.DataType.fromType(name) orelse std.debug.panic("invalid primitive {s}", .{name});
+        const ty = vm_type.DataType.fromTypeString(name) orelse std.debug.panic("invalid primitive {s}", .{name});
         return self.loadPrimitiveWithType(name, ty);
     }
 

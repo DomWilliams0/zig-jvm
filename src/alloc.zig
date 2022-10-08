@@ -4,7 +4,7 @@ const jvm = @import("jvm.zig");
 const Allocator = std.mem.Allocator;
 
 /// Verbose reference counting logging
-var logging = false;
+var logging = true;
 
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
@@ -35,11 +35,11 @@ pub fn VmRef(comptime T: type) type {
 
                 // TODO extra debug field to track double drop
                 const old = self.ptr.block.weak.fetchSub(1, .Release);
-                if (logging) std.log.debug("{*}: dropped weak count to {d}", .{ self.ptr, old - 1 });
+                if (logging) std.log.debug("{}: dropped weak count to {d}", .{ self, old - 1 });
 
                 if (old == 1) {
                     self.ptr.block.weak.fence(.Acquire);
-                    if (logging) std.log.debug("{*}: dropping inner", .{self.ptr});
+                    if (logging) std.log.debug("{}: dropping inner", .{self});
 
                     const alloc = global_allocator();
                     const alloc_size =
@@ -64,7 +64,7 @@ pub fn VmRef(comptime T: type) type {
         pub fn clone(self: Strong) Strong {
             const old = self.ptr.block.strong.fetchAdd(1, .Monotonic);
 
-            if (logging) std.log.debug("{*}: bumped strong count to {d}", .{ self.ptr, old + 1 });
+            if (logging) std.log.debug("{}: bumped strong count to {d}", .{ self, old + 1 });
 
             if (old > max_counter)
                 @panic("too many refs");
@@ -75,7 +75,7 @@ pub fn VmRef(comptime T: type) type {
         pub fn drop(self: Strong) void {
             // TODO extra debug field to track double drop
             const old = self.ptr.block.strong.fetchSub(1, .Release);
-            if (logging) std.log.debug("{*}: dropped strong count to {d}", .{ self.ptr, old - 1 });
+            if (logging) std.log.debug("{}: dropped strong count to {d}", .{ self, old - 1 });
             if (old != 1) return;
 
             self.ptr.block.strong.fence(.Acquire);
@@ -140,7 +140,7 @@ pub fn VmRef(comptime T: type) type {
             const alloc_size = @sizeOf(InnerBlock) + padding + @sizeOf(T) + size;
 
             const buf = try alloc.inner.allocAdvanced(u8, alignment, alloc_size, .exact);
-            // if (logging) std.log.debug("allocated {*} len {d} with align={d}, size={d}", .{ buf.ptr, buf.len, alignment, alloc_size });
+            if (logging) std.log.debug("allocated {*} len {d} with align={d}, size={d}", .{ buf.ptr, buf.len, alignment, alloc_size });
             const inner = @ptrCast(*InnerRef, buf);
             inner.* = .{
                 .block = .{
@@ -156,6 +156,25 @@ pub fn VmRef(comptime T: type) type {
         /// Data is undefined
         fn new() !Strong {
             return new_uninit(0, null);
+        }
+
+        comptime {
+            if (@sizeOf(VmRef(T)) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
+            if (@sizeOf(VmRef(T).Weak) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
+        }
+
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            if (self.isNull())
+                return std.fmt.formatBuf("(null)", options, writer)
+            else {
+                try if (@hasDecl(T, "formatVmRef"))
+                    T.formatVmRef(self.get(), writer)
+                else
+                    std.fmt.format(writer, "VmRef({s})", .{@typeName(T)});
+
+                return std.fmt.format(writer, "@{x}", .{@ptrToInt(self.ptr)});
+            }
         }
     };
 }

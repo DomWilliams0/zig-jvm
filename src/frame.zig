@@ -2,6 +2,7 @@ const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const object = @import("object.zig");
 const desc = @import("descriptor.zig");
+const types = @import("type.zig");
 const Allocator = std.mem.Allocator;
 
 pub const logging = std.log.level == .debug;
@@ -17,7 +18,47 @@ pub const Frame = struct {
 
     parent_frame: ?*Frame,
     // Used only if parent_frame is null.. pretty gross TODO
-    dummy_return_slot: ?*usize,
+    dummy_return_slot: ?*Frame.StackEntry,
+
+    pub const StackEntry = struct {
+        value: usize,
+        ty: types.DataType,
+
+        fn new(value: anytype) StackEntry {
+            return .{ .ty = types.DataType.fromType(@TypeOf(value)), .value = convert(@TypeOf(value)).to(value) };
+        }
+
+        fn notPresent() StackEntry {
+            return .{ .value = 0, .ty = .void };
+        }
+
+        fn convertTo(self: @This(), comptime T: type) T {
+            if (self.ty != types.DataType.fromType(T)) std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
+            return convert(T).from(self.value);
+        }
+
+        fn convertToPtr(self: *@This(), comptime T: type) *T {
+            if (self.ty != types.DataType.fromType(T)) std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
+            return @ptrCast(*T, &self.value);
+        }
+
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            return switch (self.ty) {
+                .boolean => std.fmt.format(writer, "{}", .{convert(bool).from(self.value)}),
+                .byte => std.fmt.format(writer, "{}", .{convert(i8).from(self.value)}),
+                .short => std.fmt.format(writer, "{}", .{convert(i16).from(self.value)}),
+                .int => std.fmt.format(writer, "{}", .{convert(i32).from(self.value)}),
+                .long => std.fmt.format(writer, "{}", .{convert(i64).from(self.value)}),
+                .char => std.fmt.format(writer, "{}", .{convert(u16).from(self.value)}),
+                .float => std.fmt.format(writer, "{}", .{convert(f32).from(self.value)}),
+                .double => std.fmt.format(writer, "{}", .{convert(f64).from(self.value)}),
+                .reference => std.fmt.format(writer, "{}", .{convert(object.VmObjectRef).from(self.value)}),
+                .returnAddress => std.fmt.format(writer, "{}", .{convert(usize).from(self.value)}),
+                .void => std.fmt.formatBuf("void", options, writer),
+            };
+        }
+    };
 
     pub const OperandStack = struct {
         /// Points to UNINITIALISED NEXT value on stack. When full will point out of allocation
@@ -28,41 +69,29 @@ pub const Frame = struct {
         /// bottom of stack     |
         ///                     |
         ///             top of stack
-        stack: [*]usize,
+        stack: [*]StackEntry,
 
-        /// Used for logging only, set on first use
-        bottom_of_stack: if (logging) usize else void = if (logging) 0 else {},
+        /// Used for logging only
+        bottom_of_stack: if (logging) [*]StackEntry else void,
+
+        pub fn new(stack: [*]StackEntry) @This() {
+            return .{ .stack = stack, .bottom_of_stack = if (logging) stack else {} };
+        }
 
         pub fn push(self: *@This(), value: anytype) void {
-            self.pushAndLog(value, true);
+            self.pushRaw(Frame.StackEntry.new(value));
         }
 
-        pub fn pushRaw(self: *@This(), value: usize) void {
-            self.pushAndLog(value, false);
-        }
-
-        fn pushAndLog(self: *@This(), value: anytype, comptime log: bool) void {
-            // convert to usize
-            // TODO check usize->usize=nop
-            const val = convert(@TypeOf(value)).to(value);
-
+        pub fn pushRaw(self: *@This(), val: Frame.StackEntry) void {
             self.stack[0] = val;
             self.stack += 1;
 
-            // TODO format input type better, e.g. dont show all fields on an object ref. but that should be the object's falut
             if (logging) {
-                // set bottom on first call
-                if (self.bottom_of_stack == 0)
-                    self.bottom_of_stack = @ptrToInt(self.stack - 1);
-
-                if (log)
-                    std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ (@ptrToInt(self.stack - 1) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value })
-                else
-                    std.log.debug("operand stack: pushed #{d} (opaque)", .{(@ptrToInt(self.stack - 1) - self.bottom_of_stack) / 8});
+                std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ (@ptrToInt(self.stack - 1) - @ptrToInt(self.bottom_of_stack)) / @sizeOf(StackEntry), @tagName(val.ty), val });
             }
         }
 
-        pub fn peekRaw(self: @This()) usize {
+        pub fn peekRaw(self: @This()) Frame.StackEntry {
             if (logging) std.debug.assert(!self.isEmpty());
             return (self.stack - 1)[0];
         }
@@ -71,37 +100,27 @@ pub const Frame = struct {
         pub fn peekAt(self: @This(), comptime T: type, idx: u16) T {
             if (logging) std.debug.assert(!self.isEmpty());
             const val = (self.stack - 1 - idx)[0];
-            return convert(T).from(val);
+            return val.convertTo(T);
         }
 
         fn isEmpty(self: @This()) bool {
             if (!logging) @compileError("cant check");
-            return self.bottom_of_stack == 0 or self.bottom_of_stack >= @ptrToInt(self.stack);
+            return @ptrToInt(self.bottom_of_stack) >= @ptrToInt(self.stack);
         }
 
         pub fn pop(self: *@This(), comptime T: type) T {
-            return self.popAndLog(T, true);
+            return self.popRaw().convertTo(T);
         }
 
-        pub fn popRaw(self: *@This()) usize {
-            return self.popAndLog(usize, false);
-        }
-
-        fn popAndLog(self: *@This(), comptime T: type, comptime log: bool) T {
+        pub fn popRaw(self: *@This()) Frame.StackEntry {
             // decrement to last value on stack
             self.stack -= 1;
-            const val_usize = self.stack[0];
-            const value = convert(T).from(val_usize);
+            const val = self.stack[0];
 
             if (logging) {
-                if (self.bottom_of_stack == 0) unreachable; // should be set in push
-
-                if (log)
-                    std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ (@ptrToInt(self.stack) - self.bottom_of_stack) / 8, @typeName(@TypeOf(value)), value })
-                else
-                    std.log.debug("operand stack: popped #{d} (opaque)", .{(@ptrToInt(self.stack) - self.bottom_of_stack) / 8});
+                std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ (@ptrToInt(self.stack) - @ptrToInt(self.bottom_of_stack)) / @sizeOf(StackEntry), @tagName(val.ty), val });
             }
-            return value;
+            return val;
         }
 
         pub fn transferToCallee(self: *@This(), callee: *LocalVars, method: desc.MethodDescriptor) void {
@@ -111,13 +130,12 @@ pub const Frame = struct {
             var last_copy: u16 = 0;
 
             const src_base = self.stack - method.param_count;
-
             var params = method.iterateParamTypes();
             while (params.next()) |param_type| {
                 if (param_type[0] == 'D' or param_type[0] == 'J') {
                     // wide, copy everything up to here including this double
                     const n = src - last_copy + 1;
-                    std.mem.copy(usize, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+                    std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
                     dst += n + 1;
                     src += 1;
                     last_copy = src;
@@ -129,7 +147,7 @@ pub const Frame = struct {
 
             // copy final args
             const n = src - last_copy;
-            std.mem.copy(usize, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+            std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
 
             // shrink source
             self.stack -= method.param_count;
@@ -137,14 +155,14 @@ pub const Frame = struct {
     };
 
     pub const LocalVars = struct {
-        vars: [*]usize,
+        vars: [*]Frame.StackEntry,
         // TODO track bounds in debug builds
 
         pub fn get(self: *@This(), comptime T: type, idx: u16) *T {
-            return @ptrCast(*T, &self.vars[idx]);
+            return self.getRaw(idx).convertToPtr(T);
         }
 
-        pub fn getRaw(self: *@This(), idx: u16) *usize {
+        pub fn getRaw(self: *@This(), idx: u16) *Frame.StackEntry {
             return &self.vars[idx];
         }
     };
@@ -217,7 +235,7 @@ pub const ContiguousBufferStack = struct {
     const EACH_SIZE: usize = 4095; // leave space for `used` usize
 
     const Buf = struct {
-        buf: [EACH_SIZE]usize,
+        buf: [EACH_SIZE]Frame.StackEntry,
         used: usize = 0,
 
         fn remaining(self: @This()) usize {
@@ -269,7 +287,7 @@ pub const ContiguousBufferStack = struct {
         self.bufs.deinit();
     }
 
-    pub fn reserve(self: *@This(), n: usize) ![*]usize {
+    pub fn reserve(self: *@This(), n: usize) ![*]Frame.StackEntry {
         var current = self.top();
         var buf: *Buf = if (current.remaining() < n)
             try self.pushNew()
@@ -284,7 +302,7 @@ pub const ContiguousBufferStack = struct {
         return ret.ptr;
     }
 
-    pub fn drop(self: *@This(), ptr: [*]usize) !void {
+    pub fn drop(self: *@This(), ptr: [*]Frame.StackEntry) !void {
         if (self.stack.popOrNull()) |prev| {
             if (prev.ptr == @ptrToInt(ptr)) {
                 // nice, it matches
@@ -339,8 +357,8 @@ test "contiguous bufs pop wrong order" {
 }
 
 test "operand stack" {
-    var backing = [_]usize{0} ** 8;
-    var stack = Frame.OperandStack{ .stack = &backing };
+    var backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&backing);
 
     try std.testing.expect(stack.isEmpty());
     stack.push(@as(i32, -50));
@@ -362,8 +380,8 @@ test "operands to callee local vars" {
     const method = desc.MethodDescriptor.new("(IDFJZS)V").?;
 
     // setup stack
-    var o_backing = [_]usize{0} ** 8;
-    var stack = Frame.OperandStack{ .stack = &o_backing };
+    var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&o_backing);
     stack.push(@as(i32, 10)); // bottom of stack
     stack.push(@as(f64, 44.4));
     stack.push(@as(f32, 0.25));
@@ -372,34 +390,49 @@ test "operands to callee local vars" {
     stack.push(@as(i16, 666)); // top of stack
 
     // setup local vars
-    var o_lvars = [_]usize{0} ** 8;
+    var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var vars = Frame.LocalVars{ .vars = &o_lvars };
 
     stack.transferToCallee(&vars, method);
-
-    try std.testing.expectEqual(@as(i32, 10), vars.get(i32, 0).*);
-    try std.testing.expectEqual(@as(f64, 44.4), vars.get(f64, 1).*);
-    try std.testing.expectEqual(@as(f32, 0.25), vars.get(f32, 3).*); // skip
-    try std.testing.expectEqual(@as(i64, 500_000), vars.get(i64, 4).*);
-    try std.testing.expectEqual(@as(bool, true), vars.get(bool, 6).*); // skip
-    try std.testing.expectEqual(@as(i16, 666), vars.get(i16, 7).*);
 }
 
 test "operands to callee local vars II" {
     const method = desc.MethodDescriptor.new("(II)V").?;
 
     // setup stack
-    var o_backing = [_]usize{0} ** 8;
-    var stack = Frame.OperandStack{ .stack = &o_backing };
+    var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&o_backing);
     stack.push(@as(i32, 10)); // bottom of stack
     stack.push(@as(i32, 25)); // top of stack
 
     // setup local vars
-    var o_lvars = [_]usize{0} ** 8;
+    var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var vars = Frame.LocalVars{ .vars = &o_lvars };
 
     stack.transferToCallee(&vars, method);
+}
 
-    try std.testing.expectEqual(@as(i32, 10), vars.get(i32, 0).*);
-    try std.testing.expectEqual(@as(i32, 25), vars.get(i32, 1).*);
+test "operand stack push and pop" {
+    // std.testing.log_level = .debug;
+    const method = desc.MethodDescriptor.new("(IDFJZS)V").?;
+    _ = method;
+
+    // setup stack
+    var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&o_backing);
+    stack.push(@as(i32, 10)); // bottom of stack
+    stack.push(@as(f64, 44.4));
+    stack.push(@as(f32, 0.25));
+    stack.push(@as(i64, 500_000));
+    stack.push(@as(bool, true));
+    stack.push(@as(i16, 666)); // top of stack
+
+    try std.testing.expectEqual(@as(i16, 666), stack.pop(i16));
+    try std.testing.expectEqual(@as(bool, true), stack.pop(bool)); // skip
+    try std.testing.expectEqual(@as(i64, 500_000), stack.pop(i64));
+    try std.testing.expectEqual(@as(f32, 0.25), stack.pop(f32)); // skip
+    try std.testing.expectEqual(@as(f64, 44.4), stack.pop(f64));
+    try std.testing.expectEqual(@as(i32, 10), stack.pop(i32));
+
+    try std.testing.expect(stack.isEmpty());
 }

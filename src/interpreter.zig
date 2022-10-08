@@ -42,7 +42,7 @@ pub const Interpreter = struct {
             var local_vars_buf = alloc[0..n_locals];
             var operands_buf = alloc[n_locals .. n_locals + n_operands];
 
-            operands = .{ .stack = operands_buf.ptr };
+            operands = frame.Frame.OperandStack.new(operands_buf.ptr);
             local_vars = .{ .vars = local_vars_buf.ptr };
         }
         errdefer self.frames_alloc.drop(local_vars.vars) catch unreachable;
@@ -74,7 +74,7 @@ pub const Interpreter = struct {
             }
         }
 
-        var dummy_return_slot: usize = undefined;
+        var dummy_return_slot: frame.Frame.StackEntry = undefined;
 
         const alloc = self.frameAllocator();
         var f = try alloc.create(frame.Frame);

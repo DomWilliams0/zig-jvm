@@ -58,6 +58,10 @@ pub const VmClass = struct {
         // TODO release owned memory
     }
 
+    pub fn formatVmRef(self: *const @This(), writer: anytype) !void {
+        return std.fmt.format(writer, "{s}.class", .{self.name});
+    }
+
     // ---------- field accessors
     fn findStaticField(self: @This(), name: []const u8, desc: []const u8) ?FieldId {
         return lookupFieldId(self.u.obj.fields, name, desc, .{ .static = true });
@@ -241,6 +245,10 @@ pub const VmObject = struct {
     }
     pub fn vmRefDrop(self: *@This()) void {
         self.class.drop();
+    }
+
+    pub fn formatVmRef(self: *const @This(), writer: anytype) !void {
+        return std.fmt.format(writer, "{s}", .{self.class.get().name});
     }
 
     /// Instance field
@@ -526,11 +534,6 @@ test "allocate object" {
     try helper.checkFieldValue(i32, obj, "myInt", "I", 123456);
     try helper.checkFieldValue(i32, obj, "myInt2", "I", 789012);
     try helper.checkFieldValue(bool, obj, "myBool", "Z", true);
-}
-
-test "vmref size" {
-    try std.testing.expectEqual(@sizeOf(*u8), @sizeOf(VmObjectRef));
-    try std.testing.expectEqual(@sizeOf(*u8), @sizeOf(VmObjectRef.Weak));
 }
 
 test "array" {

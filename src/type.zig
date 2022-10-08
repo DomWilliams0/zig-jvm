@@ -1,4 +1,5 @@
 const std = @import("std");
+const object = @import("object.zig");
 
 pub const DataType = enum(u4) {
     boolean = 0,
@@ -29,7 +30,7 @@ pub const DataType = enum(u4) {
         } else null;
     }
 
-    pub fn fromType(ty: []const u8) ?DataType {
+    pub fn fromTypeString(ty: []const u8) ?DataType {
         const c = if (ty.len == 0) return null else ty[0];
         return switch (c) {
             'B' => .byte,
@@ -50,7 +51,7 @@ pub const DataType = enum(u4) {
             .char, .short => 2,
             .float, .int => 4,
             .double, .long => 8,
-            .reference => @sizeOf(usize),
+            .reference => @sizeOf(object.VmObjectRef),
             else => 0,
         };
     }
@@ -65,8 +66,23 @@ pub const DataType = enum(u4) {
             .char => i16,
             .float => f32,
             .double => f64,
-            .reference => *void,
+            .reference => object.VmObjectRef,
             else => @compileError("no corresponding type"),
+        };
+    }
+
+    pub fn fromType(comptime T: type) @This() {
+        return switch (T) {
+            bool => .boolean,
+            i8 => .byte,
+            i16 => .short,
+            i32 => .int,
+            i64 => .long,
+            u16 => .char,
+            f32 => .float,
+            f64 => .double,
+            object.VmObjectRef => .reference,
+            else => @compileError("invalid type " ++ @typeName(T)),
         };
     }
 };
