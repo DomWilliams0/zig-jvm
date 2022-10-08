@@ -16,6 +16,8 @@ pub const Frame = struct {
     code_window: ?[*]const u8,
 
     parent_frame: ?*Frame,
+    // Used only if parent_frame is null.. pretty gross TODO
+    dummy_return_slot: ?*usize,
 
     pub const OperandStack = struct {
         /// Points to UNINITIALISED NEXT value on stack. When full will point out of allocation
@@ -121,6 +123,9 @@ pub const Frame = struct {
             // copy final args
             const n = src - last_copy;
             std.mem.copy(usize, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+
+            // shrink source
+            self.stack -= method.param_count;
         }
     };
 
@@ -130,6 +135,10 @@ pub const Frame = struct {
 
         pub fn get(self: *@This(), comptime T: type, idx: u16) *T {
             return @ptrCast(*T, &self.vars[idx]);
+        }
+
+        pub fn getRaw(self: *@This(), idx: u16) *usize {
+            return &self.vars[idx];
         }
     };
 };

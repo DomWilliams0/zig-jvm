@@ -794,9 +794,7 @@ pub const InsnContext = struct {
     };
 
     // TODO exception
-    fn resolveClass(self: @This(), idx: u16, comptime resolution: ClassResolution) VmClassRef {
-        const name = self.constantPool().lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
-
+    fn resolveClass(self: @This(), name: []const u8, comptime resolution: ClassResolution) VmClassRef {
         // resolve
         std.log.debug("resolving class {s}", .{name});
         const loaded = self.thread.global.classloader.loadClass(name, self.frame.class.loader) catch std.debug.panic("cant load", .{});
@@ -807,7 +805,6 @@ pub const InsnContext = struct {
             .ensure_initialised => {
                 object.VmClass.ensureInitialised(loaded);
                 // TODO cache initialised state in constant pool too
-
             },
         }
 
@@ -817,12 +814,12 @@ pub const InsnContext = struct {
     /// * looks for both method and interface method constants
     /// * resolves the class
     /// * ensures static
-    fn resolveStaticMethod(self: @This(), idx: u16) void {
+    fn invokeStaticMethod(self: @This(), idx: u16) void {
         // lookup method name/type/class
         const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
 
-        // resolve class
-        const class_ref = self.thread.global.classloader.loadClass(info.cls, self.frame.class.loader) catch std.debug.panic("cant load", .{}); // TODO
+        // resolve class and ensure initialised
+        const class_ref = self.resolveClass(info.cls, .ensure_initialised);
         const class = class_ref.get();
 
         if (class.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
@@ -835,14 +832,8 @@ pub const InsnContext = struct {
         if (method.flags.contains(.abstract)) @panic("NoSuchMethodError"); // TODO
         // TODO check access control?
 
-        // invoke with args
+        // invoke with caller frame
         self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack()) catch std.debug.panic("clinit failed", .{});
-
-        // push args onto new frame stack
-
-        // invoke new frame
-
-        @panic("TODO resolve static");
     }
 
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
@@ -859,8 +850,14 @@ pub const InsnContext = struct {
     }
 
     fn loadLocalVar(self: @This(), idx: u16) void {
-        const value = self.localVars().get(usize, idx).*;
+        const value = self.localVars().getRaw(idx).*;
         self.operandStack().pushRaw(value);
+    }
+
+    fn store(self: @This(), comptime T: type, idx: u16) void {
+        _ = T; // TODO use for verification/debug checking
+        const val = self.operandStack().popRaw();
+        self.localVars().getRaw(idx).* = val;
     }
 };
 
@@ -870,7 +867,8 @@ pub const handlers = struct {
         const idx = ctxt.readU16();
 
         // resolve and init class
-        const cls = ctxt.resolveClass(idx, .ensure_initialised);
+        const name = ctxt.constantPool().lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
+        const cls = ctxt.resolveClass(name, .ensure_initialised);
         _ = cls;
 
         unreachable; // TODO instantiate object and push onto stack
@@ -879,6 +877,70 @@ pub const handlers = struct {
     pub fn _bipush(ctxt: InsnContext) void {
         const val = ctxt.readU8();
         ctxt.operandStack().push(@as(i32, val));
+    }
+
+    pub fn _istore(ctxt: InsnContext) void {
+        ctxt.store(i32, ctxt.readU8());
+    }
+    pub fn _istore_0(ctxt: InsnContext) void {
+        ctxt.store(i32, 0);
+    }
+    pub fn _istore_1(ctxt: InsnContext) void {
+        ctxt.store(i32, 1);
+    }
+    pub fn _istore_2(ctxt: InsnContext) void {
+        ctxt.store(i32, 2);
+    }
+    pub fn _istore_3(ctxt: InsnContext) void {
+        ctxt.store(i32, 3);
+    }
+
+    pub fn _fstore(ctxt: InsnContext) void {
+        ctxt.store(f32, ctxt.readU8());
+    }
+    pub fn _fstore_0(ctxt: InsnContext) void {
+        ctxt.store(f32, 0);
+    }
+    pub fn _fstore_1(ctxt: InsnContext) void {
+        ctxt.store(f32, 1);
+    }
+    pub fn _fstore_2(ctxt: InsnContext) void {
+        ctxt.store(f32, 2);
+    }
+    pub fn _fstore_3(ctxt: InsnContext) void {
+        ctxt.store(f32, 3);
+    }
+
+    pub fn _lstore(ctxt: InsnContext) void {
+        ctxt.store(i64, ctxt.readU8());
+    }
+    pub fn _lstore_0(ctxt: InsnContext) void {
+        ctxt.store(i64, 0);
+    }
+    pub fn _lstore_1(ctxt: InsnContext) void {
+        ctxt.store(i64, 1);
+    }
+    pub fn _lstore_2(ctxt: InsnContext) void {
+        ctxt.store(i64, 2);
+    }
+    pub fn _lstore_3(ctxt: InsnContext) void {
+        ctxt.store(i64, 3);
+    }
+
+    pub fn _dstore(ctxt: InsnContext) void {
+        ctxt.store(f64, ctxt.readU8());
+    }
+    pub fn _dstore_0(ctxt: InsnContext) void {
+        ctxt.store(f64, 0);
+    }
+    pub fn _dstore_1(ctxt: InsnContext) void {
+        ctxt.store(f64, 1);
+    }
+    pub fn _dstore_2(ctxt: InsnContext) void {
+        ctxt.store(f64, 2);
+    }
+    pub fn _dstore_3(ctxt: InsnContext) void {
+        ctxt.store(f64, 3);
     }
 
     pub fn _putstatic(ctxt: InsnContext) void {
@@ -911,8 +973,7 @@ pub const handlers = struct {
     }
 
     pub fn _invokestatic(ctxt: InsnContext) void {
-        const method = ctxt.resolveStaticMethod(ctxt.readU16());
-        _ = method;
+        ctxt.invokeStaticMethod(ctxt.readU16());
     }
 
     pub fn _iload_0(ctxt: InsnContext) void {

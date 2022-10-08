@@ -61,6 +61,8 @@ pub const Interpreter = struct {
             }
         }
 
+        var dummy_return_slot: usize = undefined;
+
         const alloc = self.frameAllocator();
         var f = try alloc.create(frame.Frame);
         errdefer alloc.destroy(f);
@@ -71,6 +73,7 @@ pub const Interpreter = struct {
             .local_vars = local_vars,
             .code_window = code_window,
             .parent_frame = self.top_frame,
+            .dummy_return_slot = &dummy_return_slot,
         };
 
         // cant fail now, link up frame
@@ -132,19 +135,19 @@ fn interpreterLoop() void {
     switch (ctxt_mut.control_flow) {
         .return_ => {
             const this_frame = thread.interpreter.top_frame.?;
+            const caller_frame = this_frame.parent_frame;
+            std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.name, this_frame.method.name });
 
-            // TODO copy out return value before freeing operand stack
             if (ctxt.frame.method.descriptor.isNotVoid()) {
                 const ret_value = this_frame.operands.popRaw();
-                if (ctxt.frame.method.descriptor.returnType().?[0] == 'I')
-                    std.log.debug("returned i32 {d}", .{frame.convert(i32).from(ret_value)});
-
-                std.debug.panic("TODO return value {d}", .{ret_value});
+                if (caller_frame) |caller| {
+                    caller.operands.pushRaw(ret_value);
+                } else {
+                    this_frame.dummy_return_slot.?.* = ret_value;
+                }
             }
 
             // clean up this frame
-            const caller_frame = this_frame.parent_frame;
-            std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.name, this_frame.method.name });
             thread.interpreter.frameAllocator().destroy(this_frame);
 
             // pass execution back to caller
