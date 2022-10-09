@@ -203,6 +203,38 @@ pub const InsnContext = struct {
         self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack()) catch std.debug.panic("invokespecial failed", .{});
     }
 
+    fn invokeVirtualMethod(self: @This(), idx: u16) void {
+        // lookup method name/type/class
+        const info = self.constantPool().lookupMethod(idx) orelse unreachable;
+
+        // resolve referenced class
+        const cls_ref = self.resolveClass(info.cls, .resolve_only);
+        const cls = cls_ref.get();
+
+        if (cls.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
+
+        // find method in class/superclasses/interfaces
+        const method = cls.findMethodRecursive(info.name, info.ty) orelse @panic("NoSuchMethodError");
+        if (method.flags.contains(.static)) @panic("IncompatibleClassChangeError"); // TODO
+        if (method.flags.contains(.abstract)) @panic("NoSuchMethodError"); // TODO
+        // TODO check access control?
+
+        // get this obj and null check
+        const this_obj_ref = self.operandStack().peekAt(VmObjectRef.Nullable, method.descriptor.param_count).toStrong() orelse @panic("NPE");
+        const this_obj = this_obj_ref.get();
+
+        // select method (5.4.6)
+        const this_obj_cls_ref = this_obj.class;
+        const selected_method = object.VmClass.selectMethod(this_obj_cls_ref, method);
+        const selected_cls = selected_method.cls.toStrong() orelse this_obj_cls_ref;
+        std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.method.descriptor.str));
+
+        std.log.debug("resolved method to {s}.{s}", .{ selected_cls.get().name, selected_method.method.name });
+
+        // invoke with caller frame
+        self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack()) catch std.debug.panic("invokevirtual failed", .{});
+    }
+
     fn resolveField(self: @This(), idx: u16) *const cafebabe.Field {
         // lookup info
         const info = self.constantPool().lookupField(idx) orelse unreachable;
@@ -280,8 +312,53 @@ pub const handlers = struct {
     }
 
     pub fn _bipush(ctxt: InsnContext) void {
-        const val = ctxt.readU8();
-        ctxt.operandStack().push(@as(i32, val));
+        ctxt.operandStack().push(@as(i32, ctxt.readU8()));
+    }
+
+    pub fn _iconst_m1(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, -1));
+    }
+    pub fn _iconst_0(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, 0));
+    }
+    pub fn _iconst_1(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, 1));
+    }
+    pub fn _iconst_2(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, 2));
+    }
+    pub fn _iconst_3(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, 3));
+    }
+    pub fn _iconst_4(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, 4));
+    }
+    pub fn _iconst_5(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, 5));
+    }
+
+    pub fn _lconst_0(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i64, 0));
+    }
+    pub fn _lconst_1(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i64, 1));
+    }
+
+    pub fn _dconst_0(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(f64, 0.0));
+    }
+    pub fn _dconst_1(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(f64, 1.0));
+    }
+
+    pub fn _fconst_0(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(f32, 0.0));
+    }
+    pub fn _fconst_1(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(f32, 1.0));
+    }
+    pub fn _fconst_2(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(f32, 2.0));
     }
 
     pub fn _iload(ctxt: InsnContext) void {
@@ -478,6 +555,9 @@ pub const handlers = struct {
     }
     pub fn _invokespecial(ctxt: InsnContext) void {
         ctxt.invokeSpecialMethod(ctxt.readU16());
+    }
+    pub fn _invokevirtual(ctxt: InsnContext) void {
+        ctxt.invokeVirtualMethod(ctxt.readU16());
     }
 
     pub fn _putfield(ctxt: InsnContext) void {

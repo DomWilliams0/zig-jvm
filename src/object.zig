@@ -124,6 +124,48 @@ pub const VmClass = struct {
         } else null;
     }
 
+    /// For invokevirtual and invokeinterface (5.4.6).
+    /// Returned class ref is borrowed
+    pub const SelectedMethod = struct { method: *const cafebabe.Method, cls: VmClassRef.Nullable };
+    pub fn selectMethod(self: VmClassRef, resolved_method: *const cafebabe.Method) SelectedMethod {
+        if (!resolved_method.flags.contains(.private)) {
+            const helper = struct {
+                /// 5.4.5
+                fn canMethodOverride(overriding_method: *const cafebabe.Method, override_candidate: *const cafebabe.Method) bool {
+                    const m_c = overriding_method;
+                    const m_a = override_candidate;
+                    return (std.mem.eql(u8, m_c.name, m_a.name) and
+                        std.mem.eql(u8, m_c.descriptor.str, m_a.descriptor.str) and
+                        (m_a.flags.contains(.public) or
+                        m_a.flags.contains(.protected))); // TODO complicated transitive runtime package comparisons oh god
+                    // compiler segfaults on `or @panic(...)`, issue Z
+                }
+
+                /// Returns borrowed class ref
+                fn checkSuperClasses(cls_ref: VmClassRef, method: *const cafebabe.Method) ?SelectedMethod {
+                    const cls = cls_ref.get();
+                    // check own methods
+                    for (cls.u.obj.methods) |m, i| {
+                        if (canMethodOverride(&m, method)) return .{ .method = &cls.u.obj.methods[i], .cls = cls_ref.intoNullable() };
+                    }
+
+                    // recurse on super class
+                    if (cls.super_cls) |super| if (checkSuperClasses(super, method)) |m| return m;
+
+                    return null;
+                }
+            };
+
+            // check super classes recursively
+            if (helper.checkSuperClasses(self, resolved_method)) |m| return m;
+
+            // TODO check super interfaces
+
+        }
+
+        return .{ .method = resolved_method, .cls = VmClassRef.Nullable.nullRef() };
+    }
+
     /// Looks in self, superinterfaces then superclasses (5.4.3.2)
     pub fn findFieldInSupers(
         self: @This(),

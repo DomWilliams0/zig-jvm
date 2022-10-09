@@ -98,6 +98,7 @@ pub const MethodDescriptor = struct {
     // Must be validated with new
     str: []const u8,
 
+    /// Does not include `this` parameter for instance methods
     param_count: u8,
 
     pub fn new(str: []const u8) ?MethodDescriptor {
