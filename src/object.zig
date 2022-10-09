@@ -6,6 +6,7 @@ const classloader = @import("classloader.zig");
 const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
 const Method = cafebabe.Method;
+const StackEntry = @import("frame.zig").Frame.StackEntry;
 
 // TODO merge these with cafebabe class flags? merge at comptime possible?
 pub const ClassStatus = packed struct {
@@ -347,11 +348,35 @@ pub const VmObject = struct {
         return lookupFieldId(self.class.get().u.obj.fields, name, desc, .{ .static = false });
     }
 
-    /// Instance field
+    /// Instance field value
     pub fn getFieldFromField(self: *@This(), comptime T: type, field: *const cafebabe.Field) *T {
         const offset = field.u.layout_offset;
+        return self.getRawFieldPointer(T, offset);
+    }
+
+    /// Instance field value
+    pub fn getFieldFromFieldBlindly(self: *@This(), field: *const cafebabe.Field) StackEntry {
+        const offset = field.u.layout_offset;
+        return switch (field.descriptor.getType()) {
+            .primitive => |prim| switch (prim) {
+                .int => StackEntry.new(self.getRawFieldCopy(i32, offset)),
+                .short => StackEntry.new(self.getRawFieldCopy(i16, offset)),
+                else => @panic("TODO prim"),
+            },
+            .reference, .array => StackEntry.new(self.getRawFieldCopy(VmObjectRef.Nullable, offset)),
+        };
+    }
+
+    fn getRawFieldPointer(self: *@This(), comptime T: type, offset: u16) *T {
         var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
         return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+    }
+
+    fn getRawFieldCopy(self: *@This(), comptime T: type, offset: u16) T {
+        var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+        const ptr = @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+        // TODO need to clone vm object?
+        return ptr.*;
     }
 };
 

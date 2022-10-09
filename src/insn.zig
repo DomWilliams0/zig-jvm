@@ -282,13 +282,14 @@ pub const InsnContext = struct {
 
         const expected_ty = field.descriptor.getType();
 
-        // TODO need type checking for class assignment
-        // TODO need to AND an int->bool
+        // TODO need type checking for class and array assignment
         return switch (expected_ty) {
             .primitive => |prim| switch (prim) {
-                // must be an int
-                .boolean, .byte, .char, .short, .int => frame.Frame.StackEntry.new(val.convertTo(i32)), // TODO narrow/widen conversion needed?
-                else => @panic("TODO other primitives"),
+                .boolean => frame.Frame.StackEntry.new(val.convertTo(i32) & 1),
+                .byte, .char, .short, .int => frame.Frame.StackEntry.new(val.convertTo(i32)),
+                .float => frame.Frame.StackEntry.new(val.convertTo(f32)),
+                .double => frame.Frame.StackEntry.new(val.convertTo(f64)),
+                .long => frame.Frame.StackEntry.new(val.convertTo(i64)),
             },
             .array => @panic("TODO putfield array"),
             .reference => @panic("TODO putfield reference"),
@@ -567,10 +568,36 @@ pub const handlers = struct {
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse @panic("NPE");
 
-        var field_ref = obj.get().getFieldFromField(frame.Frame.StackEntry, field);
-        field_ref.* = val;
+        switch (val.ty) {
+            .int => {
+                obj.get().getFieldFromField(i32, field).* = val.convertToUnchecked(i32);
+            },
+            .long, .float, .double, .reference => @panic("TODO"),
+
+            .boolean,
+            .byte,
+            .char,
+            .short,
+            => unreachable, // filtered out
+            .void, .returnAddress => unreachable,
+        }
 
         std.log.debug("putfield({}, {s}) = {x}", .{ obj_ref, field.name, val });
+    }
+
+    pub fn _getfield(ctxt: InsnContext) void {
+        const field = ctxt.resolveField(ctxt.readU16());
+        const field_ty = field.descriptor.getType();
+        _ = field_ty;
+
+        const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
+        const obj = obj_ref.toStrong() orelse @panic("NPE");
+
+        std.debug.assert(obj.get().class.get().isObject()); // verified
+
+        const value = obj.get().getFieldFromFieldBlindly(field);
+        ctxt.operandStack().pushRaw(value);
+        std.log.debug("getfield({}, {s}) = {x}", .{ obj_ref, field.name, value });
     }
 };
 

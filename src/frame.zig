@@ -38,6 +38,11 @@ pub const Frame = struct {
             return convert(T).from(self.value);
         }
 
+        // Doesn't check ty
+        pub fn convertToUnchecked(self: @This(), comptime T: type) T {
+            return convert(T).from(self.value);
+        }
+
         fn convertToPtr(self: *@This(), comptime T: type) *T {
             if (self.ty != types.DataType.fromType(T)) std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
             return @ptrCast(*T, &self.value);
