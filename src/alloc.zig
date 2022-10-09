@@ -4,7 +4,7 @@ const jvm = @import("jvm.zig");
 const Allocator = std.mem.Allocator;
 
 /// Verbose reference counting logging
-var logging = true;
+var logging = false;
 
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
