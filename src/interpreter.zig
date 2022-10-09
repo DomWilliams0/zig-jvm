@@ -68,7 +68,7 @@ pub const Interpreter = struct {
                 }
 
                 // copy args from caller to callee local vars
-                caller_stack.transferToCallee(&local_vars, method.descriptor);
+                caller_stack.transferToCallee(&local_vars, method.descriptor, is_instance_method);
             } else {
                 std.log.warn("not passing expected args!", .{});
             }
@@ -134,6 +134,7 @@ fn interpreterLoop() void {
         // refetch on every insn, method might have changed
         const f = if (thread.interpreter.top_frame) |f| f else break;
         ctxt.frame = f;
+        f.operands.log();
 
         const next_insn = f.code_window.?[0];
 

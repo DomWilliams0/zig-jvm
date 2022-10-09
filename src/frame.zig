@@ -54,7 +54,7 @@ pub const Frame = struct {
                 .float => std.fmt.format(writer, "{}", .{convert(f32).from(self.value)}),
                 .double => std.fmt.format(writer, "{}", .{convert(f64).from(self.value)}),
                 .reference => std.fmt.format(writer, "{}", .{convert(object.VmObjectRef).from(self.value)}),
-                .returnAddress => std.fmt.format(writer, "{}", .{convert(usize).from(self.value)}),
+                .returnAddress => std.fmt.format(writer, "{x}", .{convert(usize).from(self.value)}),
                 .void => std.fmt.formatBuf("void", options, writer),
             };
         }
@@ -108,6 +108,31 @@ pub const Frame = struct {
             return @ptrToInt(self.bottom_of_stack) >= @ptrToInt(self.stack);
         }
 
+        pub fn log(self: @This()) void {
+            if (!logging) return;
+
+            var ptr = self.bottom_of_stack;
+            var i: u16 = 0;
+
+            var buf: [1024]u8 = undefined;
+            var writer = std.io.fixedBufferStream(&buf);
+            _ = writer.write("operand stack: {") catch unreachable;
+            while (@ptrToInt(ptr) < @ptrToInt(self.stack)) {
+                if (i != 0) {
+                    _ = writer.write(", ") catch break;
+                }
+                std.fmt.format(writer.writer(), "#{d}: {s}, {?}", .{ i, @tagName(ptr[0].ty), ptr[0] }) catch break;
+
+                ptr += 1;
+                i += 1;
+            }
+
+            _ = writer.write("}") catch {};
+
+            const s = buf[0..writer.pos];
+            std.log.debug("{s}", .{s});
+        }
+
         pub fn pop(self: *@This(), comptime T: type) T {
             return self.popRaw().convertTo(T);
         }
@@ -123,13 +148,18 @@ pub const Frame = struct {
             return val;
         }
 
-        pub fn transferToCallee(self: *@This(), callee: *LocalVars, method: desc.MethodDescriptor) void {
+        pub fn transferToCallee(self: *@This(), callee: *LocalVars, method: desc.MethodDescriptor, implicit_this: bool) void {
             // TODO cache u8 indices of wide args in method
             var src: u16 = 0;
             var dst: u16 = 0;
             var last_copy: u16 = 0;
 
-            const src_base = self.stack - method.param_count;
+            var param_count = method.param_count;
+            if (implicit_this) {
+                param_count += 1;
+                src = 1;
+            }
+            const src_base = self.stack - param_count;
             var params = method.iterateParamTypes();
             while (params.next()) |param_type| {
                 if (param_type[0] == 'D' or param_type[0] == 'J') {
@@ -150,7 +180,7 @@ pub const Frame = struct {
             std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
 
             // shrink source
-            self.stack -= method.param_count;
+            self.stack -= param_count;
         }
     };
 
@@ -393,7 +423,7 @@ test "operands to callee local vars" {
     var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var vars = Frame.LocalVars{ .vars = &o_lvars };
 
-    stack.transferToCallee(&vars, method);
+    stack.transferToCallee(&vars, method, false);
 }
 
 test "operands to callee local vars II" {
@@ -402,14 +432,20 @@ test "operands to callee local vars II" {
     // setup stack
     var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var stack = Frame.OperandStack.new(&o_backing);
-    stack.push(@as(i32, 10)); // bottom of stack
+    stack.push(object.VmObjectRef.nullRef()); // implicit this, on bottom of stack
+    stack.push(@as(i32, 10));
     stack.push(@as(i32, 25)); // top of stack
+    stack.log();
 
     // setup local vars
     var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var vars = Frame.LocalVars{ .vars = &o_lvars };
 
-    stack.transferToCallee(&vars, method);
+    stack.transferToCallee(&vars, method, true); // implicit this
+
+    try std.testing.expectEqual(vars.get(object.VmObjectRef.Nullable, 0).*, object.VmObjectRef.nullRef());
+    try std.testing.expectEqual(vars.get(i32, 1).*, 10);
+    try std.testing.expectEqual(vars.get(i32, 2).*, 25);
 }
 
 test "operand stack push and pop" {

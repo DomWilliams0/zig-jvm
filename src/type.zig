@@ -81,7 +81,7 @@ pub const DataType = enum(u4) {
             u16 => .char,
             f32 => .float,
             f64 => .double,
-            object.VmObjectRef => .reference,
+            object.VmObjectRef, object.VmObjectRef.Nullable => .reference,
             else => @compileError("invalid type " ++ @typeName(T)),
         };
     }

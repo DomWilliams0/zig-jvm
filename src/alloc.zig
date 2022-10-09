@@ -17,6 +17,10 @@ pub fn VmRef(comptime T: type) type {
             return thread.global.allocator;
         }
 
+        pub fn nullRef() Nullable {
+            return null;
+        }
+
         pub const Weak = struct {
             ptr: *InnerRef,
 
@@ -104,6 +108,7 @@ pub fn VmRef(comptime T: type) type {
             return .{ .ptr = ptr };
         }
 
+        // TODO incorrect!! Strong should never be null, use Nullable instead
         pub fn isNull(self: Strong) bool {
             // TODO use a singleton ptr comparison instead of real null
             return @ptrToInt(self.ptr) == 0;
