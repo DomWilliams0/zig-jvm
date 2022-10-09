@@ -203,6 +203,23 @@ pub const InsnContext = struct {
         self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack()) catch std.debug.panic("invokespecial failed", .{});
     }
 
+    fn resolveField(self: @This(), idx: u16) *const cafebabe.Field {
+        // lookup info
+        const info = self.constantPool().lookupField(idx) orelse unreachable;
+
+        // ensure resolved (5.4.3.2)
+        // TODO cache this in constant pool
+
+        // resolve class
+        const cls = self.resolveClass(info.cls, .resolve_only);
+
+        // lookup in class
+        const field = cls.get().findFieldInSupers(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError"); // TODO
+
+        // TODO access control
+        return field;
+    }
+
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
         return &self.frame.operands;
     }
@@ -218,13 +235,32 @@ pub const InsnContext = struct {
 
     fn store(self: @This(), comptime T: type, idx: u16) void {
         const val = self.operandStack().pop(T);
-        self.localVars().get(T, idx).* = val;
+        self.localVars().set(val, idx);
     }
 
     fn load(self: @This(), comptime T: type, idx: u16) void {
         // TODO need to bump ref count for objects?
         const val = self.localVars().get(T, idx).*;
         self.operandStack().push(val);
+    }
+
+    /// Pops value from top of stack for a putfield/putstatic insn
+    fn popPutFieldValue(self: @This(), field: *const cafebabe.Field) ?frame.Frame.StackEntry {
+        const val = self.operandStack().popRaw();
+
+        const expected_ty = field.descriptor.getType();
+
+        // TODO need type checking for class assignment
+        // TODO need to AND an int->bool
+        return switch (expected_ty) {
+            .primitive => |prim| switch (prim) {
+                // must be an int
+                .boolean, .byte, .char, .short, .int => frame.Frame.StackEntry.new(val.convertTo(i32)), // TODO narrow/widen conversion needed?
+                else => @panic("TODO other primitives"),
+            },
+            .array => @panic("TODO putfield array"),
+            .reference => @panic("TODO putfield reference"),
+        };
     }
 };
 
@@ -442,6 +478,19 @@ pub const handlers = struct {
     }
     pub fn _invokespecial(ctxt: InsnContext) void {
         ctxt.invokeSpecialMethod(ctxt.readU16());
+    }
+
+    pub fn _putfield(ctxt: InsnContext) void {
+        const field = ctxt.resolveField(ctxt.readU16());
+
+        const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
+        const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
+        const obj = obj_ref.toStrong() orelse @panic("NPE");
+
+        var field_ref = obj.get().getFieldFromField(frame.Frame.StackEntry, field);
+        field_ref.* = val;
+
+        std.log.debug("putfield({}, {s}) = {x}", .{ obj_ref, field.name, val });
     }
 };
 

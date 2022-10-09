@@ -1,15 +1,30 @@
 const std = @import("std");
 const object = @import("object.zig");
 
+pub const PrimitiveDataType = enum(u3) {
+    boolean = 0,
+    byte = 1,
+    short = 2,
+    int = 3,
+    long = 4,
+    char = 5,
+    float = 6,
+    double = 7,
+
+    pub fn toDataType(self: @This()) DataType {
+        return @intToEnum(DataType, @enumToInt(self));
+    }
+};
+
 pub const DataType = enum(u4) {
     boolean = 0,
-    byte,
-    short,
-    int,
-    long,
-    char,
-    float,
-    double,
+    byte = 1,
+    short = 2,
+    int = 3,
+    long = 4,
+    char = 5,
+    float = 6,
+    double = 7,
     reference,
     void,
     returnAddress,
@@ -18,6 +33,13 @@ pub const DataType = enum(u4) {
         return switch (self) {
             .boolean, .byte, .short, .int, .long, .char, .float, .double => true,
             else => false,
+        };
+    }
+
+    pub fn asPrimitive(self: @This()) ?PrimitiveDataType {
+        return switch (self) {
+            .boolean, .byte, .short, .int, .long, .char, .float, .double => @intToEnum(PrimitiveDataType, @enumToInt(self)),
+            else => null,
         };
     }
 

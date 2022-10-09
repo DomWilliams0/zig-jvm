@@ -24,7 +24,7 @@ pub const Frame = struct {
         value: usize,
         ty: types.DataType,
 
-        fn new(value: anytype) StackEntry {
+        pub fn new(value: anytype) StackEntry {
             const val = if (@TypeOf(value) == object.VmObjectRef) value.intoNullable() else value;
             return .{ .ty = types.DataType.fromType(@TypeOf(val)), .value = convert(@TypeOf(val)).to(val) };
         }
@@ -33,7 +33,7 @@ pub const Frame = struct {
             return .{ .value = 0, .ty = .void };
         }
 
-        fn convertTo(self: @This(), comptime T: type) T {
+        pub fn convertTo(self: @This(), comptime T: type) T {
             if (self.ty != types.DataType.fromType(T)) std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
             return convert(T).from(self.value);
         }
@@ -191,6 +191,10 @@ pub const Frame = struct {
 
         pub fn get(self: *@This(), comptime T: type, idx: u16) *T {
             return self.getRaw(idx).convertToPtr(T);
+        }
+
+        pub fn set(self: *@This(), value: anytype, idx: u16) void {
+            self.vars[idx] = Frame.StackEntry.new(value);
         }
 
         pub fn getRaw(self: *@This(), idx: u16) *Frame.StackEntry {

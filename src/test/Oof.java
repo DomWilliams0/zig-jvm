@@ -1,6 +1,6 @@
 
 public class Oof {
-    int a = 100;
+    short a = 100;
 
     static int b = 123;
 

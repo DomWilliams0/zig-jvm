@@ -18,7 +18,7 @@ pub const VmClass = struct {
     flags: std.EnumSet(cafebabe.ClassFile.Flags),
     name: []const u8, // constant pool reference
     super_cls: ?VmClassRef,
-    interfaces: []*VmClass, // TODO class refs
+    interfaces: []VmClassRef,
     loader: classloader.WhichLoader,
     init_state: InitState = .uninitialised,
     monitor: Monitor = .{}, // TODO put into java.lang.Class object instance instead
@@ -120,6 +120,43 @@ pub const VmClass = struct {
             {
                 // seems like returning &m is returning a function local...
                 break &self.u.obj.methods[i];
+            }
+        } else null;
+    }
+
+    /// Looks in self, superinterfaces then superclasses (5.4.3.2)
+    pub fn findFieldInSupers(
+        self: @This(),
+        name: []const u8,
+        desc: []const u8,
+        flags: anytype,
+    ) ?*const Field {
+        // check self first
+        if (self.findFieldInThisOnly(name, desc, flags)) |f| return f;
+
+        // check superinterfaces recursively
+        for (self.interfaces) |iface| if (iface.get().findFieldInSupers(name, desc, flags)) |f| return f;
+
+        // check super class
+        if (self.super_cls) |super| if (super.get().findFieldInSupers(name, desc, flags)) |f| return f;
+
+        return null;
+    }
+
+    /// Looks in self only
+    fn findFieldInThisOnly(
+        self: @This(),
+        name: []const u8,
+        desc: []const u8,
+        flags: anytype,
+    ) ?*const Field {
+        const pls = makeFlagsAndAntiFlags(Field.Flags, flags);
+        return for (self.u.obj.fields) |m, i| {
+            if ((m.flags.bits.mask & pls.flags.bits.mask) == pls.flags.bits.mask and
+                (m.flags.bits.mask & ~(pls.antiflags.bits.mask)) == m.flags.bits.mask and
+                std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
+            {
+                break &self.u.obj.fields[i];
             }
         } else null;
     }
@@ -266,6 +303,13 @@ pub const VmObject = struct {
 
     fn findInstanceField(self: @This(), name: []const u8, desc: []const u8) ?FieldId {
         return lookupFieldId(self.class.get().u.obj.fields, name, desc, .{ .static = false });
+    }
+
+    /// Instance field
+    pub fn getFieldFromField(self: *@This(), comptime T: type, field: *const cafebabe.Field) *T {
+        const offset = field.u.layout_offset;
+        var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+        return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
     }
 };
 

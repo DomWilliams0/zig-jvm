@@ -1,4 +1,5 @@
 const std = @import("std");
+const types = @import("type.zig");
 
 // TODO intern all types of descriptors, could store borrowed tag in last bit(s) of ptr
 pub const FieldDescriptor = struct {
@@ -69,6 +70,26 @@ pub const FieldDescriptor = struct {
             'D', 'J' => 8,
             'L', '[' => @sizeOf(usize),
             else => unreachable,
+        };
+    }
+
+    pub fn getType(self: @This()) union(enum) {
+        primitive: types.PrimitiveDataType,
+        reference: []const u8,
+        array: []const u8,
+    } {
+        return switch (self.str[0]) {
+            'B' => .{ .primitive = .byte },
+            'C' => .{ .primitive = .char },
+            'D' => .{ .primitive = .double },
+            'F' => .{ .primitive = .float },
+            'I' => .{ .primitive = .int },
+            'J' => .{ .primitive = .long },
+            'S' => .{ .primitive = .short },
+            'Z' => .{ .primitive = .boolean },
+            'L' => .{ .reference = self.str[1 .. self.str.len - 2] },
+            '[' => .{ .array = self.str[1..] },
+            else => unreachable, // verified
         };
     }
 };
@@ -190,4 +211,11 @@ test "valid method descriptors" {
     try std.testing.expectEqualStrings("D", params.next().?);
     try std.testing.expectEqualStrings("Ljava/lang/Thread;", params.next().?);
     try std.testing.expect(params.next() == null);
+}
+
+test "getType" {
+    try std.testing.expectEqual(.{ .primitive = .int }, FieldDescriptor.new("I").?.getType());
+    try std.testing.expectEqual(.{ .reference = "java/lang/String" }, FieldDescriptor.new("Ljava/lang/String;").?.getType());
+    try std.testing.expectEqual(.{ .array = "S" }, FieldDescriptor.new("[S").?.getType());
+    try std.testing.expectEqual(.{ .array = "[I" }, FieldDescriptor.new("[[I").?.getType());
 }
