@@ -295,6 +295,37 @@ pub const InsnContext = struct {
             .reference => @panic("TODO putfield reference"),
         };
     }
+
+    const BinaryOp = enum { add, sub, mul, div };
+
+    fn binaryOp(self: @This(), comptime T: type, comptime op: BinaryOp) void {
+        const val2 = self.operandStack().popWiden(T);
+        const val1 = self.operandStack().popWiden(T);
+
+        const result = if (@typeInfo(T) == .Int) switch (op) {
+            .add => val1 +% val2,
+            .sub => val1 -% val2,
+            .mul => val1 *% val2,
+            .div => std.math.divTrunc(T, val1, val2) catch |err| switch (err) {
+                error.Overflow => val1,
+                error.DivisionByZero => @panic("ArithmeticException"),
+            },
+        } else if (@typeInfo(T) == .Float) switch (op) {
+            .add => val1 + val2,
+            .sub => val1 - val2,
+            .mul => val1 * val2,
+            .div => val1 / val2,
+        } else @compileError("not int or float");
+
+        std.log.debug("{} {s} {} = {}", .{ val1, switch (op) {
+            .add => "+",
+            .sub => "-",
+            .mul => "*",
+            .div => "/",
+        }, val2, result });
+
+        self.operandStack().push(result);
+    }
 };
 
 /// Instruction implementations, resolved in `handler_lookup`
@@ -598,6 +629,58 @@ pub const handlers = struct {
         const value = obj.get().getFieldFromFieldBlindly(field);
         ctxt.operandStack().pushRaw(value);
         std.log.debug("getfield({}, {s}) = {x}", .{ obj_ref, field.name, value });
+    }
+
+    pub fn _iadd(ctxt: InsnContext) void {
+        ctxt.binaryOp(i32, .add);
+    }
+    pub fn _isub(ctxt: InsnContext) void {
+        ctxt.binaryOp(i32, .sub);
+    }
+    pub fn _imul(ctxt: InsnContext) void {
+        ctxt.binaryOp(i32, .mul);
+    }
+    pub fn _idiv(ctxt: InsnContext) void {
+        ctxt.binaryOp(i32, .div);
+    }
+
+    pub fn _ladd(ctxt: InsnContext) void {
+        ctxt.binaryOp(i64, .add);
+    }
+    pub fn _lsub(ctxt: InsnContext) void {
+        ctxt.binaryOp(i64, .sub);
+    }
+    pub fn _lmul(ctxt: InsnContext) void {
+        ctxt.binaryOp(i64, .mul);
+    }
+    pub fn _ldiv(ctxt: InsnContext) void {
+        ctxt.binaryOp(i64, .div);
+    }
+
+    pub fn _fadd(ctxt: InsnContext) void {
+        ctxt.binaryOp(f32, .add);
+    }
+    pub fn _fsub(ctxt: InsnContext) void {
+        ctxt.binaryOp(f32, .sub);
+    }
+    pub fn _fmul(ctxt: InsnContext) void {
+        ctxt.binaryOp(f32, .mul);
+    }
+    pub fn _fdiv(ctxt: InsnContext) void {
+        ctxt.binaryOp(f32, .div);
+    }
+
+    pub fn _dadd(ctxt: InsnContext) void {
+        ctxt.binaryOp(f64, .add);
+    }
+    pub fn _dsub(ctxt: InsnContext) void {
+        ctxt.binaryOp(f64, .sub);
+    }
+    pub fn _dmul(ctxt: InsnContext) void {
+        ctxt.binaryOp(f64, .mul);
+    }
+    pub fn _ddiv(ctxt: InsnContext) void {
+        ctxt.binaryOp(f64, .div);
     }
 };
 

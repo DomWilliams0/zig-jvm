@@ -38,6 +38,21 @@ pub const Frame = struct {
             return convert(T).from(self.value);
         }
 
+        pub fn convertToInt(self: @This()) i32 {
+            return if (self.ty == .byte)
+                @intCast(i32, convert(i8).from(self.value))
+            else if (self.ty == .short)
+                @intCast(i32, convert(i16).from(self.value))
+            else if (self.ty == .char)
+                @intCast(i32, convert(u16).from(self.value))
+            else if (self.ty == .boolean)
+                @boolToInt(convert(bool).from(self.value))
+            else if (self.ty == .int)
+                convert(i32).from(self.value)
+            else
+                std.debug.panic("type mismatch, expected integer but found {s}", .{@tagName(self.ty)});
+        }
+
         // Doesn't check ty
         pub fn convertToUnchecked(self: @This(), comptime T: type) T {
             return convert(T).from(self.value);
@@ -139,8 +154,15 @@ pub const Frame = struct {
             std.log.debug("{s}", .{s});
         }
 
+        /// Must be exact i.e. i16 != i32
         pub fn pop(self: *@This(), comptime T: type) T {
             return self.popRaw().convertTo(T);
+        }
+
+        /// Widens bool/i8/i16/u16 to i32
+        pub fn popWiden(self: *@This(), comptime T: type) T {
+            const val = self.popRaw();
+            return if (T == i32) val.convertToInt() else val.convertTo(T);
         }
 
         pub fn popRaw(self: *@This()) Frame.StackEntry {
@@ -264,6 +286,29 @@ test "convert" {
     const conv = convert([*]const u8).to(s.ptr);
     const res = convert([*]const u8).from(conv);
     try std.testing.expectEqual(res, s.ptr);
+}
+
+test "convert to integer" {
+    const help = struct {
+        fn checkInt(
+            val: anytype,
+        ) void {
+            const entry = Frame.StackEntry.new(val);
+            const res_int = entry.convertToInt();
+            const res_expected = if (@typeInfo(@TypeOf(val)) == .Bool) @intCast(i32, @boolToInt(val)) else @intCast(i32, val);
+            std.testing.expectEqual(res_expected, res_int) catch unreachable;
+        }
+    };
+
+    help.checkInt(@as(i8, 15));
+    help.checkInt(@as(i8, -2));
+    help.checkInt(@as(i16, 300));
+    help.checkInt(@as(i16, -400));
+    help.checkInt(@as(i32, 39_000));
+    help.checkInt(@as(i32, -39_000));
+    help.checkInt(@as(u16, 'H'));
+    help.checkInt(@as(bool, true));
+    help.checkInt(@as(bool, false));
 }
 
 // for both operands and localvars, alloc in big chunks
