@@ -313,19 +313,19 @@ pub const handlers = struct {
     }
 
     pub fn _aload(ctxt: InsnContext) void {
-        ctxt.load(VmObjectRef, ctxt.readU8());
+        ctxt.load(VmObjectRef.Nullable, ctxt.readU8());
     }
     pub fn _aload_0(ctxt: InsnContext) void {
-        ctxt.load(VmObjectRef, 0);
+        ctxt.load(VmObjectRef.Nullable, 0);
     }
     pub fn _aload_1(ctxt: InsnContext) void {
-        ctxt.load(VmObjectRef, 1);
+        ctxt.load(VmObjectRef.Nullable, 1);
     }
     pub fn _aload_2(ctxt: InsnContext) void {
-        ctxt.load(VmObjectRef, 2);
+        ctxt.load(VmObjectRef.Nullable, 2);
     }
     pub fn _aload_3(ctxt: InsnContext) void {
-        ctxt.load(VmObjectRef, 3);
+        ctxt.load(VmObjectRef.Nullable, 3);
     }
 
     pub fn _istore(ctxt: InsnContext) void {
@@ -393,19 +393,19 @@ pub const handlers = struct {
     }
 
     pub fn _astore(ctxt: InsnContext) void {
-        ctxt.store(VmObjectRef, ctxt.readU8());
+        ctxt.store(VmObjectRef.Nullable, ctxt.readU8());
     }
     pub fn _astore_0(ctxt: InsnContext) void {
-        ctxt.store(VmObjectRef, 0);
+        ctxt.store(VmObjectRef.Nullable, 0);
     }
     pub fn _astore_1(ctxt: InsnContext) void {
-        ctxt.store(VmObjectRef, 1);
+        ctxt.store(VmObjectRef.Nullable, 1);
     }
     pub fn _astore_2(ctxt: InsnContext) void {
-        ctxt.store(VmObjectRef, 2);
+        ctxt.store(VmObjectRef.Nullable, 2);
     }
     pub fn _astore_3(ctxt: InsnContext) void {
-        ctxt.store(VmObjectRef, 3);
+        ctxt.store(VmObjectRef.Nullable, 3);
     }
 
     pub fn _putstatic(ctxt: InsnContext) void {

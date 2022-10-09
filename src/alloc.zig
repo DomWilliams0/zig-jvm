@@ -6,6 +6,7 @@ const Allocator = std.mem.Allocator;
 /// Verbose reference counting logging
 var logging = false;
 
+/// Never null! Pass around `Nullable`
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
     return struct {
@@ -15,10 +16,6 @@ pub fn VmRef(comptime T: type) type {
         fn global_allocator() VmAllocator {
             const thread = jvm.thread_state();
             return thread.global.allocator;
-        }
-
-        pub fn nullRef() Nullable {
-            return null;
         }
 
         pub const Weak = struct {
@@ -96,27 +93,45 @@ pub fn VmRef(comptime T: type) type {
             return self.ptr == other.ptr;
         }
 
-        pub fn intoRaw(self: Strong) Nullable {
-            return self.ptr;
-        }
-
-        pub fn fromRawMaybe(ptr: Nullable) ?Strong {
-            return if (ptr) |p| Strong{ .ptr = p } else null;
+        pub fn intoNullable(self: Strong) Nullable {
+            return .{ .ptr = self.ptr };
         }
 
         pub fn fromRaw(ptr: *InnerRef) Strong {
             return .{ .ptr = ptr };
         }
 
-        // TODO incorrect!! Strong should never be null, use Nullable instead
-        pub fn isNull(self: Strong) bool {
-            // TODO use a singleton ptr comparison instead of real null
-            return @ptrToInt(self.ptr) == 0;
-        }
-
         // }; // end of Strong
 
-        pub const Nullable = ?*InnerRef;
+        pub const NullablePtr = ?*InnerRef;
+
+        pub const Nullable = struct {
+            ptr: NullablePtr,
+
+            pub fn nullRef() @This() {
+                return .{ .ptr = null };
+            }
+
+            pub fn isNull(self: @This()) bool {
+                return self.ptr == null;
+            }
+
+            pub fn toStrong(self: @This()) ?Strong {
+                return if (self.ptr) |p| Strong{ .ptr = p } else null;
+            }
+
+            pub fn format(self: Nullable, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                _ = fmt;
+                if (self.toStrong()) |strong| {
+                    try if (@hasDecl(T, "formatVmRef"))
+                        T.formatVmRef(strong.get(), writer)
+                    else
+                        std.fmt.format(writer, "VmRef({s})", .{@typeName(T)});
+
+                    return std.fmt.format(writer, "@{x}", .{@ptrToInt(strong.ptr)});
+                } else return std.fmt.formatBuf("(null)", options, writer);
+            }
+        };
 
         const InnerBlock = extern struct {
             weak: Counter,
@@ -165,21 +180,8 @@ pub fn VmRef(comptime T: type) type {
 
         comptime {
             if (@sizeOf(VmRef(T)) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
+            if (@sizeOf(VmRef(T).Nullable) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
             if (@sizeOf(VmRef(T).Weak) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
-        }
-
-        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = fmt;
-            if (self.isNull())
-                return std.fmt.formatBuf("(null)", options, writer)
-            else {
-                try if (@hasDecl(T, "formatVmRef"))
-                    T.formatVmRef(self.get(), writer)
-                else
-                    std.fmt.format(writer, "VmRef({s})", .{@typeName(T)});
-
-                return std.fmt.format(writer, "@{x}", .{@ptrToInt(self.ptr)});
-            }
         }
     };
 }

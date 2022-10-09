@@ -60,8 +60,8 @@ pub const Interpreter = struct {
             if (caller) |caller_stack| {
                 if (is_instance_method) {
                     // null check `this` param
-                    const this_obj = caller_stack.peekAt(object.VmObjectRef, param_count);
-                    if (this_obj.isNull()) @panic("NPE");
+                    const this_obj = caller_stack.peekAt(object.VmObjectRef.Nullable, param_count);
+                    if (this_obj.isNull()) @panic("NPE"); // TODO do this null check later?
 
                     // include in count
                     param_count += 1;

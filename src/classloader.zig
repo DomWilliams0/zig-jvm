@@ -7,9 +7,12 @@ const object = @import("object.zig");
 const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
 
+const VmClassRef = object.VmClassRef;
+const VmObjectRef = object.VmObjectRef;
+
 pub const WhichLoader = union(enum) {
     bootstrap,
-    user: object.VmObjectRef,
+    user: VmObjectRef,
 
     fn eq(a: @This(), b: @This()) bool {
         return switch (a) {
@@ -53,7 +56,7 @@ pub const ClassLoader = struct {
     classes: std.ArrayHashMapUnmanaged(Key, LoadState, ClassesContext, true),
 
     /// Initialised during startup so not mutex protected
-    primitives: [vm_type.primitives.len]object.VmClassRef.Nullable = [_]object.VmClassRef.Nullable{null} ** vm_type.primitives.len,
+    primitives: [vm_type.primitives.len]VmClassRef.Nullable = [_]VmClassRef.Nullable{VmClassRef.Nullable.nullRef()} ** vm_type.primitives.len,
 
     const ClassesContext = struct {
         pub fn hash(_: @This(), key: Key) u32 {
@@ -71,7 +74,7 @@ pub const ClassLoader = struct {
     const LoadState = union(enum) {
         unloaded,
         loading: Thread.Id,
-        loaded: object.VmClassRef,
+        loaded: VmClassRef,
         failed,
     };
 
@@ -104,7 +107,7 @@ pub const ClassLoader = struct {
         self.classes = .{};
 
         for (self.primitives) |prim| {
-            if (prim) |p| object.VmClassRef.fromRaw(p).drop();
+            if (prim.toStrong()) |p| p.drop();
         }
     }
 
@@ -112,7 +115,7 @@ pub const ClassLoader = struct {
     /// Loader is cloned if needed for loading.
     /// Returns BORROWED reference
     // TODO return exception or error type
-    pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) anyerror!object.VmClassRef {
+    pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) anyerror!VmClassRef {
         // TODO exception
         if (name.len < 2) std.debug.panic("class name too short {s}", .{name});
 
@@ -193,7 +196,7 @@ pub const ClassLoader = struct {
 
     /// Name is the file name of the class
     // TODO set exception
-    fn loadBootstrapClass(self: *Self, name: []const u8) !object.VmClassRef {
+    fn loadBootstrapClass(self: *Self, name: []const u8) !VmClassRef {
         // TODO should allocate in big blocks rather than using gpa for all tiny allocs
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
@@ -203,7 +206,7 @@ pub const ClassLoader = struct {
     }
 
     // TODO set exception
-    fn loadArrayClass(self: *Self, name: []const u8, is_primitive: bool, loader: WhichLoader) !object.VmClassRef {
+    fn loadArrayClass(self: *Self, name: []const u8, is_primitive: bool, loader: WhichLoader) !VmClassRef {
         std.debug.assert(name[0] == '[');
         const elem_name = name[1..];
 
@@ -238,22 +241,22 @@ pub const ClassLoader = struct {
 
     // TODO cached/better lookup for known bootstrap classes
     /// Returns BORROWED reference
-    pub fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?object.VmClassRef {
+    pub fn getLoadedBootstrapClass(self: *Self, name: []const u8) ?VmClassRef {
         return switch (self.getLoadState(name, .bootstrap)) {
             .loaded => |cls| cls,
             else => null,
         };
     }
 
-    pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!object.VmClassRef {
+    pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!VmClassRef {
         const ty = vm_type.DataType.fromTypeString(name) orelse std.debug.panic("invalid primitive {s}", .{name});
         return self.loadPrimitiveWithType(name, ty);
     }
 
     /// Name should be static if lodaing for the first time (during startup)
-    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.DataType) anyerror!object.VmClassRef {
+    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.DataType) anyerror!VmClassRef {
         var entry = &self.primitives[@enumToInt(ty)];
-        if (entry.*) |cls| return object.VmClassRef.fromRaw(cls).clone();
+        if (entry.toStrong()) |cls| return cls.clone();
 
         std.log.debug("loading primitive {s}", .{name});
 
@@ -269,13 +272,13 @@ pub const ClassLoader = struct {
             .loader = .bootstrap,
         };
 
-        entry.* = class.clone().intoRaw();
+        entry.* = class.clone().intoNullable();
         return class;
     }
 
     /// Class bytes are the callers responsiblity to clean up.
     /// Not an array or primitive.
-    fn defineClass(self: *Self, arena: Allocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !object.VmClassRef {
+    fn defineClass(self: *Self, arena: Allocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !VmClassRef {
         var stream = std.io.fixedBufferStream(class_bytes);
         var classfile = try cafebabe.ClassFile.parse(arena, self.alloc, &stream);
         errdefer classfile.deinit(self.alloc);

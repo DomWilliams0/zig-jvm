@@ -51,7 +51,7 @@ pub const DataType = enum(u4) {
             .char, .short => 2,
             .float, .int => 4,
             .double, .long => 8,
-            .reference => @sizeOf(object.VmObjectRef),
+            .reference => @sizeOf(object.VmObjectRef.Nullable),
             else => 0,
         };
     }
@@ -66,7 +66,7 @@ pub const DataType = enum(u4) {
             .char => i16,
             .float => f32,
             .double => f64,
-            .reference => object.VmObjectRef,
+            .reference => object.VmObjectRef.Nullable,
             else => @compileError("no corresponding type"),
         };
     }
@@ -81,7 +81,8 @@ pub const DataType = enum(u4) {
             u16 => .char,
             f32 => .float,
             f64 => .double,
-            object.VmObjectRef, object.VmObjectRef.Nullable => .reference,
+            object.VmObjectRef.Nullable => .reference,
+            object.VmObjectRef => @compileError("use Nullable reference instead"),
             else => @compileError("invalid type " ++ @typeName(T)),
         };
     }

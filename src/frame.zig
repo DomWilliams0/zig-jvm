@@ -25,7 +25,8 @@ pub const Frame = struct {
         ty: types.DataType,
 
         fn new(value: anytype) StackEntry {
-            return .{ .ty = types.DataType.fromType(@TypeOf(value)), .value = convert(@TypeOf(value)).to(value) };
+            const val = if (@TypeOf(value) == object.VmObjectRef) value.intoNullable() else value;
+            return .{ .ty = types.DataType.fromType(@TypeOf(val)), .value = convert(@TypeOf(val)).to(val) };
         }
 
         fn notPresent() StackEntry {
@@ -53,7 +54,7 @@ pub const Frame = struct {
                 .char => std.fmt.format(writer, "{}", .{convert(u16).from(self.value)}),
                 .float => std.fmt.format(writer, "{}", .{convert(f32).from(self.value)}),
                 .double => std.fmt.format(writer, "{}", .{convert(f64).from(self.value)}),
-                .reference => std.fmt.format(writer, "{}", .{convert(object.VmObjectRef).from(self.value)}),
+                .reference => std.fmt.format(writer, "{}", .{convert(object.VmObjectRef.Nullable).from(self.value)}),
                 .returnAddress => std.fmt.format(writer, "{x}", .{convert(usize).from(self.value)}),
                 .void => std.fmt.formatBuf("void", options, writer),
             };
@@ -432,7 +433,7 @@ test "operands to callee local vars II" {
     // setup stack
     var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var stack = Frame.OperandStack.new(&o_backing);
-    stack.push(object.VmObjectRef.nullRef()); // implicit this, on bottom of stack
+    stack.push(object.VmObjectRef.Nullable.nullRef()); // implicit this, on bottom of stack
     stack.push(@as(i32, 10));
     stack.push(@as(i32, 25)); // top of stack
     stack.log();
@@ -443,7 +444,7 @@ test "operands to callee local vars II" {
 
     stack.transferToCallee(&vars, method, true); // implicit this
 
-    try std.testing.expectEqual(vars.get(object.VmObjectRef.Nullable, 0).*, object.VmObjectRef.nullRef());
+    try std.testing.expectEqual(vars.get(object.VmObjectRef.Nullable, 0).*, object.VmObjectRef.Nullable.nullRef());
     try std.testing.expectEqual(vars.get(i32, 1).*, 10);
     try std.testing.expectEqual(vars.get(i32, 2).*, 25);
 }
