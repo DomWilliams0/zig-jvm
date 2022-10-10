@@ -240,21 +240,21 @@ pub const InsnContext = struct {
         _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack()) catch std.debug.panic("invokevirtual failed", .{});
     }
 
-    fn resolveField(self: @This(), idx: u16) *const cafebabe.Field {
+    fn resolveField(self: @This(), idx: u16, comptime variant: enum { instance, static }) struct { field: *cafebabe.Field, cls: VmClassRef } {
         // lookup info
         const info = self.constantPool().lookupField(idx) orelse unreachable;
 
         // ensure resolved (5.4.3.2)
         // TODO cache this in constant pool
 
-        // resolve class
-        const cls = self.resolveClass(info.cls, .resolve_only);
+        // resolve and/or init class
+        const cls = self.resolveClass(info.cls, if (variant == .static) .ensure_initialised else .resolve_only);
 
         // lookup in class
         const field = cls.get().findFieldInSupers(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError"); // TODO
 
         // TODO access control
-        return field;
+        return .{ .field = field, .cls = cls };
     }
 
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
@@ -572,8 +572,31 @@ pub const handlers = struct {
     }
 
     pub fn _putstatic(ctxt: InsnContext) void {
-        // TODO
-        _ = ctxt;
+        const info = ctxt.resolveField(ctxt.readU16(), .static);
+        const field = info.field;
+
+        const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
+
+        field.u.value = val.value;
+        std.log.debug("putstatic({}, {s}) = {x}", .{ info.cls, field.name, val });
+    }
+    pub fn _getstatic(ctxt: InsnContext) void {
+        // resolve field and class
+        const info = ctxt.resolveField(ctxt.readU16(), .static);
+        const field = info.field;
+
+        std.debug.assert(field.flags.contains(.static)); // verified
+        const raw_value = field.u.value;
+
+        const field_ty = field.descriptor.getType();
+        const ty = switch (field_ty) {
+            .primitive => |prim| prim.toDataType(),
+            .reference, .array => .reference,
+        };
+
+        const value = frame.Frame.StackEntry{ .value = raw_value, .ty = ty };
+        ctxt.operandStack().pushRaw(value);
+        std.log.debug("getstatic({}, {s}) = {x}", .{ info.cls, field.name, value });
     }
 
     pub fn _return(ctxt: InsnContext) void {
@@ -611,7 +634,7 @@ pub const handlers = struct {
     }
 
     pub fn _putfield(ctxt: InsnContext) void {
-        const field = ctxt.resolveField(ctxt.readU16());
+        const field = ctxt.resolveField(ctxt.readU16(), .instance).field;
 
         const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
@@ -635,10 +658,7 @@ pub const handlers = struct {
     }
 
     pub fn _getfield(ctxt: InsnContext) void {
-        const field = ctxt.resolveField(ctxt.readU16());
-        const field_ty = field.descriptor.getType();
-        _ = field_ty;
-
+        const field = ctxt.resolveField(ctxt.readU16(), .instance).field;
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse @panic("NPE");
 

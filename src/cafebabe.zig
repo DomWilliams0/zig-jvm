@@ -545,7 +545,7 @@ pub const ConstantPool = struct {
         if (allow_wide) tags ++ .{ Tag.long, Tag.double };
         const constant = self.lookupMany(idx_cp, tags) orelse return null;
         return switch (constant.tag) {
-            .class => .{.class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null},
+            .class => .{ .class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
 
             else => @panic("TODO other constants"),
         };

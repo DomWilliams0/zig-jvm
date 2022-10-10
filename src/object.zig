@@ -173,7 +173,7 @@ pub const VmClass = struct {
         name: []const u8,
         desc: []const u8,
         flags: anytype,
-    ) ?*const Field {
+    ) ?*Field {
         // check self first
         if (self.findFieldInThisOnly(name, desc, flags)) |f| return f;
 
@@ -192,7 +192,7 @@ pub const VmClass = struct {
         name: []const u8,
         desc: []const u8,
         flags: anytype,
-    ) ?*const Field {
+    ) ?*Field {
         const pls = makeFlagsAndAntiFlags(Field.Flags, flags);
         return for (self.u.obj.fields) |m, i| {
             if ((m.flags.bits.mask & pls.flags.bits.mask) == pls.flags.bits.mask and

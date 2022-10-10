@@ -187,6 +187,10 @@ pub fn VmRef(comptime T: type) type {
             if (@sizeOf(VmRef(T).Nullable) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
             if (@sizeOf(VmRef(T).Weak) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
         }
+
+        pub fn format(self: Strong, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            return Nullable.format(self.intoNullable(), fmt, options, writer);
+        }
     };
 }
 
