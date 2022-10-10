@@ -338,7 +338,9 @@ pub const InsnContext = struct {
         switch (constant) {
             .class => |name| {
                 const cls = self.resolveClass(name, .resolve_only);
-                self.operandStack().push(cls.get().getClassInstance().clone());
+                _ = cls;
+                @panic("TODO get java/lang/Class instance");
+                // self.operandStack().push(cls.get().getClassInstance().clone());
             },
         }
     }

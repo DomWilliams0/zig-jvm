@@ -149,6 +149,7 @@ fn interpreterLoop() void {
         const f = if (thread.interpreter.top_frame) |f| f else break;
         ctxt.frame = f;
         f.operands.log();
+        f.local_vars.log(f.method.code.max_locals);
 
         const next_insn = f.code_window.?[0];
 

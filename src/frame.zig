@@ -228,6 +228,30 @@ pub const Frame = struct {
         pub fn getRaw(self: *@This(), idx: u16) *Frame.StackEntry {
             return &self.vars[idx];
         }
+
+        pub fn log(self: @This(), max: u16) void {
+            if (!logging) return;
+
+            var ptr = self.vars;
+            _ = ptr;
+            var i: u16 = 0;
+
+            var buf: [1024]u8 = undefined;
+            var writer = std.io.fixedBufferStream(&buf);
+            _ = writer.write("local vars: [") catch unreachable;
+            while (i < max) : (i += 1) {
+                if (i != 0) {
+                    _ = writer.write(", ") catch break;
+                }
+                const lvar = self.vars[i];
+                std.fmt.format(writer.writer(), "#{d}: {s}, {?}", .{ i, @tagName(lvar.ty), lvar }) catch break;
+            }
+
+            _ = writer.write("]") catch {};
+
+            const s = buf[0..writer.pos];
+            std.log.debug("{s}", .{s});
+        }
     };
 };
 
