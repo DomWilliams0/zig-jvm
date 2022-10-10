@@ -116,6 +116,11 @@ pub const InsnContext = struct {
         return b[1];
     }
 
+    fn readI8(self: Self) i8 {
+        const b = self.body();
+        return @bitCast(i8, b[1]);
+    }
+
     const ClassResolution = enum {
         resolve_only,
         ensure_initialised,
@@ -160,7 +165,7 @@ pub const InsnContext = struct {
         // TODO check access control?
 
         // invoke with caller frame
-        self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack()) catch std.debug.panic("clinit failed", .{});
+        _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack()) catch std.debug.panic("clinit failed", .{});
     }
 
     fn invokeSpecialMethod(self: @This(), idx: u16) void {
@@ -200,7 +205,7 @@ pub const InsnContext = struct {
         std.log.debug("resolved method to {s}.{s}", .{ cls.get().name, method.name });
 
         // invoke with caller frame
-        self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack()) catch std.debug.panic("invokespecial failed", .{});
+        _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack()) catch std.debug.panic("invokespecial failed", .{});
     }
 
     fn invokeVirtualMethod(self: @This(), idx: u16) void {
@@ -232,7 +237,7 @@ pub const InsnContext = struct {
         std.log.debug("resolved method to {s}.{s}", .{ selected_cls.get().name, selected_method.method.name });
 
         // invoke with caller frame
-        self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack()) catch std.debug.panic("invokevirtual failed", .{});
+        _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack()) catch std.debug.panic("invokevirtual failed", .{});
     }
 
     fn resolveField(self: @This(), idx: u16) *const cafebabe.Field {
@@ -344,7 +349,7 @@ pub const handlers = struct {
     }
 
     pub fn _bipush(ctxt: InsnContext) void {
-        ctxt.operandStack().push(@as(i32, ctxt.readU8()));
+        ctxt.operandStack().push(@as(i32, ctxt.readI8()));
     }
 
     pub fn _iconst_m1(ctxt: InsnContext) void {

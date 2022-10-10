@@ -1,20 +1,30 @@
 const classloader = @import("classloader.zig");
 const vm_type = @import("type.zig");
+const object = @import("object.zig");
 
 const Preload = struct {
     cls: []const u8,
+    initialise: bool = false,
     // TODO native method bindings. use comptime reflection to link up
 };
 
 const preload_classes: [2]Preload = .{ .{ .cls = "java/lang/String" }, .{ .cls = "[I" } };
 
-fn load(preload: Preload, loader: *classloader.ClassLoader) !void {
+pub const Options = struct {
+    /// Skip initialising
+    no_initialise: bool = false,
+};
+
+fn load(comptime opts: Options, preload: Preload, loader: *classloader.ClassLoader) !void {
     // TODO check for array
     // TODO handle user loader
 
     // TODO comptime check '[' and call another func. but check that all the many preload funcs share the same generated code
     // TODO variant with comptime bootstrap loader
-    _ = try loader.loadClass(preload.cls, .bootstrap);
+    const cls = try loader.loadClass(preload.cls, .bootstrap);
+
+    if (!opts.no_initialise and preload.initialise)
+        object.VmClass.ensureInitialised(cls);
 }
 
 fn loadPrimitives(loader: *classloader.ClassLoader) !void {
@@ -23,13 +33,13 @@ fn loadPrimitives(loader: *classloader.ClassLoader) !void {
     }
 }
 
-pub fn initBootstrapClasses(loader: *classloader.ClassLoader) !void {
-    try load(.{ .cls = "java/lang/Object" }, loader);
-    try load(.{ .cls = "java/lang/Class" }, loader);
+pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Options) !void {
+    try load(opts, .{ .cls = "java/lang/Object", .initialise = true }, loader);
+    try load(opts, .{ .cls = "java/lang/Class", .initialise = true }, loader);
 
     // TODO fix up class vmdata pointers now
 
     try loadPrimitives(loader);
     inline for (preload_classes) |preload|
-        try load(preload, loader);
+        try load(opts, preload, loader);
 }

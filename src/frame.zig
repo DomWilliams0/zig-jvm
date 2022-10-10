@@ -20,6 +20,7 @@ pub const Frame = struct {
     // Used only if parent_frame is null.. pretty gross TODO
     dummy_return_slot: ?*Frame.StackEntry,
 
+    // TODO move this out of frame as a generic VM type
     pub const StackEntry = struct {
         value: usize,
         ty: types.DataType,
@@ -29,7 +30,7 @@ pub const Frame = struct {
             return .{ .ty = types.DataType.fromType(@TypeOf(val)), .value = convert(@TypeOf(val)).to(val) };
         }
 
-        fn notPresent() StackEntry {
+        pub fn notPresent() StackEntry {
             return .{ .value = 0, .ty = .void };
         }
 

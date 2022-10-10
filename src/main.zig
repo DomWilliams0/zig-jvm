@@ -18,7 +18,7 @@ pub fn main() !void {
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);
 
-    const jvm_args = try arg.JvmArgs.parse(alloc, raw_args) orelse {
+    const jvm_args = try arg.JvmArgs.parse(alloc, raw_args, .{}) orelse {
         std.log.info("TODO show usage", .{});
         return;
     };
@@ -35,6 +35,7 @@ pub fn main() !void {
     // TODO exception
     try bootstrap.initBootstrapClasses(
         &jvm_handle.global.classloader,
+        .{},
     );
 
     //  TODO get system classloader
@@ -47,7 +48,7 @@ pub fn main() !void {
     const main_method = main_cls.get().findMethodInThisOnly("main", "([Ljava/lang/String;)V", .{ .public = true, .static = true }) orelse unreachable;
 
     // invoke main
-    try jvm.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
+    _ = try jvm.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
 
     std.log.info("done", .{});
 

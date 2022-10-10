@@ -45,8 +45,11 @@ pub const JvmArgs = struct {
         indices: std.ArrayList(Elem),
         slice: ?[]const u8,
 
+        /// Extra static paths to use, TODO do this better
+        extras: std.ArrayList([]const u8),
+
         fn new(alloc: Allocator) @This() {
-            return .{ .indices = std.ArrayList(Elem).init(alloc), .slice = null };
+            return .{ .indices = std.ArrayList(Elem).init(alloc), .slice = null, .extras = std.ArrayList([]const u8).init(alloc) };
         }
 
         fn initWith(self: *@This(), path: []const u8) !void {
@@ -61,17 +64,27 @@ pub const JvmArgs = struct {
             }
         }
 
+        pub fn addExtra(self: *@This(), extra: []const u8) !void {
+            try self.extras.append(extra);
+        }
+
         fn deinit(self: *@This()) void {
             self.indices.deinit();
         }
 
         const ClasspathIterator = struct {
             cp: *const Classpath,
-            next_idx: u32,
+            next_idx: u32 = 0,
+            extra_idx: u32 = 0,
 
             pub fn next(self: *@This()) ?[]const u8 {
                 const idx = self.next_idx;
-                if (idx >= self.cp.indices.items.len) return null;
+                if (idx >= self.cp.indices.items.len) {
+                    // time for extras
+                    if (self.extra_idx >= self.cp.extras.items.len) return null;
+                    defer self.extra_idx += 1;
+                    return self.cp.extras.items[self.extra_idx];
+                }
                 self.next_idx += 1;
 
                 const elem = self.cp.indices.items[idx];
@@ -80,13 +93,15 @@ pub const JvmArgs = struct {
         };
 
         pub fn iterator(self: *const @This()) ClasspathIterator {
-            return .{ .cp = self, .next_idx = 0 };
+            return .{ .cp = self };
         }
     };
 
+    pub const Options = struct { require_main_class: bool = true };
+
     /// Args must live as long as this.
     /// If returns null, show usage
-    pub fn parse(alloc: Allocator, args: []const [:0]const u8) !?JvmArgs {
+    pub fn parse(alloc: Allocator, args: []const [:0]const u8, comptime opts: Options) !?JvmArgs {
         const parsed = do_parse(args) orelse return null;
 
         // abort on help
@@ -98,7 +113,7 @@ pub const JvmArgs = struct {
 
         if (parsed.get(.main_class)) |cls| {
             main_class = cls.?;
-        } else {
+        } else if (opts.require_main_class) {
             return null;
         }
 

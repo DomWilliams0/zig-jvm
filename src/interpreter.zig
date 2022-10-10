@@ -20,16 +20,28 @@ pub const Interpreter = struct {
         self.frames_alloc.deinit();
     }
 
-    pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !void {
+    pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !frame.Frame.StackEntry {
         return self.executeUntilReturnWithCallerFrame(class, method, null);
     }
 
-    pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) !void {
+    pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) !frame.Frame.StackEntry {
         // TODO format on method to show class.method
         std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
         defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
 
-        if (method.code.code == null) @panic("TODO native method");
+        if (method.code.code == null) {
+            var count = method.descriptor.param_count;
+            if (!method.flags.contains(.static)) count += 1;
+
+            std.log.warn("skipping unimplemented native method", .{});
+            if (caller) |caller_stack| {
+                while (count > 0) : (count -= 1) {
+                    _ = caller_stack.popRaw();
+                }
+            }
+
+            return frame.Frame.StackEntry.notPresent();
+        }
 
         // alloc local var and operand stack storage
         var operands: frame.Frame.OperandStack = undefined; // set next
@@ -95,6 +107,8 @@ pub const Interpreter = struct {
         // go go go
         std.log.debug("{?}", .{self.callstack()});
         interpreterLoop();
+
+        return dummy_return_slot;
     }
 
     fn frameAllocator(self: @This()) std.mem.Allocator {

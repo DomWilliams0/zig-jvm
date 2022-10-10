@@ -16,6 +16,11 @@ pub fn build(b: *std.build.Builder) void {
     exe.setBuildMode(mode);
     exe.install();
 
+    const test_runner = b.addExecutable("jvm-test-runner", "src/test-runner.zig");
+    test_runner.setTarget(target);
+    test_runner.setBuildMode(mode);
+    test_runner.install();
+
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
