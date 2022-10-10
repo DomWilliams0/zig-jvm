@@ -331,6 +331,17 @@ pub const InsnContext = struct {
 
         self.operandStack().push(result);
     }
+
+    fn loadConstant(self: @This(), idx: u16, comptime allow_wide: bool) void {
+        const constant = self.constantPool().lookupConstant(idx, allow_wide) orelse unreachable;
+
+        switch (constant) {
+            .class => |name| {
+                const cls = self.resolveClass(name, .resolve_only);
+                self.operandStack().push(cls.get().getClassInstance().clone());
+            },
+        }
+    }
 };
 
 /// Instruction implementations, resolved in `handler_lookup`
@@ -686,6 +697,10 @@ pub const handlers = struct {
     }
     pub fn _ddiv(ctxt: InsnContext) void {
         ctxt.binaryOp(f64, .div);
+    }
+
+    pub fn _ldc(ctxt: InsnContext) void {
+        ctxt.loadConstant(ctxt.readU8(), false);
     }
 };
 

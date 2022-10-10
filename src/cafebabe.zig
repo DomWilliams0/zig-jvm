@@ -528,6 +528,29 @@ pub const ConstantPool = struct {
         return name[2 .. 2 + len];
     }
 
+    pub const LoadableConstant = union(enum) {
+        /// Class name
+        class: []const u8,
+    };
+    pub fn lookupConstant(self: Self, idx_cp: u16, comptime allow_wide: bool) ?LoadableConstant {
+        const tags = .{
+            Tag.integer,
+            Tag.float,
+            Tag.class,
+            Tag.string,
+            Tag.methodHandle,
+            Tag.methodType,
+            Tag.dynamic,
+        };
+        if (allow_wide) tags ++ .{ Tag.long, Tag.double };
+        const constant = self.lookupMany(idx_cp, tags) orelse return null;
+        return switch (constant.tag) {
+            .class => .{.class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null},
+
+            else => @panic("TODO other constants"),
+        };
+    }
+
     fn validateIndexCp(self: Self, idx_cp: u16) ?usize {
         // const idx = std.math.sub(u16, idx_cp, 1) catch return null; // adjust for 1 based indexing
         if (idx_cp == 0 or idx_cp >= self.indices.len + 1) {

@@ -120,6 +120,10 @@ pub fn VmRef(comptime T: type) type {
                 return if (self.ptr) |p| Strong{ .ptr = p } else null;
             }
 
+            pub fn toStrongUnchecked(self: @This()) Strong {
+                return Strong{ .ptr = self.ptr.? };
+            }
+
             pub fn format(self: Nullable, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
                 _ = fmt;
                 if (self.toStrong()) |strong| {
