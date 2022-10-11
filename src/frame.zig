@@ -207,6 +207,11 @@ pub const Frame = struct {
             // copy final args
             const n = src - last_copy;
             std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+            if (logging) {
+                var i: u16 = 0;
+                while (i < param_count) : (i += 1)
+                    callee.setInitialised(i);
+            }
 
             // shrink source
             self.stack -= param_count;
@@ -215,7 +220,13 @@ pub const Frame = struct {
 
     pub const LocalVars = struct {
         vars: [*]Frame.StackEntry,
-        // TODO track bounds in debug builds
+
+        // track initialised vars for logging
+        initialised: if (logging) std.DynamicBitSet else void,
+
+        fn setInitialised(self: *@This(), idx: u16) void {
+            if (logging) self.initialised.set(idx);
+        }
 
         pub fn get(self: *@This(), comptime T: type, idx: u16) *T {
             return self.getRaw(idx).convertToPtr(T);
@@ -223,6 +234,7 @@ pub const Frame = struct {
 
         pub fn set(self: *@This(), value: anytype, idx: u16) void {
             self.vars[idx] = Frame.StackEntry.new(value);
+            self.setInitialised(idx);
         }
 
         pub fn getRaw(self: *@This(), idx: u16) *Frame.StackEntry {
@@ -239,12 +251,17 @@ pub const Frame = struct {
             var i: u16 = 0;
 
             var buf: [1024]u8 = undefined;
+            var written_anything = false;
             var writer = std.io.fixedBufferStream(&buf);
             _ = writer.write("local vars: [") catch unreachable;
             while (i < max) : (i += 1) {
-                if (i != 0) {
+                if (!self.initialised.isSet(i)) continue; // only log if initialised
+
+                if (written_anything) {
                     _ = writer.write(", ") catch break;
                 }
+                written_anything = true;
+
                 const lvar = self.vars[i];
                 std.fmt.format(writer.writer(), "#{d}: {s}, {?}", .{ i, @tagName(lvar.ty), lvar }) catch break;
             }
