@@ -25,7 +25,8 @@ pub const Handler = struct {
                 const func = if (@hasDecl(handlers, name)) @field(handlers, name) else nop_handler(insn);
                 @call(.{ .modifier = .always_inline }, func, .{ctxt});
 
-                ctxt.frame.code_window.? += @as(usize, insn.sz) + 1;
+                if (!insn.jmps)
+                    ctxt.frame.code_window.? += @as(usize, insn.sz) + 1;
             }
         };
 
@@ -111,6 +112,11 @@ pub const InsnContext = struct {
         return @as(u16, b[1]) << 8 | @as(u16, b[2]);
     }
 
+    fn readI16(self: Self) i16 {
+        const b = self.body();
+        return @as(i16, b[1]) << 8 | @as(i16, b[2]);
+    }
+
     fn readU8(self: Self) u16 {
         const b = self.body();
         return b[1];
@@ -119,6 +125,11 @@ pub const InsnContext = struct {
     fn readI8(self: Self) i8 {
         const b = self.body();
         return @bitCast(i8, b[1]);
+    }
+
+    fn readSecondI8(self: Self) i8 {
+        const b = self.body();
+        return @bitCast(i8, b[2]);
     }
 
     const ClassResolution = enum {
@@ -298,6 +309,7 @@ pub const InsnContext = struct {
         int: type,
         specific: type,
     };
+
     fn arrayStore(self: @This(), comptime opt: ArrayStoreLoad) void {
         const pop_ty = switch (opt) {
             .byte_bool, .int => i32,
@@ -320,6 +332,30 @@ pub const InsnContext = struct {
         }
 
         std.log.debug("array store {} idx {} = {}", .{ array_obj, idx, val });
+    }
+
+    fn arrayLoad(self: @This(), comptime opt: ArrayStoreLoad) void {
+        const pop_ty = switch (opt) {
+            .byte_bool, .int => i32,
+            .specific => |ty| ty,
+        };
+        _ = pop_ty;
+
+        const idx_unchecked = self.operandStack().pop(i32);
+        const array_opt = self.operandStack().pop(VmObjectRef.Nullable);
+
+        const array_obj = array_opt.toStrong() orelse @panic("NPE");
+        const array = array_obj.get().getArrayHeader();
+
+        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len) @panic("ArrayIndexOutOfBoundsException") else @intCast(usize, idx_unchecked);
+
+        self.operandStack().push(switch (opt) {
+            .int => |ty| @intCast(i32, array.getElems(ty)[idx]),
+            .specific => |ty| array.getElems(ty)[idx],
+            .byte_bool => @intCast(i32, array.getElems(i8)[idx]),
+        });
+
+        std.log.debug("array load {} idx {} = {}", .{ array_obj, idx, self.operandStack().peekRaw() });
     }
 
     /// Pops value from top of stack for a putfield/putstatic insn
@@ -371,6 +407,61 @@ pub const InsnContext = struct {
         }, val2, result });
 
         self.operandStack().push(result);
+    }
+
+    const BinaryCmp = enum {
+        eq,
+        ne,
+        lt,
+        ge,
+        gt,
+        le,
+
+        fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            return std.fmt.formatBuf(switch (self) {
+                .eq => "==",
+                .ne => "!=",
+                .lt => "<",
+                .ge => ">=",
+                .gt => ">",
+                .le => "<=",
+            }, options, writer);
+        }
+    };
+
+    fn ifCmp(self: @This(), comptime T: type, comptime op: BinaryCmp) void {
+        const val2 = self.operandStack().pop(T);
+        const val1 = self.operandStack().pop(T);
+
+        const branch = switch (op) {
+            .ge => val1 >= val2,
+            else => @panic("TODO"),
+        };
+
+        std.log.debug("cmp: {} {s} {} = {}{s}", .{ val1, @tagName(op), val2, branch, blk: {
+            var buf: [32]u8 = undefined;
+            break :blk if (branch)
+                std.fmt.bufPrint(&buf, " jmp +{d}", .{self.readI16()}) catch unreachable
+            else
+                "";
+        } });
+
+        if (branch) {
+            self.goto(self.readI16());
+        } else {
+            // manually increment pc past this insn (and size 2)
+            self.goto(2 + 1);
+        }
+    }
+
+    /// Adds offset to pc
+    fn goto(self: @This(), offset: i16) void {
+        if (offset >= 0) {
+            self.frame.code_window.? += @intCast(usize, offset);
+        } else {
+            self.frame.code_window.? -= @intCast(usize, -offset);
+        }
     }
 
     fn loadConstant(self: @This(), idx: u16, comptime allow_wide: bool) void {
@@ -823,12 +914,51 @@ pub const handlers = struct {
     pub fn _aastore(ctxt: InsnContext) void {
         ctxt.arrayStore(.{ .specific = VmObjectRef.Nullable });
     }
+    pub fn _iaload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .int = i32 });
+    }
+    pub fn _saload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .int = i16 });
+    }
+    pub fn _baload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.byte_bool);
+    }
+    pub fn _caload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .int = u16 });
+    }
+    pub fn _faload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .specific = f32 });
+    }
+    pub fn _daload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .specific = f64 });
+    }
+    pub fn _aaload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .specific = VmObjectRef.Nullable });
+    }
 
     pub fn _arraylength(ctxt: InsnContext) void {
         const array_opt = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const array_obj = array_opt.toStrong() orelse @panic("NPE");
         const len = array_obj.get().getArrayHeader().array_len;
         ctxt.operandStack().push(@intCast(i32, len));
+    }
+
+    pub fn _if_icmpge(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .ge);
+    }
+
+    pub fn _iinc(ctxt: InsnContext) void {
+        var lvar = ctxt.localVars().get(i32, ctxt.readU8());
+        const offset = @intCast(i32, ctxt.readSecondI8());
+        std.log.debug("increment {} += {}", .{ lvar.*, offset });
+        lvar.* += offset;
+    }
+
+    pub fn _goto(ctxt: InsnContext) void {
+        const offset = ctxt.readI16();
+        const pc = ctxt.currentPc();
+        std.log.debug("goto {}", .{@as(i33, pc) +% @intCast(i33, offset)});
+        ctxt.goto(offset);
     }
 };
 
