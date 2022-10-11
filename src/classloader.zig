@@ -111,6 +111,22 @@ pub const ClassLoader = struct {
         }
     }
 
+    /// Same as loadClass("[" ++ name, ...). Must not be a primitive
+    pub fn loadClassAsArrayElement(self: *Self, elem_name: []const u8, requested_loader: WhichLoader) anyerror!VmClassRef {
+        // prepend [
+        var array_cls_name: []u8 = try self.alloc.alloc(u8, elem_name.len + 1);
+        array_cls_name[0] = '[';
+        std.mem.copy(u8, array_cls_name[1..], elem_name);
+
+        return self.loadClassInternal(array_cls_name, requested_loader, .reference);
+    }
+
+    const ArrayType = enum {
+        not,
+        primitive,
+        reference,
+    };
+
     /// Main entrypoint - name can be array or class name. Loads now if not already.
     /// Loader is cloned if needed for loading.
     /// Returns BORROWED reference
@@ -119,12 +135,6 @@ pub const ClassLoader = struct {
         // TODO exception
         if (name.len < 2) std.debug.panic("class name too short {s}", .{name});
 
-        // TODO reuse classstatus enum
-        const ArrayType = enum {
-            not,
-            primitive,
-            reference,
-        };
         // TODO helper wrapper type around type names like java/lang/String and [[C ?
         const array_type: ArrayType = if (name[0] == '[')
             if (name[1] == 'L' or name[1] == '[')
@@ -141,6 +151,10 @@ pub const ClassLoader = struct {
             unreachable; // TODO load element class first
         }
 
+        return self.loadClassInternal(name, loader, array_type);
+    }
+
+    fn loadClassInternal(self: *Self, name: []const u8, loader: WhichLoader, array_type: ArrayType) anyerror!VmClassRef {
         switch (self.getLoadState(name, loader)) {
             .loading => unreachable, // TODO other threads
             .loaded => |cls| return cls,

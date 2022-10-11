@@ -128,7 +128,7 @@ pub const InsnContext = struct {
 
     /// Returns BORROWED reference
     fn resolveClass(self: @This(), name: []const u8, comptime resolution: ClassResolution) VmClassRef {
-        return self.resolveClassWithLoader(name,resolution, self.class().loader);
+        return self.resolveClassWithLoader(name, resolution, self.class().loader);
     }
 
     /// Returns BORROWED reference
@@ -291,6 +291,35 @@ pub const InsnContext = struct {
         // TODO need to bump ref count for objects?
         const val = self.localVars().get(T, idx).*;
         self.operandStack().push(val);
+    }
+
+    const ArrayStoreLoad = union(enum) {
+        byte_bool,
+        int: type,
+        specific: type,
+    };
+    fn arrayStore(self: @This(), comptime opt: ArrayStoreLoad) void {
+        const pop_ty = switch (opt) {
+            .byte_bool, .int => i32,
+            .specific => |ty| ty,
+        };
+
+        const val = self.operandStack().pop(pop_ty);
+        const idx_unchecked = self.operandStack().pop(i32);
+        const array_opt = self.operandStack().pop(VmObjectRef.Nullable);
+
+        const array_obj = array_opt.toStrong() orelse @panic("NPE");
+        const array = array_obj.get().getArrayHeader();
+
+        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len) @panic("ArrayIndexOutOfBoundsException") else @intCast(usize, idx_unchecked);
+
+        switch (opt) {
+            .int => |ty| array.getElems(ty)[idx] = @intCast(ty, val),
+            .specific => |ty| array.getElems(ty)[idx] = val,
+            .byte_bool => array.getElems(i8)[idx] = @intCast(i8, val),
+        }
+
+        std.log.debug("array store {} idx {} = {}", .{ array_obj, idx, val });
     }
 
     /// Pops value from top of stack for a putfield/putstatic insn
@@ -757,6 +786,49 @@ pub const handlers = struct {
 
         const array = object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
         ctxt.operandStack().push(array);
+    }
+
+    pub fn _anewarray(ctxt: InsnContext) void {
+        const elem_cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
+        const elem_cls = ctxt.resolveClass(elem_cls_name, .resolve_only);
+        _ = elem_cls;
+
+        const count = ctxt.operandStack().pop(i32);
+        if (count < 0) @panic("NegativeArraySizeException");
+
+        const array_cls = ctxt.thread.global.classloader.loadClassAsArrayElement(elem_cls_name, ctxt.class().loader) catch @panic("cant load array class");
+
+        const array = object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
+        ctxt.operandStack().push(array);
+    }
+
+    pub fn _iastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .int = i32 });
+    }
+    pub fn _sastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .int = i16 });
+    }
+    pub fn _bastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.byte_bool);
+    }
+    pub fn _castore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .int = u16 });
+    }
+    pub fn _fastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .specific = f32 });
+    }
+    pub fn _dastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .specific = f64 });
+    }
+    pub fn _aastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .specific = VmObjectRef.Nullable });
+    }
+
+    pub fn _arraylength(ctxt: InsnContext) void {
+        const array_opt = ctxt.operandStack().pop(VmObjectRef.Nullable);
+        const array_obj = array_opt.toStrong() orelse @panic("NPE");
+        const len = array_obj.get().getArrayHeader().array_len;
+        ctxt.operandStack().push(@intCast(i32, len));
     }
 };
 

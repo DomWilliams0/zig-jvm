@@ -436,7 +436,7 @@ pub const VmObject = struct {
         return ptr.*;
     }
 
-    fn getArrayHeader(self: *@This()) *ArrayHeader {
+    pub fn getArrayHeader(self: *@This()) *ArrayHeader {
         std.debug.assert(self.class.get().isArray());
         return @ptrCast(*ArrayHeader, @alignCast(@alignOf(ArrayHeader), &self.storage));
     }
@@ -466,7 +466,6 @@ const ArrayHeader = packed struct {
     }
 
     pub fn getElems(self: *@This(), comptime T: type) []T {
-        std.log.debug("raw elems {*} len {d}, padding {d}", .{ self.getElemsRaw(), self.getElemsRaw().len, self.padding });
         return @alignCast(@alignOf(T), std.mem.bytesAsSlice(T, self.getElemsRaw()));
     }
 };
