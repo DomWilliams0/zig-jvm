@@ -225,10 +225,11 @@ pub const ClassLoader = struct {
         const elem_dims = if (elem_class.name[0] == '[') elem_class.u.array.dims else 0;
 
         var class = try vm_alloc.allocClass();
+        const padding = elem_class.calculateArrayPreElementPadding();
         class.get().* = .{
             .flags = flags,
             .name = try self.alloc.dupe(u8, name),
-            .u = .{ .array = .{ .elem_cls = elem_class_ref, .dims = elem_dims + 1 } },
+            .u = .{ .array = .{ .elem_cls = elem_class_ref.clone(), .dims = elem_dims + 1, .padding = padding } },
             .constant_pool = undefined,
             .status = .{ .ty = .array },
             .super_cls = java_lang_Object.clone(),
@@ -248,15 +249,18 @@ pub const ClassLoader = struct {
         };
     }
 
+    /// Name should be static if loading for the first time (during startup).
+    /// Returns BORROWED class reference
     pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!VmClassRef {
-        const ty = vm_type.DataType.fromTypeString(name) orelse std.debug.panic("invalid primitive {s}", .{name});
+        const ty = vm_type.PrimitiveDataType.fromTypeString(name) orelse std.debug.panic("invalid primitive {s}", .{name});
         return self.loadPrimitiveWithType(name, ty);
     }
 
-    /// Name should be static if lodaing for the first time (during startup)
-    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.DataType) anyerror!VmClassRef {
+    /// Name should be static if loading for the first time (during startup).
+    /// Returns BORROWED class reference
+    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.PrimitiveDataType) anyerror!VmClassRef {
         var entry = &self.primitives[@enumToInt(ty)];
-        if (entry.toStrong()) |cls| return cls.clone();
+        if (entry.toStrong()) |cls| return cls;
 
         std.log.debug("loading primitive {s}", .{name});
 
@@ -272,8 +276,8 @@ pub const ClassLoader = struct {
             .loader = .bootstrap,
         };
 
-        entry.* = class.clone().intoNullable();
-        return class;
+        entry.* = class.intoNullable();
+        return class; // borrowed
     }
 
     /// Class bytes are the callers responsiblity to clean up.

@@ -78,15 +78,16 @@ pub const JvmHandle = struct {
 
         thread_env.deinit();
 
-        // all other threads should be dead now, clear threadlocals
+        // all other threads should be dead now, destroy global context
         std.log.info("destroying main thread", .{});
-        thread_env = undefined;
-        inited = false;
 
-        // destroy global context
         self.global.classloader.deinit();
         const alloc = self.global.allocator.inner;
         alloc.destroy(self.global);
+
+        thread_env = undefined;
+        inited = false;
+
         var self_mut = self;
         self_mut.global = undefined;
     }

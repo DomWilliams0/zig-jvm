@@ -33,10 +33,12 @@ pub const VmClass = struct {
             methods: []Method,
             layout: ObjectLayout,
         },
-        primitive: vm_type.DataType,
+        primitive: vm_type.PrimitiveDataType,
         array: struct {
             elem_cls: VmClassRef,
             dims: u8,
+            /// Padding bytes between u32 len and start of elements
+            padding: u8,
         },
     },
 
@@ -298,6 +300,58 @@ pub const VmClass = struct {
 
         return obj_ref;
     }
+
+    /// Returns padding between object.storage and start of elements (skipping past header)
+    pub fn calculateArrayPreElementPadding(self: @This()) u8 {
+        return std.mem.alignForwardGeneric(u8, @sizeOf(ArrayHeader), if (self.isPrimitive()) self.u.primitive.alignment() else @alignOf(usize));
+    }
+
+    /// Self is array class, and is cloned to pass to object
+    pub fn instantiateArray(self: VmClassRef, len: usize) VmObjectRef {
+        std.debug.assert(self.get().isArray());
+        const cls = self.get();
+        std.log.debug("instantiating array of class {s} with {d} length", .{ cls.name, len });
+
+        const elem_cls = cls.u.array.elem_cls;
+        const elem_sz = if (elem_cls.get().isPrimitive())
+            elem_cls.get().u.primitive.size()
+        else
+            @sizeOf(usize);
+
+        // TODO combine size and align into single getter
+        const elem_align = if (elem_cls.get().isPrimitive())
+            elem_cls.get().u.primitive.alignment()
+        else
+            @alignOf(usize);
+        _ = elem_align;
+
+        var array_size: usize = undefined;
+        if (len >= std.math.maxInt(u32) or @mulWithOverflow(usize, len, elem_sz, &array_size)) @panic("overflow, array is too big!!");
+
+        const padding = cls.u.array.padding;
+        // store a u32 len, padding, then the elems
+        // TODO alignment is too big for most array types, can save some bytes
+        var array_ref = VmObjectRef.new_uninit(@sizeOf(ArrayHeader) + padding + array_size, @alignOf(usize)) catch @panic("out of memory");
+
+        // init object fields
+        array_ref.get().* = .{
+            .class = self.clone(),
+            .storage = {},
+        };
+
+        // init array
+        var header = array_ref.get().getArrayHeader();
+        header.* = ArrayHeader{
+            .array_len = @truncate(u32, len),
+            .elem_sz = @truncate(u8, elem_sz),
+            .padding = padding,
+        };
+        // TODO zero allocator?
+        // set default field values, luckily all zero bits is +0.0 for floats+doubles, and null ptrs (TODO really for objects?)
+        std.mem.set(u8, header.getElemsRaw(), 0);
+
+        return array_ref;
+    }
 };
 
 const Monitor = struct {
@@ -321,7 +375,10 @@ pub const VmObject = struct {
         const cls = self.class.get();
         return if (cls.isObject())
             cls.u.obj.layout.instance_offset
-        else if (cls.isArray()) @panic("TODO array instantiation") else 0;
+        else if (cls.isArray()) blk: {
+            const header = self.getArrayHeaderConst();
+            break :blk @sizeOf(ArrayHeader) + header.padding + (header.array_len * header.elem_sz);
+        } else 0;
     }
     pub fn vmRefDrop(self: *@This()) void {
         self.class.drop();
@@ -378,6 +435,40 @@ pub const VmObject = struct {
         // TODO need to clone vm object?
         return ptr.*;
     }
+
+    fn getArrayHeader(self: *@This()) *ArrayHeader {
+        std.debug.assert(self.class.get().isArray());
+        return @ptrCast(*ArrayHeader, @alignCast(@alignOf(ArrayHeader), &self.storage));
+    }
+
+    fn getArrayHeaderConst(self: *const @This()) *const ArrayHeader {
+        std.debug.assert(self.class.get().isArray());
+        return @ptrCast(*const ArrayHeader, @alignCast(@alignOf(ArrayHeader), &self.storage));
+    }
+};
+
+const ArrayHeader = packed struct {
+    // TODO actually max length is a u31
+    array_len: u32,
+    /// Size of each element
+    elem_sz: u8,
+    /// Padding between start of this header and the elements
+    padding: u8,
+
+    /// Here is `this.padding` bytes of padding then the elements
+    next: void = {},
+
+    // Must be within a VmObject
+    pub fn getElemsRaw(self: *@This()) []u8 {
+        var start: [*]u8 = @ptrCast([*]u8, @alignCast(1, self)) + self.padding;
+        const slice_len = self.array_len * self.elem_sz;
+        return start[0..slice_len];
+    }
+
+    pub fn getElems(self: *@This(), comptime T: type) []T {
+        std.log.debug("raw elems {*} len {d}, padding {d}", .{ self.getElemsRaw(), self.getElemsRaw().len, self.padding });
+        return @alignCast(@alignOf(T), std.mem.bytesAsSlice(T, self.getElemsRaw()));
+    }
 };
 
 pub const VmClassRef = vm_alloc.VmRef(VmClass);
@@ -393,25 +484,6 @@ pub const FieldId = union(enum) {
 pub const ObjectLayout = struct {
     /// Exact offset from start of object to end of field storage
     instance_offset: u16 = @sizeOf(VmObject),
-};
-
-/// Implicitly lives at the end of an object allocation that is an array
-pub const ArrayStorageRef = extern struct {
-    len: u32,
-    // `len` elements go here
-
-    fn elementsStart(self: *@This(), comptime T: type) []T {
-        std.debug.assert(@sizeOf(T) != 0);
-        // const padding = 0; // TODO
-
-        const ptr: [*]u32 = &self.len;
-        _ = ptr;
-        unreachable;
-    }
-
-    pub fn getElementsShorts(self: *@This()) []i16 {
-        _ = self;
-    }
 };
 
 /// Updates layout_offset in each field, offset from the given base. Updates to the offset after these fields
@@ -647,16 +719,45 @@ test "allocate object" {
     try helper.checkFieldValue(bool, obj, "myBool", "Z", true);
 }
 
-test "array" {
-    // var allocation: [32]u8 = .{0} ** 32;
-    // // const backing = [6]i16{1,2,3,4,5,6};
-    // var untyped_ref = @ptrCast(*ArrayStorageRef, &allocation[0]);
-    // untyped_ref.len = 4;
+test "allocate array" {
+    // init global allocator
+    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    defer handle.deinit();
 
-    // const typed = ArrayStorageRef.specialised(.short);
-    // var typed_ref = @ptrCast(*typed, &untyped_ref);
+    const S = struct {
+        fn checkArray(comptime elem: type, jvm: anytype, array_cls: []const u8, val: elem) !void {
+            const elem_cls = try jvm.global.classloader.loadPrimitive(array_cls[1..]);
+            defer elem_cls.drop();
 
-    // try std.testing.expectEqual(4, typed_ref.len);
+            const cls = try vm_alloc.allocClass();
+            cls.get().name = "Dummy";
+            cls.get().status = .{ .ty = .array };
+            cls.get().u = .{ .array = .{ .elem_cls = elem_cls.clone(), .dims = 1, .padding = cls.get().calculateArrayPreElementPadding() } };
+            defer cls.drop();
+
+            const obj = VmClass.instantiateArray(cls, 12);
+            defer obj.drop();
+
+            var array = obj.get().getArrayHeader();
+            try std.testing.expectEqual(@as(u32, 12), array.array_len);
+            var elems = array.getElems(elem);
+
+            try std.testing.expectEqual(@as(usize, 12), elems.len);
+            for (elems) |e| {
+                try std.testing.expectEqual(@as(elem, 0), e);
+            }
+
+            elems[0] = @as(elem, val);
+            elems[11] = @as(elem, val);
+            try std.testing.expectEqual(@as(elem, val), elems[0]);
+            try std.testing.expectEqual(@as(elem, val), elems[11]);
+        }
+    };
+
+    try S.checkArray(i32, handle, "[I", 30000);
+    try S.checkArray(i16, handle, "[S", -2000);
+    try S.checkArray(i8, handle, "[B", 115);
+    try S.checkArray(i64, handle, "[J", 0x123412345678);
 }
 
 fn makeFlagsAndAntiFlags(comptime E: type, comptime flags: anytype) struct {

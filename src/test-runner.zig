@@ -35,7 +35,8 @@ pub fn main() !void {
 
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const test_alloc = test_gpa.allocator();
-    const tests = try Test.discover(test_alloc);
+    const test_filter = std.os.getenv("ZIG_JVM_TEST_FILTER");
+    const tests = try Test.discover(test_alloc, test_filter);
     defer tests.deinit();
 
     try Test.prepareForAll();
@@ -50,7 +51,7 @@ pub fn main() !void {
 const Test = struct {
     src_path: []const u8,
 
-    fn discover(alloc: Allocator) !std.ArrayList(Test) {
+    fn discover(alloc: Allocator, filter: ?[]const u8) !std.ArrayList(Test) {
         const path = try std.fs.realpathAlloc(alloc, "./src/test");
         std.log.debug("looking for tests in {s}", .{path});
         defer alloc.free(path);
@@ -63,6 +64,9 @@ const Test = struct {
         errdefer tests.deinit();
         while (try iter.next()) |it| {
             if (it.kind == .File and std.mem.endsWith(u8, it.name, ".java")) {
+                if (filter) |f| {
+                    if (std.mem.indexOf(u8, it.name, f) == null) continue;
+                }
                 const src_path = try std.mem.concat(alloc, u8, &.{ path, "/", it.name });
                 std.log.debug("found test {s}", .{it.name});
                 try tests.append(Test{ .src_path = src_path });

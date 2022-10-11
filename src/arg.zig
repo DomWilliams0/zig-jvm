@@ -250,7 +250,7 @@ test "bad" {
 
 test "load and parse" {
     // std.testing.log_level = .debug;
-    var args = try JvmArgs.parse(std.testing.allocator, &[_][:0]const u8{ "jvm", "-cp", "/nice:cool/epic/sweet.jar:lalala", "positional" }) orelse unreachable;
+    var args = try JvmArgs.parse(std.testing.allocator, &[_][:0]const u8{ "jvm", "-cp", "/nice:cool/epic/sweet.jar:lalala", "positional" }, .{}) orelse unreachable;
     defer args.deinit();
 
     var cp = args.classpath.iterator();

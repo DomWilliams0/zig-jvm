@@ -126,12 +126,16 @@ pub const InsnContext = struct {
         ensure_initialised,
     };
 
-    // TODO exception
     /// Returns BORROWED reference
     fn resolveClass(self: @This(), name: []const u8, comptime resolution: ClassResolution) VmClassRef {
+        return self.resolveClassWithLoader(name,resolution, self.class().loader);
+    }
+
+    /// Returns BORROWED reference
+    fn resolveClassWithLoader(self: @This(), name: []const u8, comptime resolution: ClassResolution, loader: classloader.WhichLoader) VmClassRef {
         // resolve
         std.log.debug("resolving class {s}", .{name});
-        const loaded = self.thread.global.classloader.loadClass(name, self.class().loader) catch std.debug.panic("cant load", .{});
+        const loaded = self.thread.global.classloader.loadClass(name, loader) catch std.debug.panic("cant load", .{});
         // TODO cache in constant pool
 
         switch (resolution) {
@@ -144,6 +148,14 @@ pub const InsnContext = struct {
 
         return loaded;
     }
+
+    // /// Returns BORROWED reference
+    // fn resolvePrimitiveClass(self: @This(), name: []const u8) VmClassRef {
+    //     std.log.debug("resolving primitive class {s}", .{name});
+    //     const loaded = self.thread.global.classloader.loadPrimitive(name, self.class().loader) catch std.debug.panic("cant load", .{});
+    //     // TODO cache in constant pool?
+    //     return loaded;
+    // }
 
     fn invokeStaticMethod(self: @This(), idx: u16) void {
         // lookup method name/type/class
@@ -723,6 +735,28 @@ pub const handlers = struct {
 
     pub fn _ldc(ctxt: InsnContext) void {
         ctxt.loadConstant(ctxt.readU8(), false);
+    }
+
+    pub fn _newarray(ctxt: InsnContext) void {
+        const elem_ty = switch (ctxt.readU8()) {
+            4 => "[Z",
+            5 => "[C",
+            6 => "[F",
+            7 => "[D",
+            8 => "[B",
+            9 => "[S",
+            10 => "[I",
+            11 => "[J",
+            else => @panic("invalid newarray type"),
+        };
+
+        const count = ctxt.operandStack().pop(i32);
+        if (count < 0) @panic("NegativeArraySizeException");
+
+        const array_cls = ctxt.resolveClassWithLoader(elem_ty, .resolve_only, .bootstrap);
+
+        const array = object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
+        ctxt.operandStack().push(array);
     }
 };
 

@@ -232,6 +232,8 @@ pub const Frame = struct {
         pub fn log(self: @This(), max: u16) void {
             if (!logging) return;
 
+            // TODO track if written yet when logging, to not print undefined memory
+
             var ptr = self.vars;
             _ = ptr;
             var i: u16 = 0;

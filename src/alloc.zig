@@ -163,6 +163,8 @@ pub fn VmRef(comptime T: type) type {
             const padding = std.mem.alignForward(@sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
             const alloc_size = @sizeOf(InnerBlock) + padding + @sizeOf(T) + size;
 
+            // TODO should be able to get cheaply zero allocated memory from OS, to avoid needing to zero it manually
+            //  (which is exactly what is needed for default initialising arrays/objects)
             const buf = try alloc.inner.allocAdvanced(u8, alignment, alloc_size, .exact);
             if (logging) std.log.debug("allocated {*} len {d} with align={d}, size={d}", .{ buf.ptr, buf.len, alignment, alloc_size });
             const inner = @ptrCast(*InnerRef, buf);

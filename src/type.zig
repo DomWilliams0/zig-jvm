@@ -14,6 +14,47 @@ pub const PrimitiveDataType = enum(u3) {
     pub fn toDataType(self: @This()) DataType {
         return @intToEnum(DataType, @enumToInt(self));
     }
+
+    pub fn size(self: @This()) usize {
+        return switch (self) {
+            .boolean => 1,
+            .byte => 1,
+            .short => 2,
+            .char => 2,
+            .int => 4,
+            .long => 8,
+            .float => 4,
+            .double => 8,
+        };
+    }
+
+    pub fn alignment(self: @This()) u8 {
+        return switch (self) {
+            .boolean => @alignOf(bool),
+            .byte => @alignOf(i8),
+            .short => @alignOf(i16),
+            .char => @alignOf(u16),
+            .int => @alignOf(i32),
+            .long => @alignOf(u64),
+            .float => @alignOf(f32),
+            .double => @alignOf(f64),
+        };
+    }
+
+    pub fn fromTypeString(ty: []const u8) ?PrimitiveDataType {
+        const c = if (ty.len == 0) return null else ty[0];
+        return switch (c) {
+            'B' => .byte,
+            'Z' => .boolean,
+            'C' => .char,
+            'S' => .short,
+            'I' => .int,
+            'F' => .float,
+            'D' => .double,
+            'J' => .long,
+            else => null,
+        };
+    }
 };
 
 pub const DataType = enum(u4) {
@@ -52,21 +93,6 @@ pub const DataType = enum(u4) {
         } else null;
     }
 
-    pub fn fromTypeString(ty: []const u8) ?DataType {
-        const c = if (ty.len == 0) return null else ty[0];
-        return switch (c) {
-            'B' => .byte,
-            'Z' => .boolean,
-            'C' => .char,
-            'S' => .short,
-            'I' => .int,
-            'F' => .float,
-            'D' => .double,
-            'J' => .long,
-            else => null,
-        };
-    }
-
     pub fn size(self: @This()) u8 {
         return switch (self) {
             .boolean, .byte => 1,
@@ -74,6 +100,23 @@ pub const DataType = enum(u4) {
             .float, .int => 4,
             .double, .long => 8,
             .reference => @sizeOf(object.VmObjectRef.Nullable),
+            .returnAddress => 4,
+            else => 0,
+        };
+    }
+
+    pub fn alignment(self: @This()) usize {
+        return switch (self) {
+            .boolean => @alignOf(bool),
+            .byte => @alignOf(i8),
+            .short => @alignOf(i16),
+            .char => @alignOf(u16),
+            .int => @alignOf(i32),
+            .long => @alignOf(u64),
+            .float => @alignOf(f32),
+            .double => @alignOf(f64),
+            .reference => @alignOf(usize),
+            .returnAddress => @alignOf(u32),
             else => 0,
         };
     }
@@ -112,7 +155,7 @@ pub const DataType = enum(u4) {
 
 const Primitive = struct {
     name: []const u8,
-    ty: DataType,
+    ty: PrimitiveDataType,
 };
 pub const primitives: [8]Primitive = .{
     .{ .name = "boolean", .ty = .boolean },
