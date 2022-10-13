@@ -531,21 +531,34 @@ pub const ConstantPool = struct {
     pub const LoadableConstant = union(enum) {
         /// Class name
         class: []const u8,
+        long: i64,
+        double: f64,
     };
-    pub fn lookupConstant(self: Self, idx_cp: u16, comptime allow_wide: bool) ?LoadableConstant {
-        const tags = .{
-            Tag.integer,
-            Tag.float,
-            Tag.class,
-            Tag.string,
-            Tag.methodHandle,
-            Tag.methodType,
-            Tag.dynamic,
+
+    pub const ConstantLookupOption = enum {
+        any_single,
+        any_wide,
+        long_double,
+    };
+    pub fn lookupConstant(self: Self, idx_cp: u16, comptime opt: ConstantLookupOption) ?LoadableConstant {
+        const tags = switch (opt) {
+            .any_single => .{
+                Tag.integer,
+                Tag.float,
+                Tag.class,
+                Tag.string,
+                Tag.methodHandle,
+                Tag.methodType,
+                Tag.dynamic,
+            },
+            .any_wide => .{ Tag.integer, Tag.float, Tag.class, Tag.string, Tag.methodHandle, Tag.methodType, Tag.dynamic, Tag.long, Tag.double },
+            .long_double => .{ Tag.long, Tag.double },
         };
-        if (allow_wide) tags ++ .{ Tag.long, Tag.double };
         const constant = self.lookupMany(idx_cp, tags) orelse return null;
         return switch (constant.tag) {
             .class => .{ .class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
+            .long => .{ .long = @bitCast(i64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
+            .double => .{ .double = @bitCast(f64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
 
             else => @panic("TODO other constants"),
         };

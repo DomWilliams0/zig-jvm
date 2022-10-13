@@ -464,8 +464,8 @@ pub const InsnContext = struct {
         }
     }
 
-    fn loadConstant(self: @This(), idx: u16, comptime allow_wide: bool) void {
-        const constant = self.constantPool().lookupConstant(idx, allow_wide) orelse unreachable;
+    fn loadConstant(self: @This(), idx: u16, comptime opt: cafebabe.ConstantPool.ConstantLookupOption) void {
+        const constant = self.constantPool().lookupConstant(idx, opt) orelse unreachable;
 
         switch (constant) {
             .class => |name| {
@@ -474,7 +474,33 @@ pub const InsnContext = struct {
                 @panic("TODO get java/lang/Class instance");
                 // self.operandStack().push(cls.get().getClassInstance().clone());
             },
+            .long => |val| self.operandStack().push(val),
+            .double => |val| self.operandStack().push(val),
         }
+    }
+
+    fn convertPrimitive(self: @This(), comptime from: type, comptime to: type) void {
+        const val = self.operandStack().pop(from);
+        const from_int: ?std.builtin.Type.Int = switch (@typeInfo(from)) {
+            .Int => |i| i,
+            else => null,
+        };
+        const to_int: ?std.builtin.Type.Int = switch (@typeInfo(to)) {
+            .Int => |i| i,
+            else => null,
+        };
+
+        const new_val = if (from_int) |from_int_|
+            if (to_int) |to_int_|
+                if (to_int_.bits > from_int_.bits or to_int_.signedness == .unsigned) @intCast(to, val) else @truncate(to, val) // int to int
+            else
+                @intToFloat(to, val)
+        else if (to_int) |_|
+            @floatToInt(to, val)
+        else
+            @floatCast(to, val);
+
+        self.operandStack().push(new_val);
     }
 };
 
@@ -854,7 +880,10 @@ pub const handlers = struct {
     }
 
     pub fn _ldc(ctxt: InsnContext) void {
-        ctxt.loadConstant(ctxt.readU8(), false);
+        ctxt.loadConstant(ctxt.readU8(), .any_single);
+    }
+    pub fn _ldc2_w(ctxt: InsnContext) void {
+        ctxt.loadConstant(ctxt.readU16(), .long_double);
     }
 
     pub fn _newarray(ctxt: InsnContext) void {
@@ -911,6 +940,9 @@ pub const handlers = struct {
     pub fn _dastore(ctxt: InsnContext) void {
         ctxt.arrayStore(.{ .specific = f64 });
     }
+    pub fn _lastore(ctxt: InsnContext) void {
+        ctxt.arrayStore(.{ .specific = i64 });
+    }
     pub fn _aastore(ctxt: InsnContext) void {
         ctxt.arrayStore(.{ .specific = VmObjectRef.Nullable });
     }
@@ -931,6 +963,9 @@ pub const handlers = struct {
     }
     pub fn _daload(ctxt: InsnContext) void {
         ctxt.arrayLoad(.{ .specific = f64 });
+    }
+    pub fn _laload(ctxt: InsnContext) void {
+        ctxt.arrayLoad(.{ .specific = i64 });
     }
     pub fn _aaload(ctxt: InsnContext) void {
         ctxt.arrayLoad(.{ .specific = VmObjectRef.Nullable });
@@ -959,6 +994,55 @@ pub const handlers = struct {
         const pc = ctxt.currentPc();
         std.log.debug("goto {}", .{@as(i33, pc) +% @intCast(i33, offset)});
         ctxt.goto(offset);
+    }
+
+    pub fn _i2b(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i32, i8);
+    }
+    pub fn _i2c(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i32, u16);
+    }
+    pub fn _i2d(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i32, f64);
+    }
+    pub fn _i2f(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i32, f32);
+    }
+    pub fn _i2l(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i32, i64);
+    }
+    pub fn _i2s(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i32, i16);
+    }
+
+    pub fn _d2f(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(f64, f32);
+    }
+    pub fn _d2i(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(f64, i32);
+    }
+    pub fn _d2l(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(f64, i64);
+    }
+
+    pub fn _f2d(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(f32, f64);
+    }
+    pub fn _f2i(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(f32, i32);
+    }
+    pub fn _f2l(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(f32, i64);
+    }
+
+    pub fn _l2f(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i64, f32);
+    }
+    pub fn _l2d(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i64, f64);
+    }
+    pub fn _l2i(ctxt: InsnContext) void {
+        ctxt.convertPrimitive(i64, i32);
     }
 };
 
