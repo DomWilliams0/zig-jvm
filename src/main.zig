@@ -15,13 +15,16 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
+    defer _ = gpa.detectLeaks(); // run after other defers
+
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);
 
-    const jvm_args = try arg.JvmArgs.parse(alloc, raw_args, .{}) orelse {
+    var jvm_args = try arg.JvmArgs.parse(alloc, raw_args, .{}) orelse {
         std.log.info("TODO show usage", .{});
         return;
     };
+    defer jvm_args.deinit();
 
     // TODO put this into JvmArgs
     std.log.debug("args:", .{});
@@ -51,7 +54,4 @@ pub fn main() !void {
     _ = try jvm.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
 
     std.log.info("done", .{});
-
-    // TODO fix leaks
-    // defer _ = gpa.detectLeaks(); // run after other defers
 }

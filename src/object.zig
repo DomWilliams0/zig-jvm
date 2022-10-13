@@ -15,7 +15,6 @@ pub const ClassStatus = packed struct {
 
 /// Always allocated on GC heap
 pub const VmClass = struct {
-    constant_pool: cafebabe.ConstantPool,
     flags: std.EnumSet(cafebabe.ClassFile.Flags),
     name: []const u8, // constant pool reference
     super_cls: ?VmClassRef,
@@ -32,6 +31,7 @@ pub const VmClass = struct {
             fields: []Field,
             methods: []Method,
             layout: ObjectLayout,
+            constant_pool: cafebabe.ConstantPool,
         },
         primitive: vm_type.PrimitiveDataType,
         array: struct {
@@ -57,8 +57,23 @@ pub const VmClass = struct {
     pub fn vmRefSize(_: *const VmClass) usize {
         return 0; // nothing extra
     }
-    pub fn vmRefDrop(_: *@This()) void {
+    pub fn vmRefDrop(self: *@This()) void {
         // TODO release owned memory
+
+        const alloc = @import("jvm.zig").thread_state().global.classloader.alloc;
+
+        if (self.isObject()) {
+            alloc.free(self.u.obj.fields);
+
+            for (self.u.obj.methods) |m| m.deinit(alloc);
+            alloc.free(self.u.obj.methods);
+            self.u.obj.constant_pool.deinit(alloc);
+        } else if (self.isArray()) {
+            alloc.free(self.name);
+            self.u.array.elem_cls.drop();
+        }
+
+        if (self.super_cls) |super| super.drop();
     }
 
     pub fn formatVmRef(self: *const @This(), writer: anytype) !void {

@@ -11,6 +11,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
+    // defer _ = gpa.detectLeaks(); // run after other defers
+
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);
 
@@ -18,6 +20,7 @@ pub fn main() !void {
         std.log.info("TODO show test usage", .{});
         return;
     };
+    defer jvm_args.deinit();
 
     try jvm_args.boot_classpath.addExtra(Test.class_dir);
 
@@ -97,7 +100,6 @@ const Test = struct {
     }
 
     fn run(self: Test, alloc: Allocator) !void {
-
         // compile
         std.log.debug("compiling {s}", .{std.fs.path.basename(self.src_path)});
         var javac = std.ChildProcess.init(&.{ "javac", "-d", class_dir, self.src_path }, alloc);

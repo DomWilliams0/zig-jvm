@@ -104,7 +104,7 @@ pub const InsnContext = struct {
     }
 
     fn constantPool(self: Self) *cafebabe.ConstantPool {
-        return &self.class().constant_pool;
+        return &self.class().u.obj.constant_pool;
     }
 
     fn readU16(self: Self) u16 {

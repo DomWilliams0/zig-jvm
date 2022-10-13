@@ -36,11 +36,11 @@ pub fn VmRef(comptime T: type) type {
 
                 // TODO extra debug field to track double drop
                 const old = self.ptr.block.weak.fetchSub(1, .Release);
-                if (logging) std.log.debug("{}: dropped weak count to {d}", .{ self, old - 1 });
+                // if (logging) std.log.debug("{}: dropped weak count to {d}", .{ self, old - 1 });
 
                 if (old == 1) {
                     self.ptr.block.weak.fence(.Acquire);
-                    if (logging) std.log.debug("{}: dropping inner", .{self});
+                    // if (logging) std.log.debug("{}: dropping inner", .{self});
 
                     const alloc = global_allocator();
                     const alloc_size =

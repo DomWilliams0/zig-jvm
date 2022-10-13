@@ -174,7 +174,7 @@ pub const ClassLoader = struct {
         };
 
         if (loaded_res) |cls| {
-            self.setLoadState(name, loader, .{ .loaded = cls.clone() }) catch unreachable; // already in there
+            self.setLoadState(name, loader, .{ .loaded = cls }) catch unreachable; // already in there
             return cls;
         } else |err| {
             self.setLoadState(name, loader, .failed) catch unreachable; // already in there
@@ -244,7 +244,6 @@ pub const ClassLoader = struct {
             .flags = flags,
             .name = try self.alloc.dupe(u8, name),
             .u = .{ .array = .{ .elem_cls = elem_class_ref.clone(), .dims = elem_dims + 1, .padding = padding } },
-            .constant_pool = undefined,
             .status = .{ .ty = .array },
             .super_cls = java_lang_Object.clone(),
             .interfaces = &.{}, // TODO
@@ -283,7 +282,6 @@ pub const ClassLoader = struct {
             .flags = std.EnumSet(cafebabe.ClassFile.Flags).init(.{ .public = true, .final = true, .abstract = true }),
             .name = name, // static
             .u = .{ .primitive = ty },
-            .constant_pool = undefined, // unused
             .super_cls = null,
             .status = .{ .ty = .primitive },
             .interfaces = &.{},
@@ -306,11 +304,10 @@ pub const ClassLoader = struct {
         // linking
 
         // resolve super
-        var super_class = if (classfile.super_cls) |super| try self.loadClass(super, loader) else null;
+        var super_class = if (classfile.super_cls) |super| (try self.loadClass(super, loader)).clone() else null;
 
         var class = try vm_alloc.allocClass();
         class.get().* = .{
-            .constant_pool = classfile.constant_pool,
             .flags = classfile.flags,
             .name = classfile.this_cls,
             .super_cls = super_class,
@@ -320,6 +317,7 @@ pub const ClassLoader = struct {
                 .obj = .{
                     .fields = classfile.fields,
                     .methods = classfile.methods,
+                    .constant_pool = classfile.constant_pool,
                     .layout = undefined, // set next in preparation stage
                 },
             },
@@ -332,6 +330,8 @@ pub const ClassLoader = struct {
         class.get().u.obj.layout = layout;
         std.log.debug("{s} has layout {any}", .{ name, layout });
 
+        // TODO interfaces are not yet implemented
+        classfile.interfaces.deinit(self.alloc);
         return class;
     }
 

@@ -70,6 +70,7 @@ pub const JvmArgs = struct {
 
         fn deinit(self: *@This()) void {
             self.indices.deinit();
+            self.extras.deinit();
         }
 
         const ClasspathIterator = struct {
@@ -204,7 +205,7 @@ pub const JvmArgs = struct {
         return results;
     }
 
-    fn deinit(self: *@This()) void {
+    pub fn deinit(self: *@This()) void {
         self.boot_classpath.deinit();
         self.classpath.deinit();
     }

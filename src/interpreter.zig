@@ -177,6 +177,8 @@ fn interpreterLoop() void {
             }
 
             // clean up this frame
+            // TODO new objects are still on the stack/lvars and will be leaked...sounds like a gc is needed
+            this_frame.class.drop();
             thread.interpreter.frameAllocator().destroy(this_frame);
 
             // pass execution back to caller

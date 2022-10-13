@@ -599,7 +599,7 @@ pub const ConstantPool = struct {
         }
     }
 
-    fn deinit(self: *@This(), persistent: Allocator) void {
+    pub fn deinit(self: *@This(), persistent: Allocator) void {
         persistent.free(self.indices);
         persistent.free(self.slice);
     }
