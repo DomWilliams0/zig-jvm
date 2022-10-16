@@ -245,7 +245,7 @@ pub const ClassLoader = struct {
             .name = try self.alloc.dupe(u8, name),
             .u = .{ .array = .{ .elem_cls = elem_class_ref.clone(), .dims = elem_dims + 1, .padding = padding } },
             .status = .{ .ty = .array },
-            .super_cls = java_lang_Object.clone(),
+            .super_cls = java_lang_Object.clone().intoNullable(),
             .interfaces = &.{}, // TODO
             .loader = loader.clone(),
             .class_instance = try self.allocJavaLangClassInstance(),
@@ -283,7 +283,7 @@ pub const ClassLoader = struct {
             .flags = std.EnumSet(cafebabe.ClassFile.Flags).init(.{ .public = true, .final = true, .abstract = true }),
             .name = name, // static
             .u = .{ .primitive = ty },
-            .super_cls = null,
+            .super_cls = VmClassRef.Nullable.nullRef(),
             .status = .{ .ty = .primitive },
             .interfaces = &.{},
             .loader = .bootstrap,
@@ -316,7 +316,7 @@ pub const ClassLoader = struct {
         // linking
 
         // resolve super
-        var super_class = if (classfile.super_cls) |super| (try self.loadClass(super, loader)).clone() else null;
+        var super_class = if (classfile.super_cls) |super| (try self.loadClass(super, loader)).clone().intoNullable() else VmClassRef.Nullable.nullRef();
 
         var class = try vm_alloc.allocClass();
         class.get().* = .{
@@ -338,7 +338,7 @@ pub const ClassLoader = struct {
         };
 
         // preparation
-        var layout: object.ObjectLayout = if (!classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class) |super| super.get().u.obj.layout else .{};
+        var layout: object.ObjectLayout = if (!classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class.toStrong()) |super| super.get().u.obj.layout else .{};
         try object.defineObjectLayout(arena, class.get().u.obj.fields, &layout);
         class.get().u.obj.layout = layout;
         std.log.debug("{s} has layout {any}", .{ name, layout });

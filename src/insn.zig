@@ -202,8 +202,8 @@ pub const InsnContext = struct {
 
         // decide which class to use
         // ignore ACC_SUPER
-        const cls = if (!std.mem.eql(u8, info.name, "<init>") and !referenced_cls_ref.get().flags.contains(.interface) and current_supercls != null and current_supercls.?.cmpPtr(referenced_cls_ref)) //
-            current_supercls.? // checked
+        const cls = if (!std.mem.eql(u8, info.name, "<init>") and !referenced_cls_ref.get().flags.contains(.interface) and !current_supercls.isNull() and current_supercls.toStrongUnchecked().cmpPtr(referenced_cls_ref)) //
+            current_supercls.toStrongUnchecked() // checked
         else
             referenced_cls_ref;
 

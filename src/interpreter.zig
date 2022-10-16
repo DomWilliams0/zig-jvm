@@ -55,7 +55,7 @@ pub const Interpreter = struct {
             var operands_buf = alloc[n_locals .. n_locals + n_operands];
 
             operands = frame.Frame.OperandStack.new(operands_buf.ptr);
-            local_vars = .{ .vars = local_vars_buf.ptr, .initialised = if (frame.logging) try std.DynamicBitSet.initEmpty(self.frameAllocator(), n_locals) else {} };
+            local_vars = try frame.Frame.LocalVars.new(local_vars_buf.ptr, self.frameAllocator(), n_locals);
         }
         errdefer self.frames_alloc.drop(local_vars.vars) catch unreachable;
 
