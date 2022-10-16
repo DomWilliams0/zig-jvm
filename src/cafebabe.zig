@@ -1,4 +1,5 @@
 const std = @import("std");
+const jni = @import("jni.zig");
 const io = std.io;
 const log = std.log;
 const Allocator = std.mem.Allocator;
@@ -319,6 +320,12 @@ pub const Method = struct {
         if (has_code != should_have_code) {
             log.warn("method {s} code mismatch, has={any}, should_have={any}", .{ name, has_code, should_have_code });
             return error.UnexpectedCodeOrLackThereof;
+        }
+
+        if (flags.contains(.native)) {
+            // native
+            const thunk = try jni.NativeMethodCode.new(persistent, desc);
+            _ = thunk;
         }
 
         return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code };

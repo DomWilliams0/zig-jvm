@@ -687,7 +687,7 @@ test "allocate object" {
     const cls = try vm_alloc.allocClass();
     cls.get().name = "Dummy";
     cls.get().super_cls = VmClassRef.Nullable.nullRef();
-    cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined, .constant_pool = undefined  } }; // only instance fields
+    cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined, .constant_pool = undefined } }; // only instance fields
     defer cls.drop();
 
     // allocate object

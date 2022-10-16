@@ -64,6 +64,15 @@ pub const Frame = struct {
             return @ptrCast(*T, &self.value);
         }
 
+        /// Allow bool if T==i8
+        fn convertToPtrFfi(self: *@This(), comptime T: type) *T {
+            if (self.ty != types.DataType.fromType(T)) {
+                if (T == i8 and self.ty == .boolean) {} // allow
+                else std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
+            }
+            return @ptrCast(*T, &self.value);
+        }
+
         pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             _ = fmt;
             return switch (self.ty) {
@@ -123,6 +132,14 @@ pub const Frame = struct {
             if (logging) std.debug.assert(!self.isEmpty());
             const val = (self.stack - 1 - idx)[0];
             return val.convertTo(T);
+        }
+
+        /// 0 = current top, 1 = next under top
+        /// Allows i8 = bool
+        pub fn peekAtPtrFfi(self: @This(), comptime T: type, idx: u16) *T {
+            if (logging) std.debug.assert(!self.isEmpty());
+            const val = &(self.stack - 1 - idx)[0];
+            return val.convertToPtrFfi(T);
         }
 
         fn isEmpty(self: @This()) bool {

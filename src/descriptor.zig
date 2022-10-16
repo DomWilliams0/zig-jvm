@@ -134,6 +134,21 @@ pub const MethodDescriptor = struct {
         return self.str[ret_start + 1 ..];
     }
 
+    pub fn returnTypeSimple(self: @This()) types.DataType {
+        return switch (self.str[self.str.len - 1]) {
+            'V' => .void,
+            'B' => .byte,
+            'C' => .char,
+            'D' => .double,
+            'F' => .float,
+            'I' => .int,
+            'J' => .long,
+            'S' => .short,
+            'Z' => .boolean,
+            else => .reference,
+        };
+    }
+
     pub fn isNotVoid(self: @This()) bool {
         return self.str[self.str.len - 1] != 'V';
     }

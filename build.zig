@@ -14,11 +14,15 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("zig-jvm", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.linkLibC();
+    exe.linkSystemLibrary("ffi");
     exe.install();
 
     const test_runner = b.addExecutable("jvm-test-runner", "src/test-runner.zig");
     test_runner.setTarget(target);
     test_runner.setBuildMode(mode);
+    test_runner.linkLibC();
+    test_runner.linkSystemLibrary("ffi");
     test_runner.install();
 
     const run_cmd = exe.run();
@@ -30,9 +34,10 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_tests = b.addTest("src/main.zig");
+    const exe_tests = b.addTest("src/object.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
+    exe_tests.linkLibC();
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
