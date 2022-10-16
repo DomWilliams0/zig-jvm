@@ -8,7 +8,7 @@ const Preload = struct {
     // TODO native method bindings. use comptime reflection to link up
 };
 
-const preload_classes: [2]Preload = .{ .{ .cls = "java/lang/String" }, .{ .cls = "[I" } };
+const preload_classes: [2]Preload = .{ .{ .cls = "java/lang/String", .initialise = true }, .{ .cls = "[I" } };
 
 pub const Options = struct {
     /// Skip initialising
@@ -37,7 +37,10 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
     try load(opts, .{ .cls = "java/lang/Object", .initialise = true }, loader);
     try load(opts, .{ .cls = "java/lang/Class", .initialise = true }, loader);
 
-    // TODO fix up class vmdata pointers now
+    // fix up class vmdata pointers now
+    inline for (.{ "java/lang/Object", "java/lang/Class" }) |cls| {
+        loader.getLoadedBootstrapClass(cls).?.get().class_instance = try loader.allocJavaLangClassInstance();
+    }
 
     try loadPrimitives(loader);
     inline for (preload_classes) |preload|

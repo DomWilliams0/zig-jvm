@@ -248,6 +248,7 @@ pub const ClassLoader = struct {
             .super_cls = java_lang_Object.clone(),
             .interfaces = &.{}, // TODO
             .loader = loader.clone(),
+            .class_instance = try self.allocJavaLangClassInstance(),
         };
 
         return class;
@@ -286,10 +287,21 @@ pub const ClassLoader = struct {
             .status = .{ .ty = .primitive },
             .interfaces = &.{},
             .loader = .bootstrap,
+            .class_instance = try self.allocJavaLangClassInstance(),
         };
 
         entry.* = class.intoNullable();
         return class; // borrowed
+    }
+
+    pub fn allocJavaLangClassInstance(self: *Self) !VmObjectRef.Nullable {
+        const java_lang_Class = self.getLoadedBootstrapClass("java/lang/Class") orelse return VmObjectRef.Nullable.nullRef();
+
+        const obj = object.VmClass.instantiateObject(java_lang_Class);
+
+        // TODO set fields
+
+        return obj.intoNullable();
     }
 
     /// Class bytes are the callers responsiblity to clean up.
@@ -322,6 +334,7 @@ pub const ClassLoader = struct {
                 },
             },
             .loader = loader.clone(),
+            .class_instance = try self.allocJavaLangClassInstance(),
         };
 
         // preparation

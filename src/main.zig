@@ -15,7 +15,9 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
-    defer _ = gpa.detectLeaks(); // run after other defers
+    defer if (@import("alloc.zig").logging) {
+        _ = gpa.detectLeaks();
+    };
 
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);

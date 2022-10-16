@@ -23,6 +23,8 @@ pub const VmClass = struct {
     init_state: InitState = .uninitialised,
     monitor: Monitor = .{}, // TODO put into java.lang.Class object instance instead
     status: ClassStatus,
+    /// Null only during early preload before java/lang/Class is loaded
+    class_instance: VmObjectRef.Nullable,
 
     /// Only fields for this class
     u: union {
@@ -366,6 +368,11 @@ pub const VmClass = struct {
         std.mem.set(u8, header.getElemsRaw(), 0);
 
         return array_ref;
+    }
+
+    /// Null deref only if used during preload before java/lang/Class is loaded
+    pub fn getClassInstance(self: @This()) VmObjectRef {
+        return self.class_instance.toStrongUnchecked();
     }
 };
 

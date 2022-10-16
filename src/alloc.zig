@@ -4,7 +4,7 @@ const jvm = @import("jvm.zig");
 const Allocator = std.mem.Allocator;
 
 /// Verbose reference counting logging
-var logging = false;
+pub var logging = false;
 
 /// Never null! Pass around `Nullable`
 pub fn VmRef(comptime T: type) type {

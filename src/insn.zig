@@ -373,8 +373,7 @@ pub const InsnContext = struct {
                 .double => frame.Frame.StackEntry.new(val.convertTo(f64)),
                 .long => frame.Frame.StackEntry.new(val.convertTo(i64)),
             },
-            .array => @panic("TODO putfield array"),
-            .reference => @panic("TODO putfield reference"),
+            .array, .reference => frame.Frame.StackEntry.new(val.convertTo(object.VmObjectRef.Nullable)),
         };
     }
 
@@ -454,6 +453,16 @@ pub const InsnContext = struct {
             self.goto(2 + 1);
         }
     }
+    fn ifNull(self: @This(), comptime inverse: bool) void {
+        const val = self.operandStack().pop(VmObjectRef.Nullable);
+        const branch = val.isNull() != inverse;
+        if (branch) {
+            self.goto(self.readI16());
+        } else {
+            // manually increment pc past this insn (and size 2)
+            self.goto(2 + 1);
+        }
+    }
 
     /// Adds offset to pc
     fn goto(self: @This(), offset: i16) void {
@@ -470,9 +479,7 @@ pub const InsnContext = struct {
         switch (constant) {
             .class => |name| {
                 const cls = self.resolveClass(name, .resolve_only);
-                _ = cls;
-                @panic("TODO get java/lang/Class instance");
-                // self.operandStack().push(cls.get().getClassInstance().clone());
+                self.operandStack().push(cls.get().getClassInstance().clone());
             },
             .long => |val| self.operandStack().push(val),
             .double => |val| self.operandStack().push(val),
@@ -980,6 +987,13 @@ pub const handlers = struct {
 
     pub fn _if_icmpge(ctxt: InsnContext) void {
         ctxt.ifCmp(i32, .ge);
+    }
+
+    pub fn _ifnull(ctxt: InsnContext) void {
+        ctxt.ifNull(false);
+    }
+    pub fn _ifnonnull(ctxt: InsnContext) void {
+        ctxt.ifNull(true);
     }
 
     pub fn _iinc(ctxt: InsnContext) void {
