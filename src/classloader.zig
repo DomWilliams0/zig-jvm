@@ -4,6 +4,8 @@ const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
 const vm_type = @import("type.zig");
 const object = @import("object.zig");
+const descriptor = @import("descriptor.zig");
+const native = @import("native.zig");
 const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
 
@@ -55,6 +57,12 @@ pub const ClassLoader = struct {
     lock: Thread.RwLock,
     classes: std.ArrayHashMapUnmanaged(Key, LoadState, ClassesContext, true),
 
+    // Protects native libs map
+    natives_lock: Thread.RwLock,
+    natives: std.AutoHashMapUnmanaged(WhichLoader, native.NativeLibraries),
+
+    this_native: native.NativeLibrary,
+
     /// Initialised during startup so not mutex protected
     primitives: [vm_type.primitives.len]VmClassRef.Nullable = [_]VmClassRef.Nullable{VmClassRef.Nullable.nullRef()} ** vm_type.primitives.len,
 
@@ -81,7 +89,8 @@ pub const ClassLoader = struct {
     const Key = struct { name: []const u8, loader: WhichLoader };
 
     pub fn new(alloc: Allocator) !ClassLoader {
-        var cl = ClassLoader{ .alloc = alloc, .lock = .{}, .classes = .{} };
+        const this_native = try native.NativeLibrary.openSelf();
+        var cl = ClassLoader{ .alloc = alloc, .lock = .{}, .classes = .{}, .natives_lock = .{}, .natives = .{}, .this_native = this_native };
         try cl.classes.ensureTotalCapacity(alloc, 1024);
         return cl;
     }
@@ -91,20 +100,32 @@ pub const ClassLoader = struct {
         defer self.lock.unlock();
 
         // drop all class references
-        var it = self.classes.iterator();
-        while (it.next()) |entry| {
-            const key = entry.key_ptr.*;
-            self.alloc.free(key.name);
-            key.loader.deinit();
-            switch (entry.value_ptr.*) {
-                .loaded => |cls| cls.drop(),
-                .failed => {}, // TODO drop exception
-                else => {},
+        {
+            var it = self.classes.iterator();
+            while (it.next()) |entry| {
+                const key = entry.key_ptr.*;
+                self.alloc.free(key.name);
+                key.loader.deinit();
+                switch (entry.value_ptr.*) {
+                    .loaded => |cls| cls.drop(),
+                    .failed => {}, // TODO drop exception
+                    else => {},
+                }
             }
         }
 
         self.classes.deinit(self.alloc);
         self.classes = .{};
+
+        {
+            var it = self.natives.iterator();
+            while (it.next()) |e| {
+                e.key_ptr.deinit();
+                e.value_ptr.deinit();
+            }
+        }
+        self.natives.deinit(self.alloc);
+        self.natives = .{};
 
         for (self.primitives) |prim| {
             if (prim.toStrong()) |p| p.drop();
@@ -387,4 +408,169 @@ pub const ClassLoader = struct {
             break io.readFile(arena, path, candidate_abs) catch continue;
         } else return null;
     }
+
+    /// Loader is cloned if this is the first lib loaded by it, otherwise borrowed only
+    pub fn loadNativeLibrary(self: *@This(), library: []const u8, loader: WhichLoader) !native.NativeLibrary {
+        self.natives_lock.lock();
+        defer self.natives_lock.unlock();
+
+        const entry = try self.natives.getOrPut(self.alloc, loader);
+        if (!entry.found_existing)
+            entry.value_ptr.* = native.NativeLibraries.new(self.alloc);
+
+        return try entry.value_ptr.lookupOrLoad(library);
+    }
+
+    pub fn loadBootstrapNativeLibrary(self: *@This()) !void {
+        self.natives_lock.lock();
+        defer self.natives_lock.unlock();
+
+        const entry = try self.natives.getOrPut(self.alloc, .bootstrap);
+        if (!entry.found_existing)
+            entry.value_ptr.* = native.NativeLibraries.new(self.alloc);
+
+        return try entry.value_ptr.lookupOrLoad("jvm");
+    }
+
+    const NativeMangling = struct {
+        /// Null terminated
+        buf: std.ArrayList(u8),
+
+        fn escape(out: *std.ArrayList(u8), name: []const u8) !void {
+            try out.ensureUnusedCapacity(name.len);
+
+            var utf8 = (try std.unicode.Utf8View.init(name)).iterator();
+
+            while (utf8.nextCodepointSlice()) |it| {
+                switch (it.len) {
+                    1 => try if (it[0] == '/') out.append('_') //
+                    else if (it[0] == '_') out.appendSlice("_1") //
+                    else if (it[0] == ';') out.appendSlice("_2") //
+                    else if (it[0] == '[') out.appendSlice("_3") //
+                    else out.append(it[0]),
+                    2 => {
+                        const enc = try std.unicode.utf8Decode(it);
+                        try out.ensureUnusedCapacity(6);
+                        std.fmt.format(out.writer(), "_0{x:0>4}", .{enc}) catch unreachable;
+                    },
+                    else => @panic("not utf16?"),
+                }
+            }
+        }
+
+        fn deinit(self: *@This()) void {
+            self.buf.deinit();
+        }
+
+        fn strZ(self: *const @This()) [:0]const u8 {
+            return self.buf.items[0 .. self.buf.items.len - 1 :0];
+        }
+
+        fn initShort(alloc: std.mem.Allocator, class_name: []const u8, method_name: []const u8) !@This() {
+            var this = NativeMangling{ .buf = std.ArrayList(u8).init(alloc) };
+            errdefer this.deinit();
+
+            var writer = this.buf.writer();
+            try std.fmt.format(writer, "Java_", .{});
+            try escape(&this.buf, class_name);
+            _ = try writer.write("_");
+            try escape(&this.buf, method_name);
+
+            // null terminate
+            _ = try writer.write("\x00");
+            return this;
+        }
+
+        fn appendLong(self: *@This(), desc: descriptor.MethodDescriptor) !void {
+            // truncate null byte
+            const nul = self.buf.pop();
+            std.debug.assert(nul == 0);
+
+            var writer = self.buf.writer();
+            _ = try writer.write("__");
+            try escape(&self.buf, desc.parameters());
+
+            // null terminate
+            _ = try writer.write("\x00");
+        }
+    };
+
+    pub fn findNativeMethod(self: *@This(), loader: WhichLoader, method: *const cafebabe.Method) ?*anyopaque {
+        return self.findNativeMethodInner(loader, method.class_name, method.name, method.descriptor);
+    }
+
+    fn findNativeMethodInner(self: *@This(), loader: WhichLoader, class_name: []const u8, method_name: []const u8, method_desc: descriptor.MethodDescriptor) ?*anyopaque {
+        const Search = struct {
+            fn searchLibraries(first_check: ?native.NativeLibrary, natives: ?native.NativeLibraries, name: NativeMangling) ?*anyopaque {
+                const symbol = name.strZ();
+                if (first_check) |lib| if (lib.resolve(symbol)) |found| return found;
+
+                if (natives) |n| {
+                    var it = n.handles.valueIterator();
+                    while (it.next()) |lib|
+                        if (lib.resolve(symbol)) |found| return found;
+                }
+
+                return null;
+            }
+        };
+
+        var mangled_name = NativeMangling.initShort(self.alloc, class_name, method_name) catch return null;
+        defer mangled_name.deinit();
+
+        // special case, check self first
+        const first_check = if (loader == .bootstrap) self.this_native else null;
+
+        self.natives_lock.lockShared();
+        defer self.natives_lock.unlockShared();
+        const natives = self.natives.get(loader);
+
+        // search for short mangled name first
+        if (Search.searchLibraries(first_check, natives, mangled_name)) |found| return found;
+
+        // try long overloaded form
+        // TODO even when takes no parameters?
+        mangled_name.appendLong(method_desc) catch return null;
+        if (Search.searchLibraries(first_check, natives, mangled_name)) |found| return found;
+
+        return null;
+    }
 };
+
+test "native mangling class name" {
+    std.testing.log_level = .debug;
+    const cls_name = "my/package/MyObjêct_cool";
+
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+
+    try ClassLoader.NativeMangling.escape(&out, cls_name);
+    try std.testing.expectEqualStrings("my_package_MyObj_000eact_1cool", out.items);
+}
+
+test "native mangling full method" {
+    std.testing.log_level = .debug;
+    const cls_name = "my/package/Cool";
+    const method = "doThings_lol";
+    const desc = descriptor.MethodDescriptor.new("(ILjava/lang/String;[J)D") orelse unreachable;
+
+    var mangled = try ClassLoader.NativeMangling.initShort(std.testing.allocator, cls_name, method);
+    defer mangled.deinit();
+
+    try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_doThings_1lol", mangled.strZ());
+
+    try mangled.appendLong(desc);
+    try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_doThings_1lol__ILjava_lang_String_2_3J", mangled.strZ());
+}
+
+// test "find native method in self" {
+//     const S = struct {
+//         export fn Java_nice_One_method() void {}
+//     };
+
+//     var loader = try ClassLoader.new(std.testing.allocator);
+//     defer loader.deinit();
+//     const found = loader.findNativeMethodInner(.bootstrap, "nice/One", "method", descriptor.MethodDescriptor.new("()V") orelse unreachable);
+//     std.debug.assert(found != null);
+
+// }

@@ -18,12 +18,12 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkSystemLibrary("ffi");
     exe.install();
 
-    const test_runner = b.addExecutable("jvm-test-runner", "src/test-runner.zig");
-    test_runner.setTarget(target);
-    test_runner.setBuildMode(mode);
-    test_runner.linkLibC();
-    test_runner.linkSystemLibrary("ffi");
-    test_runner.install();
+    // const test_runner = b.addExecutable("jvm-test-runner", "src/test-runner.zig");
+    // test_runner.setTarget(target);
+    // test_runner.setBuildMode(mode);
+    // test_runner.linkLibC();
+    // test_runner.linkSystemLibrary("ffi");
+    // test_runner.install();
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

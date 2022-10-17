@@ -1,5 +1,6 @@
 const std = @import("std");
 const jni = @import("jni.zig");
+const native = @import("native.zig");
 const io = std.io;
 const log = std.log;
 const Allocator = std.mem.Allocator;
@@ -100,8 +101,8 @@ pub const ClassFile = struct {
             }
         }
 
-        const fields = try parseFieldsOrMethods(Field, arena, persistent, &constant_pool, &reader, buf);
-        const methods = try parseFieldsOrMethods(Method, arena, persistent, &constant_pool, &reader, buf);
+        const fields = try parseFieldsOrMethods(Field, arena, persistent, this_cls, &constant_pool, &reader, buf);
+        const methods = try parseFieldsOrMethods(Method, arena, persistent, this_cls, &constant_pool, &reader, buf);
         const attributes = try parseAttributes(arena, &constant_pool, &reader, buf);
         _ = attributes; // TODO use class attributes
         return ClassFile{
@@ -145,7 +146,7 @@ pub const ClassFile = struct {
     }
 
     /// Arena is just for temporary attribute storage (TODO redo this)
-    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) ![]T {
+    fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, class_name: []const u8, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) ![]T {
         const count = try reader.readIntBig(u16);
         var slice = try persistent.alloc(T, count);
         errdefer persistent.free(slice);
@@ -168,7 +169,7 @@ pub const ClassFile = struct {
             // log.debug("field/method {s} {s}", .{ name, desc.str });
 
             const attributes = try parseAttributes(arena, cp, reader, buf);
-            const instance = try T.new(persistent, arena, cp, flags, name, desc, attributes);
+            const instance = try T.new(persistent, arena, class_name, cp, flags, name, desc, attributes);
             slice[cursor] = instance;
             cursor += 1;
         }
@@ -244,7 +245,7 @@ pub const Field = struct {
 
     const enumFromInt = enumFromIntField; // temporary
 
-    fn new(persistent: Allocator, _: Allocator, _: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+    fn new(persistent: Allocator, _: Allocator, _: []const u8, _: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         _ = attributes;
         _ = persistent;
 
@@ -256,6 +257,7 @@ pub const Field = struct {
 pub const Method = struct {
     flags: std.EnumSet(Flags),
     name: []const u8, // points into constant pool
+    class_name: []const u8, // constant pool
     descriptor: MethodDescriptor,
     code: Code,
 
@@ -277,25 +279,29 @@ pub const Method = struct {
     };
     const enumFromInt = enumFromIntMethod; // temporary
 
-    pub const Code = struct {
-        max_stack: u16,
-        max_locals: u16,
-        /// null if abstract/native
-        code: ?[]const u8,
+    pub const Code = union(enum) {
+        java: struct {
+            max_stack: u16,
+            max_locals: u16,
+            /// null if abstract
+            code: ?[]const u8,
+        },
+
+        native: native.NativeCode,
     };
 
-    fn new(persistent: Allocator, arena: Allocator, cp: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
-        var code = Code{
+    fn new(persistent: Allocator, arena: Allocator, class_name: []const u8, cp: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+        var code = Code{ .java = .{
             .max_stack = 0,
             .max_locals = 0,
             .code = null,
-        };
+        } };
         if (attributes.get("Code")) |attr| {
             var buf = std.io.fixedBufferStream(attr);
             var reader = buf.reader();
 
-            code.max_stack = try reader.readIntBig(u16);
-            code.max_locals = try reader.readIntBig(u16);
+            code.java.max_stack = try reader.readIntBig(u16);
+            code.java.max_locals = try reader.readIntBig(u16);
             const code_len = try reader.readIntBig(u32);
             // TODO align code to 4
             const code_buf = try persistent.allocWithOptions(u8, code_len, 4, null);
@@ -311,11 +317,11 @@ pub const Method = struct {
             const code_attributes = try ClassFile.parseAttributes(arena, cp, &reader, &buf);
             _ = code_attributes; // TODO use code attributes
 
-            code.code = code_buf;
+            code.java.code = code_buf;
         }
-        errdefer if (code.code) |c| persistent.free(c);
+        errdefer if (code == .java) if (code.java.code) |c| persistent.free(c);
 
-        const has_code = code.code != null;
+        const has_code = code.java.code != null;
         const should_have_code = !(flags.contains(.abstract) or flags.contains(.native));
         if (has_code != should_have_code) {
             log.warn("method {s} code mismatch, has={any}, should_have={any}", .{ name, has_code, should_have_code });
@@ -323,16 +329,14 @@ pub const Method = struct {
         }
 
         if (flags.contains(.native)) {
-            // native
-            const thunk = try jni.NativeMethodCode.new(persistent, desc);
-            _ = thunk;
+            code = .{ .native = native.NativeCode.new() };
         }
 
-        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code };
+        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code, .class_name = class_name };
     }
 
     pub fn deinit(self: @This(), persistent: Allocator) void {
-        if (self.code.code) |c| persistent.free(c);
+        if (self.code == .java) if (self.code.java.code) |c| persistent.free(c);
     }
 };
 

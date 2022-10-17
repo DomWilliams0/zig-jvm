@@ -34,13 +34,17 @@ fn loadPrimitives(loader: *classloader.ClassLoader) !void {
 }
 
 pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Options) !void {
-    try load(opts, .{ .cls = "java/lang/Object", .initialise = true }, loader);
-    try load(opts, .{ .cls = "java/lang/Class", .initialise = true }, loader);
+    const special_preload = .{ "java/lang/Object", "java/lang/Class" };
 
-    // fix up class vmdata pointers now
-    inline for (.{ "java/lang/Object", "java/lang/Class" }) |cls| {
+    inline for (special_preload) |cls| try load(opts, .{ .cls = cls }, loader);
+
+    // fix up class vmdata pointers
+    inline for (special_preload) |cls|
         loader.getLoadedBootstrapClass(cls).?.get().class_instance = try loader.allocJavaLangClassInstance();
-    }
+
+    // initialise Object and Class
+    inline for (special_preload) |cls|
+        object.VmClass.ensureInitialised(loader.getLoadedBootstrapClass(cls).?);
 
     try loadPrimitives(loader);
     inline for (preload_classes) |preload|

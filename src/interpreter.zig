@@ -29,26 +29,48 @@ pub const Interpreter = struct {
         std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
         defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
 
-        if (method.code.code == null) {
-            var count = method.descriptor.param_count;
-            if (!method.flags.contains(.static)) count += 1;
+        const code = switch (method.code) {
+            .native => |native| {
+                var native_mut = native;
+                try native_mut.ensure_bound(class, method);
 
-            std.log.warn("skipping unimplemented native method", .{});
-            if (caller) |caller_stack| {
-                while (count > 0) : (count -= 1) {
-                    _ = caller_stack.popRaw();
-                }
-            }
+                const static_cls = if (method.flags.contains(.static))
+                    class.get().getClassInstance()
+                else
+                    null;
+                _ = static_cls;
 
-            return frame.Frame.StackEntry.notPresent();
-        }
+                const x = caller orelse @panic("native method requires caller stack");
+                _ = x;
+
+                // native.invoke(caller, )
+
+                @panic("TODO ensure bound");
+            },
+
+            .java => |code| code,
+        };
+
+        // if (method.code.code == null) {
+        //     var count = method.descriptor.param_count;
+        //     if (!method.flags.contains(.static)) count += 1;
+
+        //     std.log.warn("skipping unimplemented native method", .{});
+        //     if (caller) |caller_stack| {
+        //         while (count > 0) : (count -= 1) {
+        //             _ = caller_stack.popRaw();
+        //         }
+        //     }
+
+        //     return frame.Frame.StackEntry.notPresent();
+        // }
 
         // alloc local var and operand stack storage
         var operands: frame.Frame.OperandStack = undefined; // set next
         var local_vars: frame.Frame.LocalVars = undefined; // set next
         {
-            const n_locals = method.code.max_locals;
-            const n_operands = method.code.max_stack;
+            const n_locals = code.max_locals;
+            const n_operands = code.max_stack;
 
             var alloc = try self.frames_alloc.reserve(n_locals + n_operands);
             var local_vars_buf = alloc[0..n_locals];
@@ -59,8 +81,8 @@ pub const Interpreter = struct {
         }
         errdefer self.frames_alloc.drop(local_vars.vars) catch unreachable;
 
-        // TODO handle native differently
-        const code_window = method.code.code.?.ptr;
+        const code_slice = code.code orelse @panic("abstract method");
+        const code_window = code_slice.ptr;
 
         // push args on from calling frame
         var param_count = method.descriptor.param_count;
@@ -149,7 +171,7 @@ fn interpreterLoop() void {
         const f = if (thread.interpreter.top_frame) |f| f else break;
         ctxt.frame = f;
         f.operands.log();
-        f.local_vars.log(f.method.code.max_locals);
+        f.local_vars.log(f.method.code.java.max_locals);
 
         const next_insn = f.code_window.?[0];
 

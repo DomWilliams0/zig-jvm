@@ -90,7 +90,7 @@ pub const InsnContext = struct {
     mutable: *InsnContextMut,
 
     pub fn currentPc(self: @This()) u32 {
-        const base = self.frame.method.code.code.?;
+        const base = self.frame.method.code.java.code.?;
         const offset = @ptrToInt(self.frame.code_window.?) - @ptrToInt(base.ptr);
         return @truncate(u32, offset);
     }

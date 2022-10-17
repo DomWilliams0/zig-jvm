@@ -153,6 +153,11 @@ pub const MethodDescriptor = struct {
         return self.str[self.str.len - 1] != 'V';
     }
 
+    pub fn parameters(self: @This()) []const u8 {
+        const end = std.mem.lastIndexOfScalar(u8, self.str, ')') orelse unreachable; // verified
+        return self.str[1..end];
+    }
+
     pub const ParamIterator = struct {
         str: []const u8,
         idx: usize = 0,
