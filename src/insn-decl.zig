@@ -672,7 +672,7 @@ pub const maxInsnSize: usize = blk: {
     for (insns) |i| {
         if (seen[i.id]) @compileError("duplicate insn");
         seen[i.id] = true;
-        max_size = @maximum(max_size, i.sz);
+        max_size = @import("std").math.max(max_size, i.sz);
     }
 
     break :blk max_size;

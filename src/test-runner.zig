@@ -1,7 +1,7 @@
 const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const arg = @import("arg.zig");
-const jvm = @import("jvm.zig");
+const state = @import("state.zig");
 const bootstrap = @import("bootstrap.zig");
 const Allocator = std.mem.Allocator;
 
@@ -28,7 +28,7 @@ pub fn main() !void {
     std.log.debug(" classpath: {?s}", .{jvm_args.classpath.slice});
     std.log.debug(" bootclasspath: {?s}", .{jvm_args.boot_classpath.slice});
 
-    var jvm_handle = try jvm.ThreadEnv.initMainThread(alloc, &jvm_args);
+    var jvm_handle = try state.ThreadEnv.initMainThread(alloc, &jvm_args);
     defer jvm_handle.deinit();
 
     try bootstrap.initBootstrapClasses(
@@ -110,13 +110,13 @@ const Test = struct {
         }
 
         // load test class
-        const cls = try jvm.thread_state().global.classloader.loadClass(self.testName(), .bootstrap);
+        const cls = try state.thread_state().global.classloader.loadClass(self.testName(), .bootstrap);
 
         // find test method
         const entrypoint = cls.get().findMethodInThisOnly("vmTest", "()I", .{ .public = true, .static = true }) orelse return E.MissingEntrypoint;
 
         // run the test
-        const ret_value = try jvm.thread_state().interpreter.executeUntilReturn(cls, entrypoint);
+        const ret_value = try state.thread_state().interpreter.executeUntilReturn(cls, entrypoint);
         const ret_code = ret_value.convertTo(i32);
 
         // ensure success

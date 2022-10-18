@@ -12,6 +12,7 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("zig-jvm", "src/main.zig");
+    exe.addPackagePath("jvm", "src/root.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.linkLibC();

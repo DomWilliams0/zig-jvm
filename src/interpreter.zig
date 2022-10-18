@@ -2,7 +2,7 @@ const std = @import("std");
 const frame = @import("frame.zig");
 const cafebabe = @import("cafebabe.zig");
 const insn = @import("insn.zig");
-const jvm = @import("jvm.zig");
+const state = @import("state.zig");
 const object = @import("object.zig");
 
 /// Each thread owns one
@@ -161,7 +161,7 @@ pub const Interpreter = struct {
 // TODO second interpreter type that generates threaded machine code for the method e.g. `call ins1 call ins2 call ins3`
 //   in generated code, local var lookup should reference the caller's stack when i<param count, to avoid copying
 fn interpreterLoop() void {
-    const thread = jvm.thread_state();
+    const thread = state.thread_state();
     var ctxt_mut = insn.InsnContextMut{};
     var ctxt = insn.InsnContext{ .thread = thread, .frame = undefined, .mutable = &ctxt_mut };
 

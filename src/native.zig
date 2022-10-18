@@ -123,7 +123,7 @@ pub const NativeCode = struct {
 
         std.log.debug("binding native method", .{});
 
-        var classloader = @import("jvm.zig").thread_state().global.classloader;
+        var classloader = @import("state.zig").thread_state().global.classloader;
         _ = classloader.findNativeMethod(class.get().loader, method);
 
         @panic("TODO bind");

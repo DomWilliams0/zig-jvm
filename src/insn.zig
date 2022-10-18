@@ -1,5 +1,5 @@
 const std = @import("std");
-const jvm = @import("jvm.zig");
+const state = @import("state.zig");
 const cafebabe = @import("cafebabe.zig");
 const object = @import("object.zig");
 const frame = @import("frame.zig");
@@ -85,7 +85,7 @@ pub const InsnContextMut = struct {
 pub const InsnContext = struct {
     const Self = @This();
 
-    thread: *jvm.ThreadEnv,
+    thread: *state.ThreadEnv,
     frame: *frame.Frame,
     mutable: *InsnContextMut,
 

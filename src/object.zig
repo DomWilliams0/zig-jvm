@@ -60,7 +60,7 @@ pub const VmClass = struct {
         return 0; // nothing extra
     }
     pub fn vmRefDrop(self: *@This()) void {
-        const alloc = @import("jvm.zig").thread_state().global.classloader.alloc;
+        const alloc = @import("state.zig").thread_state().global.classloader.alloc;
 
         if (self.isObject()) {
             alloc.free(self.u.obj.fields);
@@ -283,7 +283,7 @@ pub const VmClass = struct {
         // run class constructor
         // TODO exception
         if (self_mut.findMethodInThisOnly("<clinit>", "()V", .{ .static = true })) |clinit| {
-            _ = @import("jvm.zig").thread_state().interpreter.executeUntilReturn(self, clinit) catch std.debug.panic("clinit failed", .{});
+            _ = @import("state.zig").thread_state().interpreter.executeUntilReturn(self, clinit) catch std.debug.panic("clinit failed", .{});
         }
 
         // set init state
@@ -655,7 +655,7 @@ test "allocate class" {
     try std.testing.expect(int3.instance_offset > 0 and int3.instance_offset % @alignOf(i32) == 0);
 
     // init global allocator
-    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     // allocate class with static storage
@@ -680,7 +680,7 @@ test "allocate object" {
     try defineObjectLayout(alloc, &helper.fields, &layout);
 
     // init global allocator
-    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     // allocate class with static storage
@@ -748,7 +748,7 @@ test "allocate array" {
     if (true) return error.SkipZigTest;
 
     // init global allocator
-    const handle = try @import("jvm.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     const S = struct {

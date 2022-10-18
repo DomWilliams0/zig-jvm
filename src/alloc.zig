@@ -1,6 +1,6 @@
 const std = @import("std");
 const object = @import("object.zig");
-const jvm = @import("jvm.zig");
+const state = @import("state.zig");
 const Allocator = std.mem.Allocator;
 
 /// Verbose reference counting logging
@@ -14,7 +14,7 @@ pub fn VmRef(comptime T: type) type {
         const max_counter = std.math.maxInt(u32) - 1;
 
         fn global_allocator() VmAllocator {
-            const thread = jvm.thread_state();
+            const thread = state.thread_state();
             return thread.global.allocator;
         }
 
@@ -214,7 +214,7 @@ test "alloc class" {
     if (true) return error.SkipZigTest;
 
     // init global allocator
-    const handle = try jvm.ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try state.ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     const alloced = try allocClass();
@@ -240,7 +240,7 @@ test "vmref" {
     const IntRef = VmRef(VmInt);
 
     // init global allocator
-    const handle = try jvm.ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try state.ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
     // simulate runtime known size, like a class field count

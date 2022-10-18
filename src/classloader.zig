@@ -1,5 +1,6 @@
 const std = @import("std");
-const jvm = @import("jvm.zig");
+const jvm = @import("jvm");
+const state = @import("state.zig");
 const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
 const vm_type = @import("type.zig");
@@ -213,20 +214,20 @@ pub const ClassLoader = struct {
 
     /// name and loader are owned by the caller, and cloned on first addition (owned by the loader).
     /// Only fails on allocating when adding new entry
-    fn setLoadState(self: *Self, name: []const u8, loader: WhichLoader, state: LoadState) !void {
+    fn setLoadState(self: *Self, name: []const u8, loader: WhichLoader, load_state: LoadState) !void {
         self.lock.lock();
         defer self.lock.unlock();
 
         const key = Key{ .name = name, .loader = loader };
         const entry = try self.classes.getOrPut(self.alloc, key);
         if (entry.found_existing)
-            entry.value_ptr.* = state
+            entry.value_ptr.* = load_state
         else {
             entry.key_ptr.name = try self.alloc.dupe(u8, name);
             entry.key_ptr.loader = loader.clone();
         }
 
-        std.log.debug("set {s} state for {s}", .{ @tagName(state), name });
+        std.log.debug("set {s} state for {s}", .{ @tagName(load_state), name });
     }
 
     /// Name is the file name of the class
@@ -373,7 +374,7 @@ pub const ClassLoader = struct {
     // TODO error set and proper exception returning
     // TODO class name to path encoding
     fn findBootstrapClassFile(arena: Allocator, alloc: Allocator, name: []const u8) std.mem.Allocator.Error!?[]const u8 {
-        const thread = jvm.thread_state();
+        const thread = state.thread_state();
 
         var buf_backing = try alloc.alloc(u8, std.fs.MAX_PATH_BYTES * 2);
         defer alloc.free(buf_backing);

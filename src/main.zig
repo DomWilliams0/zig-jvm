@@ -1,8 +1,6 @@
 const std = @import("std");
-const cafebabe = @import("cafebabe.zig");
+const jvm = @import("jvm");
 const arg = @import("arg.zig");
-const jvm = @import("jvm.zig");
-const bootstrap = @import("bootstrap.zig");
 
 pub const JvmError = error{
     BadArgs,
@@ -34,11 +32,11 @@ pub fn main() !void {
     std.log.debug(" classpath: {?s}", .{jvm_args.classpath.slice});
     std.log.debug(" bootclasspath: {?s}", .{jvm_args.boot_classpath.slice});
 
-    var jvm_handle = try jvm.ThreadEnv.initMainThread(alloc, &jvm_args);
+    var jvm_handle = try jvm.state.ThreadEnv.initMainThread(alloc, &jvm_args);
     defer jvm_handle.deinit();
 
     // TODO exception
-    try bootstrap.initBootstrapClasses(
+    try jvm.bootstrap.initBootstrapClasses(
         &jvm_handle.global.classloader,
         .{},
     );
@@ -53,7 +51,7 @@ pub fn main() !void {
     const main_method = main_cls.get().findMethodInThisOnly("main", "([Ljava/lang/String;)V", .{ .public = true, .static = true }) orelse unreachable;
 
     // invoke main
-    _ = try jvm.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
+    _ = try jvm.state.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
 
     std.log.info("done", .{});
 }
