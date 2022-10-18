@@ -26,7 +26,7 @@ pub const Handler = struct {
                 @call(.{ .modifier = .always_inline }, func, .{ctxt});
 
                 if (!insn.jmps)
-                    ctxt.frame.code_window.? += @as(usize, insn.sz) + 1;
+                    ctxt.frame.payload.java.code_window += @as(usize, insn.sz) + 1;
             }
         };
 
@@ -89,14 +89,8 @@ pub const InsnContext = struct {
     frame: *frame.Frame,
     mutable: *InsnContextMut,
 
-    pub fn currentPc(self: @This()) u32 {
-        const base = self.frame.method.code.java.code.?;
-        const offset = @ptrToInt(self.frame.code_window.?) - @ptrToInt(base.ptr);
-        return @truncate(u32, offset);
-    }
-
     fn body(self: Self) [*]const u8 {
-        return self.frame.code_window.?;
+        return self.frame.payload.java.code_window;
     }
 
     fn class(self: Self) *object.VmClass {
@@ -281,11 +275,11 @@ pub const InsnContext = struct {
     }
 
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
-        return &self.frame.operands;
+        return &self.frame.payload.java.operands;
     }
 
     fn localVars(self: @This()) *frame.Frame.LocalVars {
-        return &self.frame.local_vars;
+        return &self.frame.payload.java.local_vars;
     }
 
     /// If method returns not void, takes return value from top of stack
@@ -467,9 +461,9 @@ pub const InsnContext = struct {
     /// Adds offset to pc
     fn goto(self: @This(), offset: i16) void {
         if (offset >= 0) {
-            self.frame.code_window.? += @intCast(usize, offset);
+            self.frame.payload.java.code_window += @intCast(usize, offset);
         } else {
-            self.frame.code_window.? -= @intCast(usize, -offset);
+            self.frame.payload.java.code_window -= @intCast(usize, -offset);
         }
     }
 
@@ -1005,7 +999,7 @@ pub const handlers = struct {
 
     pub fn _goto(ctxt: InsnContext) void {
         const offset = ctxt.readI16();
-        const pc = ctxt.currentPc();
+        const pc = ctxt.frame.currentPc().?;
         std.log.debug("goto {}", .{@as(i33, pc) +% @intCast(i33, offset)});
         ctxt.goto(offset);
     }

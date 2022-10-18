@@ -1,6 +1,7 @@
 const std = @import("std");
 const object = @import("object.zig");
 const cafebabe = @import("cafebabe.zig");
+const jni = @import("jni.zig");
 
 /// Owns handles to loaded native libraries, each classloader owns one
 pub const NativeLibraries = struct {
@@ -104,7 +105,7 @@ pub const NativeCode = struct {
         return .{ .lock = .{}, .inner = .unbound };
     }
 
-    pub fn ensure_bound(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !void {
+    pub fn ensure_bound(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !BoundNativeCode {
         {
             self.lock.lockShared();
             defer self.lock.unlockShared();
@@ -112,21 +113,28 @@ pub const NativeCode = struct {
             switch (self.inner) {
                 .unbound => {}, // bind now
                 .failed_to_bind => return error.FailedToBind,
-                .bound => return, // already done
+                .bound => |code| return code, // already done
             }
         }
 
         // bind now
-        self.lock.lock();
-        defer self.lock.unlock();
         // https://docs.oracle.com/en/java/javase/18/docs/specs/jni/design.html#resolving-native-method-names
 
         std.log.debug("binding native method", .{});
 
         var classloader = @import("state.zig").thread_state().global.classloader;
-        _ = classloader.findNativeMethod(class.get().loader, method);
+        const ptr = classloader.findNativeMethod(class.get().loader, method) orelse return error.UnsatisfiedLink;
+        // TODO throw exception if not found
 
-        @panic("TODO bind");
+        const code = try jni.NativeMethodCode.new(classloader.alloc, method.descriptor, ptr);
+
+        self.lock.lock();
+        defer self.lock.unlock();
+        self.inner = .{ .bound = .{ .jni = code } };
+        return switch (self.inner) {
+            .bound => |b| b,
+            else => unreachable,
+        };
     }
 };
 
@@ -138,4 +146,13 @@ const NativeCodeInner = union(enum) {
 
 const BoundNativeCode = union(enum) {
     jni: @import("jni.zig").NativeMethodCode,
+
+    pub fn invoke(self: @This(), caller: *@import("frame.zig").Frame.OperandStack, static_class: ?object.VmObjectRef) void {
+        switch (self) {
+            .jni => |code| {
+                var code_mut = code;
+                code_mut.invoke(caller, static_class);
+            },
+        }
+    }
 };

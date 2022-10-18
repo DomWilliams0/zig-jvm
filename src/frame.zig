@@ -8,17 +8,34 @@ const Allocator = std.mem.Allocator;
 pub const logging = std.log.level == .debug and !@import("builtin").is_test;
 
 pub const Frame = struct {
-    operands: OperandStack,
-    local_vars: LocalVars,
     method: *const cafebabe.Method,
     class: object.VmClassRef,
 
-    /// Null if not java method
-    code_window: ?[*]const u8,
+    payload: union(enum) {
+        java: struct {
+            operands: OperandStack,
+            local_vars: LocalVars,
+            code_window: [*]const u8,
+
+            /// Used only if parent_frame is null.. pretty gross TODO
+            dummy_return_slot: ?*Frame.StackEntry,
+        },
+        native,
+    },
 
     parent_frame: ?*Frame,
-    // Used only if parent_frame is null.. pretty gross TODO
-    dummy_return_slot: ?*Frame.StackEntry,
+
+    /// Null for native
+    pub fn currentPc(self: @This()) ?u32 {
+        return switch (self.payload) {
+            .java => |code| blk: {
+                const base = self.method.code.java.code.?; // cant be abstract
+                const offset = @ptrToInt(code.code_window) - @ptrToInt(base.ptr);
+                break :blk @truncate(u32, offset);
+            },
+            else => null,
+        };
+    }
 
     // TODO move this out of frame as a generic VM type
     pub const StackEntry = struct {

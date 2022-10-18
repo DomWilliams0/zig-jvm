@@ -50,8 +50,13 @@ pub const NativeMethodCode = struct {
     /// Same len as arg_types
     args: [*]*const anyopaque,
     ret_type: types.DataType,
+    fn_ptr: *const anyopaque,
 
-    pub fn new(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor) !@This() {
+    pub fn new(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: anytype) !@This() {
+        return newInner(alloc, desc, @ptrCast(*const anyopaque, fn_ptr));
+    }
+
+    fn newInner(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: *const anyopaque) !@This() {
         var cif: libffi.ffi_cif = undefined;
 
         const arg_count = desc.param_count + 2; // +jni table and cls/this
@@ -65,7 +70,6 @@ pub const NativeMethodCode = struct {
         arg_types[1] = &libffi.ffi_type_pointer; // cls/this
 
         args[0] = &thread_jni;
-        std.log.info("JNI {*}", .{&thread_jni});
 
         var i: usize = 2;
         var arg_iter = desc.iterateParamTypes();
@@ -86,6 +90,7 @@ pub const NativeMethodCode = struct {
             .arg_types = arg_types,
             .args = args.ptr,
             .ret_type = ret_type,
+            .fn_ptr = fn_ptr,
         };
     }
 
@@ -105,22 +110,28 @@ pub const NativeMethodCode = struct {
         };
     }
 
-    pub fn invoke(self: *@This(), caller: *frame.Frame.OperandStack, func: *const anyopaque) !void {
-
+    pub fn invoke(self: *@This(), caller: *frame.Frame.OperandStack, static_class: ?object.VmObjectRef) void {
         // populate args with ptrs to caller stack
         // 0 is already initialised to jni table ptr
-        var i: u16 = 1;
+        var i: u16 = if (static_class) |static| blk: {
+            // class is arg 1
+            self.args[1] = @ptrCast(*anyopaque, static.intoNullable().ptr);
+            break :blk 2; // pop from arg 2
+        } else 1; // pop from arg 1 which includes `this`
+
         while (i < self.arg_types.len) : (i += 1) {
             self.args[i] = self.peekArg(caller, i);
         }
 
         var ret_slot: usize = undefined;
-        const func_ptr = @ptrCast(*const fn () callconv(.C) void, func);
+        const func_ptr = @ptrCast(*const fn () callconv(.C) void, self.fn_ptr);
         libffi.ffi_call(@ptrCast([*c]libffi.ffi_cif, &self.cif), func_ptr, &ret_slot, @ptrCast([*c]?*anyopaque, self.args));
 
         // pop args
-        var j = self.arg_types.len;
-        while (j > 0) : (j -= 1) _ = caller.popRaw();
+        var to_pop: usize = self.arg_types.len - 1; // don't pop for jni table arg
+        if (static_class != null) to_pop -= 1; // don't pop for static class arg
+        std.log.debug("popping {d} args from caller stack", .{to_pop});
+        while (to_pop > 0) : (to_pop -= 1) _ = caller.popRaw();
 
         // push return value
         if (self.ret_type != .void) {
@@ -150,7 +161,7 @@ test "libffi" {
     };
 
     const desc = descriptor.MethodDescriptor.new("(IFJZSB)I").?;
-    var native = NativeMethodCode.new(std.testing.allocator, desc) catch unreachable;
+    var native = NativeMethodCode.new(std.testing.allocator, desc, &S.the_func) catch unreachable;
     defer native.deinit(std.testing.allocator);
 
     var o_backing = [_]frame.Frame.StackEntry{frame.Frame.StackEntry.notPresent()} ** 16;
@@ -164,6 +175,6 @@ test "libffi" {
     stack.push(@as(i16, -1024));
     stack.push(@as(i8, 105));
 
-    native.invoke(&stack, S.the_func) catch unreachable;
+    native.invoke(&stack) catch unreachable;
     try std.testing.expectEqual(@as(i32, 123), stack.pop(i32));
 }
