@@ -119,11 +119,11 @@ pub const Frame = struct {
         ///             top of stack
         stack: [*]StackEntry,
 
-        /// Used for logging only
-        bottom_of_stack: if (logging) [*]StackEntry else void,
+        /// Distance from start
+        depth: u16,
 
         pub fn new(stack: [*]StackEntry) @This() {
-            return .{ .stack = stack, .bottom_of_stack = if (logging) stack else {} };
+            return .{ .stack = stack, .depth = 0 };
         }
 
         pub fn push(self: *@This(), value: anytype) void {
@@ -133,9 +133,10 @@ pub const Frame = struct {
         pub fn pushRaw(self: *@This(), val: Frame.StackEntry) void {
             self.stack[0] = val;
             self.stack += 1;
+            self.depth += 1;
 
             if (logging) {
-                std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ (@ptrToInt(self.stack - 1) - @ptrToInt(self.bottom_of_stack)) / @sizeOf(StackEntry), @tagName(val.ty), val });
+                std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ self.depth, @tagName(val.ty), val });
             }
         }
 
@@ -160,26 +161,24 @@ pub const Frame = struct {
         }
 
         fn isEmpty(self: @This()) bool {
-            if (!logging) @compileError("cant check");
-            return @ptrToInt(self.bottom_of_stack) >= @ptrToInt(self.stack);
+            return self.depth == 0;
         }
 
         pub fn log(self: @This()) void {
             if (!logging) return;
 
-            var ptr = self.bottom_of_stack;
             var i: u16 = 0;
 
             var buf: [1024]u8 = undefined;
             var writer = std.io.fixedBufferStream(&buf);
             _ = writer.write("operand stack: {") catch unreachable;
-            while (@ptrToInt(ptr) < @ptrToInt(self.stack)) {
+            while (i < self.depth) {
+                const ptr = self.stack - self.depth + i;
                 if (i != 0) {
                     _ = writer.write(", ") catch break;
                 }
                 std.fmt.format(writer.writer(), "#{d}: {s}, {?}", .{ i, @tagName(ptr[0].ty), ptr[0] }) catch break;
 
-                ptr += 1;
                 i += 1;
             }
 
@@ -203,10 +202,11 @@ pub const Frame = struct {
         pub fn popRaw(self: *@This()) Frame.StackEntry {
             // decrement to last value on stack
             self.stack -= 1;
+            self.depth -= 1;
             const val = self.stack[0];
 
             if (logging) {
-                std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ (@ptrToInt(self.stack) - @ptrToInt(self.bottom_of_stack)) / @sizeOf(StackEntry), @tagName(val.ty), val });
+                std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ self.depth, @tagName(val.ty), val });
             }
             return val;
         }
