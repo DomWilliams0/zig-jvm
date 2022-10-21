@@ -364,7 +364,7 @@ pub const ClassLoader = struct {
         };
 
         // preparation
-        var layout: object.ObjectLayout = if (!classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class.toStrong()) |super| super.get().u.obj.layout else .{};
+        var layout: object.ObjectLayout = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class.toStrong()) |super| super.get().u.obj.layout else .{};
         try object.defineObjectLayout(arena, class.get().u.obj.fields, &layout);
         class.get().u.obj.layout = layout;
         std.log.debug("{s} has layout {any}", .{ name, layout });

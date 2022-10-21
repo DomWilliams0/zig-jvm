@@ -257,7 +257,7 @@ pub const InsnContext = struct {
         _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack()) catch std.debug.panic("invokevirtual failed", .{});
     }
 
-    fn resolveField(self: @This(), idx: u16, comptime variant: enum { instance, static }) struct { field: *cafebabe.Field, cls: VmClassRef } {
+    fn resolveField(self: @This(), idx: u16, comptime variant: enum { instance, static }) struct { field: *cafebabe.Field, fid: object.FieldId, cls: VmClassRef } {
         // lookup info
         const info = self.constantPool().lookupField(idx) orelse unreachable;
 
@@ -268,10 +268,10 @@ pub const InsnContext = struct {
         const cls = self.resolveClass(info.cls, if (variant == .static) .ensure_initialised else .resolve_only);
 
         // lookup in class
-        const field = cls.get().findFieldInSupers(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError"); // TODO
+        const field = cls.get().findFieldInSupers(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError");
 
         // TODO access control
-        return .{ .field = field, .cls = cls };
+        return .{ .field = field.field, .fid = field.id, .cls = cls };
     }
 
     fn operandStack(self: @This()) *frame.Frame.OperandStack {
@@ -535,6 +535,9 @@ pub const handlers = struct {
     pub fn _bipush(ctxt: InsnContext) void {
         ctxt.operandStack().push(@as(i32, ctxt.readI8()));
     }
+    pub fn _sipush(ctxt: InsnContext) void {
+        ctxt.operandStack().push(@as(i32, ctxt.readI16()));
+    }
 
     pub fn _iconst_m1(ctxt: InsnContext) void {
         ctxt.operandStack().push(@as(i32, -1));
@@ -792,6 +795,10 @@ pub const handlers = struct {
     pub fn _dup(ctxt: InsnContext) void {
         var stack = ctxt.operandStack();
         stack.pushRaw(stack.peekRaw());
+    }
+
+    pub fn _pop(ctxt: InsnContext) void {
+        _ = ctxt.operandStack().popRaw();
     }
 
     pub fn _invokestatic(ctxt: InsnContext) void {

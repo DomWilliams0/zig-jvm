@@ -184,23 +184,55 @@ pub const VmClass = struct {
         return .{ .method = resolved_method, .cls = VmClassRef.Nullable.nullRef() };
     }
 
+    const FindSearchResult = struct {
+        id: FieldId,
+        field: *Field,
+    };
+
     /// Looks in self, superinterfaces then superclasses (5.4.3.2)
     pub fn findFieldInSupers(
         self: @This(),
         name: []const u8,
         desc: []const u8,
         flags: anytype,
-    ) ?*Field {
-        // check self first
-        if (self.findFieldInThisOnly(name, desc, flags)) |f| return f;
+    ) ?FindSearchResult {
+        const helper = struct {
+            fn makeFieldId(super: ?*VmClass, field: *Field) FindSearchResult {
+                const fid = if (field.flags.contains(.static))
+                    FieldId{ .static_field = field }
+                else blk: {
+                    const base = if (super) |s| s.u.obj.layout.instance_offset else 0;
+                    break :blk FieldId{ .instance_offset = base + field.u.layout_offset };
+                };
 
-        // check superinterfaces recursively
-        for (self.interfaces) |iface| if (iface.get().findFieldInSupers(name, desc, flags)) |f| return f;
+                return .{ .id = fid, .field = field };
+            }
 
-        // check super class
-        if (self.super_cls.toStrong()) |super| if (super.get().findFieldInSupers(name, desc, flags)) |f| return f;
+            fn recurse(
+                cls: *VmClass,
+                field_name: []const u8,
+                field_desc: []const u8,
+                search_flags: anytype,
+                search_base: ?*VmClass,
+            ) ?FindSearchResult {
+                // check self first
+                if (cls.findFieldInThisOnly(field_name, field_desc, search_flags)) |f| return makeFieldId(search_base, f);
 
-        return null;
+                // check superinterfaces recursively
+                for (cls.interfaces) |iface|
+                    if (recurse(iface.get(), field_name, field_desc, search_flags, cls)) |f|
+                        return f;
+
+                // check super class
+                if (cls.super_cls.toStrong()) |super|
+                    if (recurse(super.get(), field_name, field_desc, search_flags, cls)) |f|
+                        return f;
+
+                return null;
+            }
+        };
+        var self_mut = self;
+        return helper.recurse(&self_mut, name, desc, flags, null);
     }
 
     /// Looks in self only
@@ -496,8 +528,7 @@ pub const VmObjectRef = vm_alloc.VmRef(VmObject);
 pub const FieldId = union(enum) {
     /// Offset into obj storage
     instance_offset: u16,
-    /// Index into fields slice
-    static_index: u16,
+    static_field: *Field,
 };
 
 pub const ObjectLayout = struct {
