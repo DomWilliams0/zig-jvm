@@ -302,7 +302,11 @@ pub const ClassLoader = struct {
 
         var class = try vm_alloc.allocClass();
         class.get().* = .{
-            .flags = std.EnumSet(cafebabe.ClassFile.Flags).init(.{ .public = true, .final = true, .abstract = true }),
+            .flags = cafebabe.BitSet(cafebabe.ClassFile.Flags).init(.{
+                .public = true,
+                .final = true,
+                .abstract = true,
+            }),
             .name = name, // static
             .u = .{ .primitive = ty },
             .super_cls = VmClassRef.Nullable.nullRef(),

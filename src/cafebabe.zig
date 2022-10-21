@@ -23,7 +23,7 @@ pub const CafebabeError = error{
 /// Mostly allocated persistently with everything moved out of this instance into a runtime type
 pub const ClassFile = struct {
     constant_pool: ConstantPool,
-    flags: std.EnumSet(Flags),
+    flags: BitSet(Flags),
     this_cls: []const u8, // constant pool
     super_cls: ?[]const u8, // constant pool
     interfaces: std.ArrayListUnmanaged([]const u8), // point into constant pool
@@ -217,7 +217,7 @@ const ClassAccessibility = enum(u16) {
 };
 
 pub const Field = struct {
-    flags: std.EnumSet(Flags),
+    flags: BitSet(Flags),
     name: []const u8, // points into constant pool
     descriptor: FieldDescriptor,
     // TODO attributes
@@ -245,7 +245,7 @@ pub const Field = struct {
 
     const enumFromInt = enumFromIntField; // temporary
 
-    fn new(persistent: Allocator, _: Allocator, _: []const u8, _: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+    fn new(persistent: Allocator, _: Allocator, _: []const u8, _: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         _ = attributes;
         _ = persistent;
 
@@ -255,7 +255,7 @@ pub const Field = struct {
 };
 
 pub const Method = struct {
-    flags: std.EnumSet(Flags),
+    flags: BitSet(Flags),
     name: []const u8, // points into constant pool
     class_name: []const u8, // constant pool
     descriptor: MethodDescriptor,
@@ -290,7 +290,7 @@ pub const Method = struct {
         native: native.NativeCode,
     };
 
-    fn new(persistent: Allocator, arena: Allocator, class_name: []const u8, cp: *const ConstantPool, flags: std.EnumSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+    fn new(persistent: Allocator, arena: Allocator, class_name: []const u8, cp: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         var code = Code{ .java = .{
             .max_stack = 0,
             .max_locals = 0,
@@ -341,7 +341,7 @@ pub const Method = struct {
 };
 
 // TODO return type due to https://github.com/ziglang/zig/issues/12949 :(
-fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.EnumSet(Field.Flags) {
+fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(Field.Flags) {
     const all = comptime blk: {
         var bits = 0;
         inline for (@typeInfo(T).Enum.fields) |d| {
@@ -352,13 +352,13 @@ fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.En
 
     if ((input | all) != all) return null;
 
-    var set: std.EnumSet(T) = undefined;
-    set.bits.mask = @truncate(@TypeOf(set.bits.mask), input);
+    var set: BitSet(T) = undefined;
+    set.bits = @truncate(u16, input);
     return set;
 }
 
 // XXX see above
-fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.EnumSet(Method.Flags) {
+fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(Method.Flags) {
     const all = comptime blk: {
         var bits = 0;
         inline for (@typeInfo(T).Enum.fields) |d| {
@@ -369,13 +369,13 @@ fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.E
 
     if ((input | all) != all) return null;
 
-    var set: std.EnumSet(T) = undefined;
-    set.bits.mask = @truncate(@TypeOf(set.bits.mask), input);
+    var set: BitSet(T) = undefined;
+    set.bits = @truncate(u16, input);
     return set;
 }
 
 // XXX see above
-fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.EnumSet(ClassFile.Flags) {
+fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(ClassFile.Flags) {
     const all = comptime blk: {
         var bits = 0;
         inline for (@typeInfo(T).Enum.fields) |d| {
@@ -386,8 +386,8 @@ fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?std.En
 
     if ((input | all) != all) return null;
 
-    var set: std.EnumSet(T) = undefined;
-    set.bits.mask = @truncate(@TypeOf(set.bits.mask), input);
+    var set: BitSet(T) = undefined;
+    set.bits = @truncate(u16, input);
     return set;
 }
 
@@ -653,4 +653,50 @@ test "parse flags" {
     try std.testing.expect(valid.contains(.static));
     try std.testing.expect(valid.contains(.final));
     try std.testing.expect(!valid.contains(.public));
+}
+
+pub fn BitSet(comptime E: type) type {
+    return struct {
+        bits: u16,
+
+        /// types = set of bits to set
+        pub fn init(types: anytype) @This() {
+            var bits: @This() = .{ .bits = 0 };
+            inline for (@typeInfo(@TypeOf(types)).Struct.fields) |f| {
+                bits.insert(@field(E, f.name));
+            }
+
+            return bits;
+        }
+
+        pub fn insert(self: *@This(), e: E) void {
+            self.bits |= @enumToInt(e);
+        }
+
+        pub fn remove(self: *@This(), e: E) void {
+            self.bits &= ~@enumToInt(e);
+        }
+
+        pub fn contains(self: @This(), e: E) bool {
+            return (self.bits & @enumToInt(e)) != 0;
+        }
+    };
+}
+
+test "method flags" {
+    std.testing.log_level = .debug;
+    var flags = enumFromIntMethod(Method.Flags, @as(u16, 1025)) orelse unreachable;
+    try std.testing.expect(flags.contains(.public));
+    try std.testing.expect(flags.contains(.abstract));
+
+    try std.testing.expect(!flags.contains(.native));
+    flags.insert(.native);
+    try std.testing.expect(flags.contains(.native));
+    flags.remove(.native);
+    try std.testing.expect(!flags.contains(.native));
+
+    const inited = BitSet(Method.Flags).init(.{.native=true, .public=true});
+    try std.testing.expect(inited.contains(.native));
+    try std.testing.expect(inited.contains(.public));
+    try std.testing.expect(!inited.contains(.private));
 }

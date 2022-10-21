@@ -15,7 +15,7 @@ pub const ClassStatus = packed struct {
 
 /// Always allocated on GC heap
 pub const VmClass = struct {
-    flags: std.EnumSet(cafebabe.ClassFile.Flags),
+    flags: cafebabe.BitSet(cafebabe.ClassFile.Flags),
     name: []const u8, // constant pool reference
     super_cls: VmClassRef.Nullable,
     interfaces: []VmClassRef,
@@ -132,8 +132,8 @@ pub const VmClass = struct {
     ) ?*const Method {
         const pls = makeFlagsAndAntiFlags(Method.Flags, flags);
         return for (self.u.obj.methods) |m, i| {
-            if ((m.flags.bits.mask & pls.flags.bits.mask) == pls.flags.bits.mask and
-                (m.flags.bits.mask & ~(pls.antiflags.bits.mask)) == m.flags.bits.mask and
+            if ((m.flags.bits & pls.flags.bits) == pls.flags.bits and
+                (m.flags.bits & ~(pls.antiflags.bits)) == m.flags.bits and
                 std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
             {
                 // seems like returning &m is returning a function local...
@@ -212,8 +212,8 @@ pub const VmClass = struct {
     ) ?*Field {
         const pls = makeFlagsAndAntiFlags(Field.Flags, flags);
         return for (self.u.obj.fields) |m, i| {
-            if ((m.flags.bits.mask & pls.flags.bits.mask) == pls.flags.bits.mask and
-                (m.flags.bits.mask & ~(pls.antiflags.bits.mask)) == m.flags.bits.mask and
+            if ((m.flags.bits & pls.flags.bits) == pls.flags.bits and
+                (m.flags.bits & ~(pls.antiflags.bits)) == m.flags.bits and
                 std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
             {
                 break &self.u.obj.fields[i];
@@ -558,8 +558,8 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
 fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
     const flags = makeFlagsAndAntiFlags(Field.Flags, input_flags);
     for (fields) |f, i| {
-        if ((f.flags.bits.mask & flags.flags.bits.mask) == flags.flags.bits.mask and
-            (f.flags.bits.mask & ~(flags.antiflags.bits.mask)) == f.flags.bits.mask and
+        if ((f.flags.bits & flags.flags.bits) == flags.flags.bits and
+            (f.flags.bits & ~(flags.antiflags.bits)) == f.flags.bits and
             std.mem.eql(u8, desc, f.descriptor.str) and std.mem.eql(u8, name, f.name))
         {
             return if (f.flags.contains(.static)) .{ .static_index = @intCast(u16, i) } else .{ .instance_offset = f.u.layout_offset };
@@ -788,14 +788,15 @@ test "allocate array" {
 }
 
 fn makeFlagsAndAntiFlags(comptime E: type, comptime flags: anytype) struct {
-    flags: std.EnumSet(E),
-    antiflags: std.EnumSet(E),
+    flags: cafebabe.BitSet(E),
+    antiflags: cafebabe.BitSet(E),
 } {
-    const yes = std.EnumSet(E).init(flags);
-
-    var no: std.EnumSet(E) = .{};
+    var yes = cafebabe.BitSet(E){ .bits = 0 };
+    var no = cafebabe.BitSet(E){ .bits = 0 };
     inline for (@typeInfo(@TypeOf(flags)).Struct.fields) |f| {
-        if (@field(flags, f.name) == false)
+        if (@field(flags, f.name) == true)
+            yes.insert(@field(E, f.name))
+        else
             no.insert(@field(E, f.name));
     }
 
