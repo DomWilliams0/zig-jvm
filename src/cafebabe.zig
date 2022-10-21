@@ -695,7 +695,7 @@ test "method flags" {
     flags.remove(.native);
     try std.testing.expect(!flags.contains(.native));
 
-    const inited = BitSet(Method.Flags).init(.{.native=true, .public=true});
+    const inited = BitSet(Method.Flags).init(.{ .native = true, .public = true });
     try std.testing.expect(inited.contains(.native));
     try std.testing.expect(inited.contains(.public));
     try std.testing.expect(!inited.contains(.private));

@@ -423,13 +423,25 @@ pub const InsnContext = struct {
         }
     };
 
-    fn ifCmp(self: @This(), comptime T: type, comptime op: BinaryCmp) void {
-        const val2 = self.operandStack().pop(T);
-        const val1 = self.operandStack().pop(T);
+    const IfCmp = enum {
+        on_stack,
+        zero,
+    };
+
+    fn ifCmp(self: @This(), comptime T: type, comptime op: BinaryCmp, comptime cmp: IfCmp) void {
+        const val2 = switch (cmp) {
+            .on_stack => self.operandStack().popWiden(T),
+            .zero => 0,
+        };
+        const val1 = self.operandStack().popWiden(T);
 
         const branch = switch (op) {
+            .eq => val1 == val2,
+            .ne => val1 != val2,
+            .lt => val1 < val2,
             .ge => val1 >= val2,
-            else => @panic("TODO"),
+            .gt => val1 > val2,
+            .le => val1 <= val2,
         };
 
         std.log.debug("cmp: {} {s} {} = {}{s}", .{ val1, @tagName(op), val2, branch, blk: {
@@ -979,8 +991,42 @@ pub const handlers = struct {
         ctxt.operandStack().push(@intCast(i32, len));
     }
 
+    pub fn _ifeq(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .eq, .zero);
+    }
+    pub fn _ifne(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .ne, .zero);
+    }
+    pub fn _iflt(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .lt, .zero);
+    }
+    pub fn _ifge(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .ge, .zero);
+    }
+    pub fn _ifgt(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .gt, .zero);
+    }
+    pub fn _ifle(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .le, .zero);
+    }
+
+    pub fn _if_icmpeq(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .eq, .on_stack);
+    }
+    pub fn _if_icmpne(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .ne, .on_stack);
+    }
+    pub fn _if_icmplt(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .lt, .on_stack);
+    }
     pub fn _if_icmpge(ctxt: InsnContext) void {
-        ctxt.ifCmp(i32, .ge);
+        ctxt.ifCmp(i32, .ge, .on_stack);
+    }
+    pub fn _if_icmpgt(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .gt, .on_stack);
+    }
+    pub fn _if_icmple(ctxt: InsnContext) void {
+        ctxt.ifCmp(i32, .le, .on_stack);
     }
 
     pub fn _ifnull(ctxt: InsnContext) void {
