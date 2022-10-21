@@ -88,11 +88,8 @@ pub const NativeLibrary = struct {
         // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66826
         return if (@call(.{ .modifier = .never_tail }, dlsym, .{ self.lib, symbol })) |sym|
             @ptrCast(*anyopaque, sym)
-        else blk: {
-            if (dlerror()) |err|
-                std.log.warn("nah {s}", .{err});
-            break :blk null;
-        };
+        else
+            null;
     }
 };
 

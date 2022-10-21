@@ -14,5 +14,3 @@ pub const types = @import("type.zig");
 
 pub const VmObjectRef = object.VmObjectRef;
 pub const VmClassRef = object.VmClassRef;
-
-usingnamespace @import("natives/natives.zig");

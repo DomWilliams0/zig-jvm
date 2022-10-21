@@ -2,6 +2,8 @@ const std = @import("std");
 const jvm = @import("jvm");
 const arg = @import("arg.zig");
 
+usingnamespace @import("natives");
+
 pub const JvmError = error{
     BadArgs,
 };
