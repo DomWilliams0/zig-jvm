@@ -2,6 +2,7 @@ const std = @import("std");
 const classloader = @import("classloader.zig");
 const vm_alloc = @import("alloc.zig");
 const interp = @import("interpreter.zig");
+const string = @import("string.zig");
 const JvmArgs = @import("arg.zig").JvmArgs;
 const Allocator = std.mem.Allocator;
 
@@ -16,6 +17,7 @@ pub const GlobalState = struct {
     classloader: classloader.ClassLoader,
     allocator: vm_alloc.VmAllocator,
     args: *const JvmArgs,
+    string_pool: string.StringPool,
 };
 
 /// Each thread owns one
@@ -41,7 +43,9 @@ pub const ThreadEnv = struct {
             .classloader = try classloader.ClassLoader.new(alloc),
             .allocator = vm_alloc.VmAllocator{ .inner = alloc },
             .args = args,
+            .string_pool = undefined, // set next
         };
+        global.string_pool = string.StringPool.new(global);
 
         _ = try initThread(global);
         return .{

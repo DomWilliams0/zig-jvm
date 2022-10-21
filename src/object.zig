@@ -86,13 +86,13 @@ pub const VmClass = struct {
     }
 
     // TODO expose generic versions for each type instead
-    pub fn getStaticField(self: *@This(), comptime T: type, field: FieldId) *T {
+    pub fn getStaticField(comptime T: type, field: FieldId) *T {
         switch (field) {
             .instance_offset => {
                 @panic("not a static field ID");
             },
-            .static_index => |idx| {
-                const ptr = &self.u.obj.fields[idx].u.value;
+            .static_field => |f| {
+                const ptr = &f.u.value;
                 return @ptrCast(*T, @alignCast(@alignOf(T), ptr));
             },
         }
@@ -190,7 +190,7 @@ pub const VmClass = struct {
     };
 
     /// Looks in self, superinterfaces then superclasses (5.4.3.2)
-    pub fn findFieldInSupers(
+    pub fn findFieldRecursively(
         self: @This(),
         name: []const u8,
         desc: []const u8,
@@ -447,24 +447,12 @@ pub const VmObject = struct {
                 var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
                 return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
             },
-            .static_index => {
-                @panic("not an instance field ID");
-            },
+            .static_field => |f| std.debug.panic("not an instance field ID ({s})", .{f.name}),
         }
     }
 
-    fn findInstanceField(self: @This(), name: []const u8, desc: []const u8) ?FieldId {
-        return lookupFieldId(self.class.get().u.obj.fields, name, desc, .{ .static = false });
-    }
-
-    /// Instance field value
-    pub fn getFieldFromField(self: *@This(), comptime T: type, field: *const cafebabe.Field) *T {
-        const offset = field.u.layout_offset;
-        return self.getRawFieldPointer(T, offset);
-    }
-
-    /// Instance field value
-    pub fn getFieldFromFieldBlindly(self: *@This(), field: *const cafebabe.Field) StackEntry {
+    /// Instance field value as stack entry
+    pub fn getRawField(self: *@This(), field: *const cafebabe.Field) StackEntry {
         const offset = field.u.layout_offset;
         return switch (field.descriptor.getType()) {
             .primitive => |prim| switch (prim) {
@@ -582,10 +570,6 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
     }
 }
 
-// fn defineArrayLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout) error{OutOfMemory}!void {
-//         // TODO multidim - nah ignore
-//     }
-
 fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
     const flags = makeFlagsAndAntiFlags(Field.Flags, input_flags);
     for (fields) |f, i| {
@@ -695,7 +679,7 @@ test "allocate class" {
     cls.get().super_cls = VmClassRef.Nullable.nullRef();
     defer cls.drop();
 
-    const static_int_val = cls.get().getStaticField(i32, cls.get().findStaticField("myIntStatic", "I") orelse unreachable);
+    const static_int_val = VmClass.getStaticField(i32, cls.get().findStaticField("myIntStatic", "I") orelse unreachable);
     static_int_val.* = 0x12345678;
 }
 

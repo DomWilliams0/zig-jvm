@@ -268,7 +268,7 @@ pub const InsnContext = struct {
         const cls = self.resolveClass(info.cls, if (variant == .static) .ensure_initialised else .resolve_only);
 
         // lookup in class
-        const field = cls.get().findFieldInSupers(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError");
+        const field = cls.get().findFieldRecursively(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError");
 
         // TODO access control
         return .{ .field = field.field, .fid = field.id, .cls = cls };
@@ -489,6 +489,10 @@ pub const InsnContext = struct {
             },
             .long => |val| self.operandStack().push(val),
             .double => |val| self.operandStack().push(val),
+            .string => |val| {
+                const string_ref = self.thread.global.string_pool.getString(val);
+                self.operandStack().push(string_ref);
+            },
         }
     }
 
@@ -812,17 +816,23 @@ pub const handlers = struct {
     }
 
     pub fn _putfield(ctxt: InsnContext) void {
-        const field = ctxt.resolveField(ctxt.readU16(), .instance).field;
+        const field = ctxt.resolveField(ctxt.readU16(), .instance);
 
-        const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
+        const val = ctxt.popPutFieldValue(field.field) orelse @panic("incompatible?");
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse @panic("NPE");
 
         switch (val.ty) {
             .int => {
-                obj.get().getFieldFromField(i32, field).* = val.convertToUnchecked(i32);
+                obj.get().getField(i32, field.fid).* = val.convertToUnchecked(i32);
             },
-            .long, .float, .double, .reference => @panic("TODO"),
+            .reference => {
+                obj.get().getField(VmObjectRef.Nullable, field.fid).* = val.convertToUnchecked(VmObjectRef.Nullable);
+            },
+            .long,
+            .float,
+            .double,
+            => @panic("TODO"),
 
             .boolean,
             .byte,
@@ -832,19 +842,19 @@ pub const handlers = struct {
             .void, .returnAddress => unreachable,
         }
 
-        std.log.debug("putfield({}, {s}) = {x}", .{ obj_ref, field.name, val });
+        std.log.debug("putfield({}, {s}) = {x}", .{ obj_ref, field.field.name, val });
     }
 
     pub fn _getfield(ctxt: InsnContext) void {
-        const field = ctxt.resolveField(ctxt.readU16(), .instance).field;
+        const field = ctxt.resolveField(ctxt.readU16(), .instance);
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse @panic("NPE");
 
         std.debug.assert(obj.get().class.get().isObject()); // verified
 
-        const value = obj.get().getFieldFromFieldBlindly(field);
+        const value = obj.get().getRawField(field.field);
         ctxt.operandStack().pushRaw(value);
-        std.log.debug("getfield({}, {s}) = {x}", .{ obj_ref, field.name, value });
+        std.log.debug("getfield({}, {s}) = {x}", .{ obj_ref, field.field.name, value });
     }
 
     pub fn _iadd(ctxt: InsnContext) void {

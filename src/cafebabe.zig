@@ -544,6 +544,7 @@ pub const ConstantPool = struct {
         class: []const u8,
         long: i64,
         double: f64,
+        string: []const u8,
     };
 
     pub const ConstantLookupOption = enum {
@@ -570,8 +571,8 @@ pub const ConstantPool = struct {
             .class => .{ .class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
             .long => .{ .long = @bitCast(i64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
             .double => .{ .double = @bitCast(f64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
-
-            else => @panic("TODO other constants"),
+            .string => .{ .string = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
+            else => std.debug.panic("TODO other constants: {s}", .{@tagName(constant.tag)}),
         };
     }
 

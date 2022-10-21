@@ -8,7 +8,8 @@ const Preload = struct {
     // TODO native method bindings. use comptime reflection to link up
 };
 
-const preload_classes: [2]Preload = .{ .{ .cls = "java/lang/String", .initialise = true }, .{ .cls = "[I" } };
+// TODO more
+const preload_classes: [1]Preload = .{.{ .cls = "[I" }};
 
 pub const Options = struct {
     /// Skip initialising
@@ -34,19 +35,31 @@ fn loadPrimitives(loader: *classloader.ClassLoader) !void {
 }
 
 pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Options) !void {
-    const special_preload = .{ "java/lang/Object", "java/lang/Class" };
+    // load special 2 first
+    try load(opts, .{ .cls = "java/lang/Object" }, loader);
+    try load(opts, .{ .cls = "java/lang/Class" }, loader);
 
-    inline for (special_preload) |cls| try load(opts, .{ .cls = cls }, loader);
+    {
+        const java_lang_Object = loader.getLoadedBootstrapClass("java/lang/Object").?;
+        const java_lang_Class = loader.getLoadedBootstrapClass("java/lang/Class").?;
 
-    // fix up class vmdata pointers
-    inline for (special_preload) |cls|
-        loader.getLoadedBootstrapClass(cls).?.get().class_instance = try loader.allocJavaLangClassInstance();
+        // fix up class vmdata pointers
+        java_lang_Object.get().class_instance = try loader.allocJavaLangClassInstance();
+        java_lang_Class.get().class_instance = try loader.allocJavaLangClassInstance();
 
-    // initialise Object and Class
-    inline for (special_preload) |cls|
-        object.VmClass.ensureInitialised(loader.getLoadedBootstrapClass(cls).?);
+        // initialise
+        object.VmClass.ensureInitialised(java_lang_Object);
+        object.VmClass.ensureInitialised(java_lang_Class);
+    }
 
     try loadPrimitives(loader);
+
+    // load String, special case for string pool
+    try load(opts, .{ .cls = "[B" }, loader);
+    try load(opts, .{ .cls = "java/lang/String", .initialise = true }, loader);
+
+    @import("state.zig").thread_state().global.string_pool.postBootstrapInit();
+
     inline for (preload_classes) |preload|
         try load(opts, preload, loader);
 }

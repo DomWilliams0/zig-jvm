@@ -8,6 +8,7 @@ pub const insn = @import("insn.zig");
 pub const interpreter = @import("interpreter.zig");
 pub const jni = @import("jni.zig");
 pub const state = @import("state.zig");
+pub const string = @import("string.zig");
 pub const native = @import("native.zig");
 pub const object = @import("object.zig");
 pub const types = @import("type.zig");

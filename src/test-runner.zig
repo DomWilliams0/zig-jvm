@@ -34,7 +34,7 @@ pub fn main() !void {
 
     try jvm.bootstrap.initBootstrapClasses(
         &jvm_handle.global.classloader,
-        .{ .no_initialise = true },
+        .{},
     );
 
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};
