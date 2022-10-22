@@ -1,6 +1,7 @@
 comptime {
     validateFunctionSignatures(@import("java_lang_Throwable.zig"));
     validateFunctionSignatures(@import("java_lang_Class.zig"));
+    validateFunctionSignatures(@import("java_lang_Object.zig"));
 }
 
 pub const JniMethod = struct {

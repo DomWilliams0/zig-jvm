@@ -1,15 +1,18 @@
 const std = @import("std");
 const Pkg = std.build.Pkg;
 
-const pkg_jni = Pkg{
-    .name = "sys",
-    .source = .{ .path = "src/sys/jni.zig" },
-};
 const pkg_jvm = Pkg{
     .name = "jvm",
     .source = .{ .path = "src/root.zig" },
 };
-const pkg_natives = Pkg{ .name = "natives", .source = .{ .path = "src/natives/root.zig" }, .dependencies = &[_]Pkg{pkg_jni} };
+const pkg_jni = Pkg{
+    .name = "sys",
+    .source = .{ .path = "src/sys/root.zig" },
+    .dependencies = &[_]Pkg{pkg_jvm},
+};
+const pkg_natives = Pkg{ .name = "natives", .source = .{ .path = "src/natives/root.zig" }, .dependencies = &[_]Pkg{
+    pkg_jni,
+} };
 
 const pkgs = [3]Pkg{ pkg_jni, pkg_jvm, pkg_natives };
 

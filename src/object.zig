@@ -573,6 +573,10 @@ const ArrayHeader = packed struct {
 pub const VmClassRef = vm_alloc.VmRef(VmClass);
 pub const VmObjectRef = vm_alloc.VmRef(VmObject);
 
+pub fn nullRef(comptime T: type) vm_alloc.VmRef(T).Nullable {
+    return vm_alloc.VmRef(T).Nullable.nullRef();
+}
+
 pub const FieldId = union(enum) {
     /// Offset into obj storage
     instance_offset: u16,
