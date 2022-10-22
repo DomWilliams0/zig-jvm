@@ -23,11 +23,13 @@ pub const Interpreter = struct {
         self.frames_alloc.deinit();
     }
 
-    pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !frame.Frame.StackEntry {
+    /// Returns null if an exception was thrown
+    pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) state.Error!?frame.Frame.StackEntry {
         return self.executeUntilReturnWithCallerFrame(class, method, null);
     }
 
-    pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) !frame.Frame.StackEntry {
+    /// Returns null if an exception was thrown
+    pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) state.Error!?frame.Frame.StackEntry {
         // TODO format on method to show class.method
         std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
         defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
@@ -63,6 +65,9 @@ pub const Interpreter = struct {
                 // cleanup
                 popFrame(f, state.thread_state());
 
+                // exception check
+                if (state.checkException()) return null;
+
                 // native must have a caller, so return value is ignored
                 std.debug.assert(self.top_frame != null);
                 return frame.Frame.StackEntry.notPresent();
@@ -97,9 +102,8 @@ pub const Interpreter = struct {
                     // TODO panic/unreachable if caller stack/args not passed, but temporarily not because main(String[] args) is not implemented
                     if (caller) |caller_stack| {
                         if (is_instance_method) {
-                            // null check `this` param
-                            const this_obj = caller_stack.peekAt(object.VmObjectRef.Nullable, param_count);
-                            if (this_obj.isNull()) @panic("NPE"); // TODO do this null check later?
+                            // `this` param should have already been null checked
+                            std.debug.assert(!caller_stack.peekAt(object.VmObjectRef.Nullable, param_count).isNull());
 
                             // include in count
                             param_count += 1;
@@ -134,6 +138,7 @@ pub const Interpreter = struct {
 
                 // go go go
                 interpreterLoop();
+                if (state.checkException()) return null;
 
                 return dummy_return_slot;
             },
@@ -216,14 +221,14 @@ fn interpreterLoop() void {
         // check for exceptions
         if (thread.interpreter.exception.toStrong()) |exc| handled: {
             if (ctxt.frame.payload == .java) {
-                var java = ctxt.frame.payload.java;
-                std.log.debug("looking for exception handler for {?} at pc {} in {}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method });
+                var java = &ctxt.frame.payload.java;
+                std.log.debug("looking for exception handler for {?} at pc {} in {s}.{s}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method.class_name, ctxt.frame.method.name });
 
                 if (ctxt.frame.findExceptionHandler(exc, thread)) |pc| {
                     ctxt.frame.setPc(pc);
+                    java.operands.clear();
                     java.operands.push(exc); // "move" out of thread interpreter
                     thread.interpreter.clearExceptionNoDrop();
-                    ctxt_mut.control_flow = .continue_;
                     break :handled;
                 }
             }
@@ -244,7 +249,11 @@ fn interpreterLoop() void {
         }
 
         // code is verified to be correct, right? yeah...
+        ctxt_mut.control_flow = .continue_;
         while (ctxt_mut.control_flow == .continue_) {
+            // we should break out of this if an exception could have been thrown
+            std.debug.assert(thread.interpreter.exception.isNull());
+
             // refetch on every insn, method might have changed
             const f = if (thread.interpreter.top_frame) |f| f else break;
             ctxt.frame = f;
@@ -281,9 +290,11 @@ fn interpreterLoop() void {
                     this_frame,
                     thread,
                 );
+
+                std.log.debug("{?}", .{thread.interpreter.callstack()});
                 return;
             },
-            .exception => {
+            .bubble_exception => {
                 // threadlocal exception has been set
                 std.debug.assert(!thread.interpreter.exception.isNull());
 
@@ -293,6 +304,10 @@ fn interpreterLoop() void {
                 popFrame(this_frame, thread);
 
                 // keep looping
+            },
+            .check_exception => {
+                // handle exception in current frame on next iteration
+                std.debug.assert(!thread.interpreter.exception.isNull());
             },
 
             .continue_ => unreachable,

@@ -2,6 +2,7 @@ const std = @import("std");
 const object = @import("object.zig");
 const cafebabe = @import("cafebabe.zig");
 const jni = @import("jni.zig");
+const state = @import("state.zig");
 
 /// Owns handles to loaded native libraries, each classloader owns one
 pub const NativeLibraries = struct {
@@ -102,14 +103,14 @@ pub const NativeCode = struct {
         return .{ .lock = .{}, .inner = .unbound };
     }
 
-    pub fn ensure_bound(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) !BoundNativeCode {
+    pub fn ensure_bound(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) state.Error!BoundNativeCode {
         {
             self.lock.lockShared();
             defer self.lock.unlockShared();
 
             switch (self.inner) {
                 .unbound => {}, // bind now
-                .failed_to_bind => return error.FailedToBind,
+                .failed_to_bind => |e| return e,
                 .bound => |code| return code, // already done
             }
         }
@@ -119,26 +120,35 @@ pub const NativeCode = struct {
 
         std.log.debug("binding native method", .{});
 
-        var classloader = @import("state.zig").thread_state().global.classloader;
-        const ptr = classloader.findNativeMethod(class.get().loader, method) orelse return error.UnsatisfiedLink;
-        // TODO throw exception if not found
+        const S = struct {
+            fn resolve(cls: object.VmClassRef, m: *const cafebabe.Method) state.Error!jni.NativeMethodCode {
+                var classloader = @import("state.zig").thread_state().global.classloader;
+                const ptr = classloader.findNativeMethod(cls.get().loader, m) orelse return error.UnsatisfiedLink;
+                return try jni.NativeMethodCode.new(classloader.alloc, m.descriptor, ptr);
+            }
+        };
 
-        const code = try jni.NativeMethodCode.new(classloader.alloc, method.descriptor, ptr);
+        // store result in inner on error or success
+        const code_res = S.resolve(class, method);
 
         self.lock.lock();
         defer self.lock.unlock();
-        self.inner = .{ .bound = .{ .jni = code } };
-        return switch (self.inner) {
-            .bound => |b| b,
-            else => unreachable,
+
+        const code = code_res catch |err| {
+            std.log.warn("failed to bind native method {s}.{s}: {any}", .{ method.class_name, method.name, err });
+            self.inner = .{ .failed_to_bind = err };
+            return err;
         };
+
+        self.inner = .{ .bound = .{ .jni = code } };
+        return self.inner.bound;
     }
 };
 
 const NativeCodeInner = union(enum) {
     unbound,
     bound: BoundNativeCode,
-    failed_to_bind, // TODO store exception
+    failed_to_bind: state.Error,
 };
 
 const BoundNativeCode = union(enum) {

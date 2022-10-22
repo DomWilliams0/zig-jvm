@@ -157,7 +157,7 @@ pub fn VmRef(comptime T: type) type {
         /// Size is extra size on top of base object size, must be consistent with vmRefSize.
         /// Alignment is that of the actual stored inner type, not T
         /// Returned data is undefined
-        pub fn new_uninit(size: usize, comptime override_alignment: ?u29) !Strong {
+        pub fn new_uninit(size: usize, comptime override_alignment: ?u29) error{OutOfMemory}!Strong {
             const alignment = override_alignment orelse @alignOf(T);
             const alloc = global_allocator();
             const padding = std.mem.alignForward(@sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
@@ -180,7 +180,7 @@ pub fn VmRef(comptime T: type) type {
         }
 
         /// Data is undefined
-        fn new() !Strong {
+        pub fn new() error{OutOfMemory}!Strong {
             return new_uninit(0, null);
         }
 
@@ -202,13 +202,6 @@ pub const VmAllocator = struct {
     inner: Allocator,
 };
 
-// TODO return jvm OutOfMemoryException instance? or is that for the caller?
-/// Returned class data is still unintialised
-pub fn allocClass() !object.VmClassRef.Strong {
-    const ref = try object.VmClassRef.new();
-    return ref;
-}
-
 test "alloc class" {
     // TODO undefined class instance crashes on drop, sort this out
     if (true) return error.SkipZigTest;
@@ -217,7 +210,7 @@ test "alloc class" {
     const handle = try state.ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
-    const alloced = try allocClass();
+    const alloced = try object.VmClassRef.new();
     // everything is unintialised!!! just set this so it can be dropped
     defer alloced.drop();
 }

@@ -2,11 +2,13 @@ const std = @import("std");
 const cafebabe = @import("cafebabe.zig");
 const vm_alloc = @import("alloc.zig");
 const vm_type = @import("type.zig");
+const state = @import("state.zig");
 const classloader = @import("classloader.zig");
 const Allocator = std.mem.Allocator;
 const Field = cafebabe.Field;
 const Method = cafebabe.Method;
 const StackEntry = @import("frame.zig").Frame.StackEntry;
+const Error = state.Error;
 
 // TODO merge these with cafebabe class flags? merge at comptime possible?
 pub const ClassStatus = packed struct {
@@ -108,6 +110,7 @@ pub const VmClass = struct {
         if (self.findMethodInSelfOrSupers(name, desc)) |m| return m;
 
         // check superinterfaces
+        // TODO return specific error if finds "multiple maximally-specific superinterface methods"
         @panic("TODO find method in super interfaces");
     }
 
@@ -263,7 +266,7 @@ pub const VmClass = struct {
         return self.status.ty == .array;
     }
 
-    pub fn ensureInitialised(self: VmClassRef) void {
+    pub fn ensureInitialised(self: VmClassRef) Error!void {
         var self_mut = self.get();
         {
             self_mut.monitor.mutex.lock();
@@ -271,10 +274,7 @@ pub const VmClass = struct {
 
             const current_state = self_mut.init_state;
             switch (current_state) {
-                .failed => {
-                    // TODO exception
-                    @panic("failed init");
-                },
+                .failed => return error.NoClassDef,
                 .initialised => return,
                 .initialising => |t| {
                     const this_thread = std.Thread.getCurrentId();
@@ -306,16 +306,19 @@ pub const VmClass = struct {
         if (!self_mut.flags.contains(.interface)) {
             if (self_mut.super_cls.toStrong()) |super| {
                 // std.log.debug("initialising super class {s} on thread {d}", .{ super.get().name, std.Thread.getCurrentId() });
-                ensureInitialised(super);
+                try ensureInitialised(super);
             }
 
             // TODO init super interfaces too
         }
 
         // run class constructor
-        // TODO exception
         if (self_mut.findMethodInThisOnly("<clinit>", "()V", .{ .static = true })) |clinit| {
-            _ = @import("state.zig").thread_state().interpreter.executeUntilReturn(self, clinit) catch std.debug.panic("clinit failed", .{});
+            if ((try state.thread_state().interpreter.executeUntilReturn(self, clinit)) == null) {
+                // exception occurred
+                std.log.warn("exception thrown running class initialiser of {s}: {any}", .{ self_mut.name, state.thread_state().interpreter.exception.toStrongUnchecked() });
+                return error.NoClassDef;
+            }
         }
 
         // set init state
@@ -323,19 +326,18 @@ pub const VmClass = struct {
         std.log.debug("initialised class {s}", .{self_mut.name});
         defer self_mut.monitor.mutex.unlock();
 
-        // TODO might have errored
         self_mut.init_state = .initialised;
         self_mut.monitor.notifyAll();
     }
 
     /// Self is cloned to pass to object
-    pub fn instantiateObject(self: VmClassRef) VmObjectRef {
+    pub fn instantiateObject(self: VmClassRef) error{OutOfMemory}!VmObjectRef {
         const cls = self.get();
         std.log.debug("instantiating object of class {s}", .{cls.name});
 
         // allocate
         const layout = cls.u.obj.layout;
-        var obj_ref = VmObjectRef.new_uninit(layout.instance_offset, null) catch @panic("out of memory");
+        var obj_ref = try VmObjectRef.new_uninit(layout.instance_offset, null);
         obj_ref.get().* = VmObject{
             .class = self.clone(),
             .storage = {},
@@ -354,7 +356,7 @@ pub const VmClass = struct {
     }
 
     /// Self is array class, and is cloned to pass to object
-    pub fn instantiateArray(self: VmClassRef, len: usize) VmObjectRef {
+    pub fn instantiateArray(self: VmClassRef, len: usize) error{OutOfMemory}!VmObjectRef {
         std.debug.assert(self.get().isArray());
         const cls = self.get();
         std.log.debug("instantiating array of class {s} with {d} length", .{ cls.name, len });
@@ -378,7 +380,7 @@ pub const VmClass = struct {
         const padding = cls.u.array.padding;
         // store a u32 len, padding, then the elems
         // TODO alignment is too big for most array types, can save some bytes
-        var array_ref = VmObjectRef.new_uninit(@sizeOf(ArrayHeader) + padding + array_size, @alignOf(usize)) catch @panic("out of memory");
+        var array_ref = try VmObjectRef.new_uninit(@sizeOf(ArrayHeader) + padding + array_size, @alignOf(usize));
 
         // init object fields
         array_ref.get().* = .{

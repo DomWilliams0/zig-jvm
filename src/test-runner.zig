@@ -112,13 +112,27 @@ const Test = struct {
 
         // load test class
         const cls = try jvm.state.thread_state().global.classloader.loadClass(self.testName(), .bootstrap);
+        jvm.object.VmClass.ensureInitialised(cls) catch |err| {
+            if (jvm.state.thread_state().interpreter.exception.toStrong()) |exc|
+                std.log.err("test {s} threw exception during initialisation: {?})", .{ self.testName(), exc })
+            else
+                std.log.err("test {s} failed: {any}", .{
+                    self.testName(),
+                    err,
+                });
+            return E.Failed;
+        };
 
         // find test method
         const entrypoint = cls.get().findMethodInThisOnly("vmTest", "()I", .{ .public = true, .static = true }) orelse return E.MissingEntrypoint;
 
         // run the test
         const ret_value = try jvm.state.thread_state().interpreter.executeUntilReturn(cls, entrypoint);
-        const ret_code = ret_value.convertTo(i32);
+        const ret_code = if (ret_value) |val| val.convertTo(i32) else {
+            const exc = jvm.state.thread_state().interpreter.exception.toStrongUnchecked();
+            std.log.err("test {s} threw exception {?}", .{ self.testName(), exc });
+            return E.Failed;
+        };
 
         // ensure success
         if (ret_code != 0) {

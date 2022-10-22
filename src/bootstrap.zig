@@ -25,7 +25,7 @@ fn load(comptime opts: Options, preload: Preload, loader: *classloader.ClassLoad
     const cls = try loader.loadClass(preload.cls, .bootstrap);
 
     if (!opts.no_initialise and preload.initialise)
-        object.VmClass.ensureInitialised(cls);
+        try object.VmClass.ensureInitialised(cls);
 }
 
 fn loadPrimitives(loader: *classloader.ClassLoader) !void {
@@ -48,8 +48,8 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
         java_lang_Class.get().class_instance = try loader.allocJavaLangClassInstance();
 
         // initialise
-        object.VmClass.ensureInitialised(java_lang_Object);
-        object.VmClass.ensureInitialised(java_lang_Class);
+        try object.VmClass.ensureInitialised(java_lang_Object);
+        try object.VmClass.ensureInitialised(java_lang_Class);
     }
 
     try loadPrimitives(loader);

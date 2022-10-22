@@ -62,7 +62,8 @@ pub const ClassFile = struct {
         return parse(arena, persistent, &stream);
     }
 
-    pub fn parse(arena: Allocator, persistent: Allocator, buf: *std.io.FixedBufferStream([]const u8)) !ClassFile {
+    const ParseError = CafebabeError || std.mem.Allocator.Error || std.io.FixedBufferStream([]const u8).Reader.Error || error{EndOfStream};
+    pub fn parse(arena: Allocator, persistent: Allocator, buf: *std.io.FixedBufferStream([]const u8)) ParseError!ClassFile {
         // TODO could some of this be done with a packed struct? how does that work with unaligned ints.
         //  would need to convert from big to native endian anyway
 

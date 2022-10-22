@@ -303,7 +303,7 @@ pub const Frame = struct {
         initialised: if (logging) std.DynamicBitSet else void,
 
         // TODO ensure that unused alloc param when logging=false is optimised out
-        pub fn new(vars: [*]Frame.StackEntry, alloc: std.mem.Allocator, n: u16) (if (logging) anyerror else error{})!@This() {
+        pub fn new(vars: [*]Frame.StackEntry, alloc: std.mem.Allocator, n: u16) (if (logging) std.mem.Allocator.Error else error{})!@This() {
             return .{ .vars = vars, .initialised = if (logging) try std.DynamicBitSet.initEmpty(alloc, n) else {} };
         }
 
@@ -362,7 +362,7 @@ pub fn convert(comptime T: type) type {
         int: usize,
         any: T,
     };
-    if (@sizeOf(T) > @sizeOf(usize)) @compileError(std.fmt.comptimePrint("can't be bigger than usize ({d} > {d})", .{ @sizeOf(T), @sizeOf(usize) }));
+    if (@sizeOf(T) > @sizeOf(usize)) @compileError(std.fmt.comptimePrint("{s} can't be bigger than usize ({d} > {d})", .{ @typeName(T), @sizeOf(T), @sizeOf(usize) }));
 
     return struct {
         pub fn to(val: T) usize {

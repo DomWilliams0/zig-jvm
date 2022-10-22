@@ -44,11 +44,6 @@ pub const WhichLoader = union(enum) {
         }
     }
 };
-pub const E = error{
-    ClassNotFound, // TODO exception instead
-    NameMismatch,
-};
-
 pub const ClassLoader = struct {
     const Self = @This();
 
@@ -134,7 +129,7 @@ pub const ClassLoader = struct {
     }
 
     /// Same as loadClass("[" ++ name, ...). Must not be a primitive
-    pub fn loadClassAsArrayElement(self: *Self, elem_name: []const u8, requested_loader: WhichLoader) anyerror!VmClassRef {
+    pub fn loadClassAsArrayElement(self: *Self, elem_name: []const u8, requested_loader: WhichLoader) state.Error!VmClassRef {
         // prepend [
         var array_cls_name: []u8 = try self.alloc.alloc(u8, elem_name.len + 1);
         array_cls_name[0] = '[';
@@ -152,19 +147,17 @@ pub const ClassLoader = struct {
     /// Main entrypoint - name can be array or class name. Loads now if not already.
     /// Loader is cloned if needed for loading.
     /// Returns BORROWED reference
-    // TODO return exception or error type
-    pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) anyerror!VmClassRef {
-        // TODO exception
-        if (name.len < 2) std.debug.panic("class name too short {s}", .{name});
+    pub fn loadClass(self: *Self, name: []const u8, requested_loader: WhichLoader) state.Error!VmClassRef {
+        if (name.len < 1) return error.ClassFormat;
 
         // TODO helper wrapper type around type names like java/lang/String and [[C ?
-        const array_type: ArrayType = if (name[0] == '[')
-            if (name[1] == 'L' or name[1] == '[')
+        const array_type: ArrayType = if (name[0] == '[') blk: {
+            if (name.len < 2) return error.ClassFormat;
+            break :blk if (name[1] == 'L' or name[1] == '[')
                 .reference
             else
-                .primitive
-        else
-            .not;
+                .primitive;
+        } else .not;
 
         // use bootstrap loader for primitive arrays
         var loader = if (array_type == .primitive) .bootstrap else requested_loader;
@@ -176,7 +169,7 @@ pub const ClassLoader = struct {
         return self.loadClassInternal(name, loader, array_type);
     }
 
-    fn loadClassInternal(self: *Self, name: []const u8, loader: WhichLoader, array_type: ArrayType) anyerror!VmClassRef {
+    fn loadClassInternal(self: *Self, name: []const u8, loader: WhichLoader, array_type: ArrayType) state.Error!VmClassRef {
         switch (self.getLoadState(name, loader)) {
             .loading => unreachable, // TODO other threads
             .loaded => |cls| return cls,
@@ -231,18 +224,17 @@ pub const ClassLoader = struct {
     }
 
     /// Name is the file name of the class
-    // TODO set exception
-    fn loadBootstrapClass(self: *Self, name: []const u8) !VmClassRef {
+    fn loadBootstrapClass(self: *Self, name: []const u8) state.Error!VmClassRef {
         // TODO should allocate in big blocks rather than using gpa for all tiny allocs
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
 
-        const file_bytes = try findBootstrapClassFile(arena.allocator(), self.alloc, name) orelse return E.ClassNotFound;
+        const file_bytes = try findBootstrapClassFile(arena.allocator(), self.alloc, name) orelse return error.NoClassDef;
         return self.defineClass(arena.allocator(), name, file_bytes, .bootstrap);
     }
 
     // TODO set exception
-    fn loadArrayClass(self: *Self, name: []const u8, is_primitive: bool, loader: WhichLoader) !VmClassRef {
+    fn loadArrayClass(self: *Self, name: []const u8, is_primitive: bool, loader: WhichLoader) state.Error!VmClassRef {
         std.debug.assert(name[0] == '[');
         const elem_name = name[1..];
 
@@ -260,7 +252,7 @@ pub const ClassLoader = struct {
         // TODO interfaces cloneable and serializable
         const elem_dims = if (elem_class.name[0] == '[') elem_class.u.array.dims else 0;
 
-        var class = try vm_alloc.allocClass();
+        var class = try object.VmClassRef.new();
         const padding = elem_class.calculateArrayPreElementPadding();
         class.get().* = .{
             .flags = flags,
@@ -287,20 +279,20 @@ pub const ClassLoader = struct {
 
     /// Name should be static if loading for the first time (during startup).
     /// Returns BORROWED class reference
-    pub fn loadPrimitive(self: *Self, name: []const u8) anyerror!VmClassRef {
+    pub fn loadPrimitive(self: *Self, name: []const u8) state.Error!VmClassRef {
         const ty = vm_type.PrimitiveDataType.fromTypeString(name) orelse std.debug.panic("invalid primitive {s}", .{name});
         return self.loadPrimitiveWithType(name, ty);
     }
 
     /// Name should be static if loading for the first time (during startup).
     /// Returns BORROWED class reference
-    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.PrimitiveDataType) anyerror!VmClassRef {
+    pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.PrimitiveDataType) state.Error!VmClassRef {
         var entry = &self.primitives[@enumToInt(ty)];
         if (entry.toStrong()) |cls| return cls;
 
         std.log.debug("loading primitive {s}", .{name});
 
-        var class = try vm_alloc.allocClass();
+        var class = try object.VmClassRef.new();
         class.get().* = .{
             .flags = cafebabe.BitSet(cafebabe.ClassFile.Flags).init(.{
                 .public = true,
@@ -320,10 +312,10 @@ pub const ClassLoader = struct {
         return class; // borrowed
     }
 
-    pub fn allocJavaLangClassInstance(self: *Self) !VmObjectRef.Nullable {
+    pub fn allocJavaLangClassInstance(self: *Self) error{OutOfMemory}!VmObjectRef.Nullable {
         const java_lang_Class = self.getLoadedBootstrapClass("java/lang/Class") orelse return VmObjectRef.Nullable.nullRef();
 
-        const obj = object.VmClass.instantiateObject(java_lang_Class);
+        const obj = try object.VmClass.instantiateObject(java_lang_Class);
 
         // TODO set fields
 
@@ -332,19 +324,25 @@ pub const ClassLoader = struct {
 
     /// Class bytes are the callers responsiblity to clean up.
     /// Not an array or primitive.
-    fn defineClass(self: *Self, arena: Allocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) !VmClassRef {
+    fn defineClass(self: *Self, arena: Allocator, name: []const u8, class_bytes: []const u8, loader: WhichLoader) state.Error!VmClassRef {
         var stream = std.io.fixedBufferStream(class_bytes);
-        var classfile = try cafebabe.ClassFile.parse(arena, self.alloc, &stream);
+        var classfile = cafebabe.ClassFile.parse(arena, self.alloc, &stream) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                std.log.warn("failed to parse class file '{s}': {any}", .{ name, err });
+                return error.ClassFormat;
+            },
+        };
         errdefer classfile.deinit(self.alloc);
 
-        if (!std.mem.eql(u8, name, classfile.this_cls)) return E.NameMismatch;
+        if (!std.mem.eql(u8, name, classfile.this_cls)) return error.ClassFormat;
 
         // linking
 
         // resolve super
         var super_class = if (classfile.super_cls) |super| (try self.loadClass(super, loader)).clone().intoNullable() else VmClassRef.Nullable.nullRef();
 
-        var class = try vm_alloc.allocClass();
+        var class = try object.VmClassRef.new();
         class.get().* = .{
             .flags = classfile.flags,
             .name = classfile.this_cls,

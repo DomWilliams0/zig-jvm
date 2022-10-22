@@ -3,6 +3,7 @@ const object = @import("object.zig");
 const descriptor = @import("descriptor.zig");
 const types = @import("type.zig");
 const frame = @import("frame.zig");
+const state = @import("state.zig");
 
 pub const libffi = @cImport({
     @cInclude("ffi.h");
@@ -52,11 +53,11 @@ pub const NativeMethodCode = struct {
     ret_type: types.DataType,
     fn_ptr: *const anyopaque,
 
-    pub fn new(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: anytype) !@This() {
+    pub fn new(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: anytype) state.Error!@This() {
         return newInner(alloc, desc, @ptrCast(*const anyopaque, fn_ptr));
     }
 
-    fn newInner(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: *const anyopaque) !@This() {
+    fn newInner(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: *const anyopaque) state.Error!@This() {
         var cif: libffi.ffi_cif = undefined;
 
         const arg_count = desc.param_count + 2; // +jni table and cls/this

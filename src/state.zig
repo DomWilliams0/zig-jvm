@@ -1,6 +1,7 @@
 const std = @import("std");
 const classloader = @import("classloader.zig");
 const vm_alloc = @import("alloc.zig");
+const object = @import("object.zig");
 const interp = @import("interpreter.zig");
 const string = @import("string.zig");
 const JvmArgs = @import("arg.zig").JvmArgs;
@@ -100,4 +101,82 @@ pub const JvmHandle = struct {
 pub fn thread_state() *ThreadEnv {
     std.debug.assert(inited);
     return &thread_env;
+}
+
+/// Terminal errors that can't be turned into exceptions
+pub const ExecutionError = error{
+    OutOfMemory,
+    LibFfi,
+};
+
+/// Errors that should be turned into exceptions. All must have a corresponding Java class
+/// defined in errorToExceptionClass (comptime checked)
+pub const ExceptionError = error{
+    UnsatisfiedLink,
+    ClassFormat,
+    NoClassDef,
+    NoSuchField,
+    NoSuchMethod,
+    IncompatibleClassChange,
+    NullPointer,
+    NegativeArraySize,
+    ArrayIndexOutOfBounds,
+    AbstractMethod,
+};
+
+/// Either exceptions or fatal errors
+pub const Error = ExecutionError || ExceptionError;
+
+fn errorToExceptionClass(err: Error) ?[]const u8 {
+    // TODO some might not have the same constructor
+    return switch (err) {
+        error.UnsatisfiedLink => "java/lang/UnsatisfiedLinkError",
+        error.ClassFormat => "java/lang/ClassFormatError",
+        error.NoClassDef => "java/lang/NoClassDefFoundError",
+        error.NoSuchField => "java/lang/NoSuchFieldError",
+        error.NoSuchMethod => "java/lang/NoSuchMethodError",
+        error.IncompatibleClassChange => "java/lang/IncompatibleClassChangeError",
+        error.NullPointer => "java/lang/NullPointerException",
+        error.NegativeArraySize => "java/lang/NegativeArraySizeException",
+        error.ArrayIndexOutOfBounds => "java/lang/ArrayIndexOutOfBoundsException",
+        error.AbstractMethod => "java/lang/AbstractMethodError",
+
+        else => return null,
+    };
+}
+
+comptime {
+    // ensure all exception errors have defined a Java class to instantiate
+    const exception_set = @typeInfo(ExceptionError).ErrorSet.?;
+    inline for (exception_set) |exc| {
+        const err = @field(ExceptionError, exc.name);
+        if (errorToExceptionClass(err) == null) @compileError("no class defined for ExceptionError." ++ exc.name);
+    }
+}
+
+/// Abort if this returns an error. TODO within here, alloc and return OutOfMemoryError and StackOverflowError
+pub fn errorToException(err: Error) ExecutionError!object.VmObjectRef {
+    if (errorToExceptionClass(err)) |cls| {
+        const thread = thread_state();
+        const loader = if (thread.interpreter.top_frame) |f| f.class.get().loader else .bootstrap;
+        const exc_class = thread.global.classloader.loadClass(cls, loader) catch |load_error| {
+            std.log.warn("failed to load exception class {s} while instantiating: {any}", .{ cls, load_error });
+
+            // propagate fatal errors instantiating new exception
+            // TODO ensure recursion isn't infinite
+            // TODO special case for stack overflow error
+            const new_exception = try errorToException(load_error);
+
+            // TODO set new exception as cause
+            return new_exception;
+        };
+        const exc_obj = try object.VmClass.instantiateObject(exc_class);
+
+        // TODO invoke constructor
+        return exc_obj;
+    } else return @errSetCast(ExecutionError, err);
+}
+
+pub fn checkException() bool {
+    return !thread_state().interpreter.exception.isNull();
 }

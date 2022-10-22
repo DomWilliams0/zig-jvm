@@ -9,10 +9,13 @@ const decl = @import("insn-decl.zig");
 const VmClassRef = object.VmClassRef;
 const VmObjectRef = object.VmObjectRef;
 const Insn = decl.Insn;
+const Error = state.Error;
 
 const handler_fn = fn (InsnContext) void;
 
 pub const debug_logging = true;
+
+const InvokeError = Error || error{InvocationException};
 
 pub const Handler = struct {
     handler: *const handler_fn,
@@ -23,10 +26,48 @@ pub const Handler = struct {
             fn handler(ctxt: InsnContext) void {
                 const name = "_" ++ insn.name;
                 const func = if (@hasDecl(handlers, name)) @field(handlers, name) else nop_handler(insn);
-                @call(.{ .modifier = .always_inline }, func, .{ctxt});
 
+                const ret_type = @typeInfo(@typeInfo(@TypeOf(func)).Fn.return_type.?);
+                switch (ret_type) {
+                    .ErrorUnion => |err_union| {
+                        if (err_union.payload != void) @compileError("unexpected return type from insn handler: " ++ @typeName(ret_type));
+
+                        // insn that could raise an exception
+                        @call(.{ .modifier = .always_inline }, func, .{ctxt}) catch |err| {
+                            // dont inline to avoid bloating insn handler funcs with the same exception handling code
+                            @call(.{ .modifier = .never_inline }, handleThrownException, .{ insn.name, ctxt, err });
+
+                            // early return, do not increment pc
+                            return;
+                        };
+                    },
+                    .Void => {
+                        // normal insn with no possible errors
+                        @call(.{ .modifier = .always_inline }, func, .{ctxt});
+                    },
+                    else => @compileError("unexpected return type from insn handler: " ++ @typeName(ret_type)),
+                }
+
+                // increment code window past this instruction
                 if (!insn.jmps)
                     ctxt.frame.payload.java.code_window += @as(usize, insn.sz) + 1;
+            }
+
+            fn handleThrownException(comptime insn_name: []const u8, ctxt: InsnContext, err: InvokeError) void {
+                switch (err) {
+                    error.InvocationException => {
+                        // exception has been pushed onto stack already
+                        ctxt.mutable.control_flow = .check_exception;
+                    },
+                    else => {
+                        std.log.debug("exception thrown in insn {s} handler: {any}", .{ insn_name, err });
+
+                        // instantiate exception and throw
+                        const e = @errSetCast(Error, err);
+                        const exc = state.errorToException(e) catch |fatal| std.debug.panic("vm error: {any}", .{fatal});
+                        ctxt.throwException(exc);
+                    },
+                }
             }
         };
 
@@ -77,7 +118,12 @@ pub const InsnContextMut = struct {
     pub const ControlFlow = enum {
         continue_,
         return_,
-        exception,
+        /// Exception thrown that has already been attempted to be handled in current frame,
+        /// bubble up immediately
+        bubble_exception,
+        /// Exception was thrown that hasn't yet been attempted to be handled in current frame,
+        /// don't pop top frame immediately
+        check_exception,
     };
 };
 
@@ -132,12 +178,12 @@ pub const InsnContext = struct {
     };
 
     /// Returns BORROWED reference
-    fn resolveClass(self: @This(), name: []const u8, comptime resolution: ClassResolution) VmClassRef {
+    fn resolveClass(self: @This(), name: []const u8, comptime resolution: ClassResolution) Error!VmClassRef {
         return self.resolveClassWithLoader(name, resolution, self.class().loader);
     }
 
     /// Returns BORROWED reference
-    fn resolveClassWithLoader(self: @This(), name: []const u8, comptime resolution: ClassResolution, loader: classloader.WhichLoader) VmClassRef {
+    fn resolveClassWithLoader(self: @This(), name: []const u8, comptime resolution: ClassResolution, loader: classloader.WhichLoader) Error!VmClassRef {
         // resolve
         std.log.debug("resolving class {s}", .{name});
         const loaded = self.thread.global.classloader.loadClass(name, loader) catch std.debug.panic("cant load", .{});
@@ -146,7 +192,7 @@ pub const InsnContext = struct {
         switch (resolution) {
             .resolve_only => {},
             .ensure_initialised => {
-                object.VmClass.ensureInitialised(loaded);
+                try object.VmClass.ensureInitialised(loaded);
                 // TODO cache initialised state in constant pool too
             },
         }
@@ -162,36 +208,37 @@ pub const InsnContext = struct {
     //     return loaded;
     // }
 
-    fn invokeStaticMethod(self: @This(), idx: u16) void {
+    fn invokeStaticMethod(self: @This(), idx: u16) InvokeError!void {
         // lookup method name/type/class
         const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
         if (info.is_interface) @panic("TODO interface method resolution");
 
         // resolve class and ensure initialised
-        const class_ref = self.resolveClass(info.cls, .ensure_initialised);
+        const class_ref = try self.resolveClass(info.cls, .ensure_initialised);
         const cls = class_ref.get();
 
-        if (cls.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
+        if (cls.flags.contains(.interface)) return error.IncompatibleClassChange;
 
         // find method in class/superclasses/interfaces
-        const method = cls.findMethodRecursive(info.name, info.ty) orelse @panic("NoSuchMethodError");
+        const method = cls.findMethodRecursive(info.name, info.ty) orelse return error.NoSuchMethod;
 
         // ensure callable
-        if (!method.flags.contains(.static)) @panic("IncompatibleClassChangeError"); // TODO
-        if (method.flags.contains(.abstract)) @panic("NoSuchMethodError"); // TODO
+        if (!method.flags.contains(.static)) return error.IncompatibleClassChange;
+        if (method.flags.contains(.abstract)) return error.NoSuchMethod;
         // TODO check access control?
 
         // invoke with caller frame
-        _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack()) catch std.debug.panic("clinit failed", .{});
+        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack())) == null)
+            return error.InvocationException;
     }
 
-    fn invokeSpecialMethod(self: @This(), idx: u16) void {
+    fn invokeSpecialMethod(self: @This(), idx: u16) InvokeError!void {
         // lookup method name/type/class
         const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
         if (info.is_interface) @panic("TODO interface method resolution");
 
         // resolve referenced class
-        const referenced_cls_ref = self.resolveClass(info.cls, .resolve_only);
+        const referenced_cls_ref = try self.resolveClass(info.cls, .resolve_only);
         const current_supercls = self.class().super_cls;
 
         // decide which class to use
@@ -222,27 +269,28 @@ pub const InsnContext = struct {
         std.log.debug("resolved method to {s}.{s}", .{ cls.get().name, method.name });
 
         // invoke with caller frame
-        _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack()) catch std.debug.panic("invokespecial failed", .{});
+        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack())) == null)
+            return error.InvocationException;
     }
 
-    fn invokeVirtualMethod(self: @This(), idx: u16) void {
+    fn invokeVirtualMethod(self: @This(), idx: u16) InvokeError!void {
         // lookup method name/type/class
         const info = self.constantPool().lookupMethod(idx) orelse unreachable;
 
         // resolve referenced class
-        const cls_ref = self.resolveClass(info.cls, .resolve_only);
+        const cls_ref = try self.resolveClass(info.cls, .resolve_only);
         const cls = cls_ref.get();
 
-        if (cls.flags.contains(.interface)) @panic("IncompatibleClassChangeError"); // TODO
+        if (cls.flags.contains(.interface)) return error.IncompatibleClassChange;
 
         // find method in class/superclasses/interfaces
-        const method = cls.findMethodRecursive(info.name, info.ty) orelse @panic("NoSuchMethodError");
-        if (method.flags.contains(.static)) @panic("IncompatibleClassChangeError"); // TODO
-        if (method.flags.contains(.abstract)) @panic("NoSuchMethodError"); // TODO
+        const method = cls.findMethodRecursive(info.name, info.ty) orelse return error.NoSuchMethod;
+        if (method.flags.contains(.static)) return error.IncompatibleClassChange;
+        if (method.flags.contains(.abstract)) return error.AbstractMethod;
         // TODO check access control?
 
         // get this obj and null check
-        const this_obj_ref = self.operandStack().peekAt(VmObjectRef.Nullable, method.descriptor.param_count).toStrong() orelse @panic("NPE");
+        const this_obj_ref = self.operandStack().peekAt(VmObjectRef.Nullable, method.descriptor.param_count).toStrong() orelse return error.NullPointer;
         const this_obj = this_obj_ref.get();
 
         // select method (5.4.6)
@@ -254,10 +302,11 @@ pub const InsnContext = struct {
         std.log.debug("resolved method to {s}.{s}", .{ selected_cls.get().name, selected_method.method.name });
 
         // invoke with caller frame
-        _ = self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack()) catch std.debug.panic("invokevirtual failed", .{});
+        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_cls, selected_method.method, self.operandStack())) == null)
+            return error.InvocationException;
     }
 
-    fn resolveField(self: @This(), idx: u16, comptime variant: enum { instance, static }) struct { field: *cafebabe.Field, fid: object.FieldId, cls: VmClassRef } {
+    fn resolveField(self: @This(), idx: u16, comptime variant: enum { instance, static }) Error!struct { field: *cafebabe.Field, fid: object.FieldId, cls: VmClassRef } {
         // lookup info
         const info = self.constantPool().lookupField(idx) orelse unreachable;
 
@@ -265,10 +314,10 @@ pub const InsnContext = struct {
         // TODO cache this in constant pool
 
         // resolve and/or init class
-        const cls = self.resolveClass(info.cls, if (variant == .static) .ensure_initialised else .resolve_only);
+        const cls = try self.resolveClass(info.cls, if (variant == .static) .ensure_initialised else .resolve_only);
 
         // lookup in class
-        const field = cls.get().findFieldRecursively(info.name, info.ty, .{}) orelse @panic("NoSuchFieldError");
+        const field = cls.get().findFieldRecursively(info.name, info.ty, .{}) orelse return error.NoSuchField;
 
         // TODO access control
         return .{ .field = field.field, .fid = field.id, .cls = cls };
@@ -304,7 +353,7 @@ pub const InsnContext = struct {
         specific: type,
     };
 
-    fn arrayStore(self: @This(), comptime opt: ArrayStoreLoad) void {
+    fn arrayStore(self: @This(), comptime opt: ArrayStoreLoad) Error!void {
         const pop_ty = switch (opt) {
             .byte_bool, .int => i32,
             .specific => |ty| ty,
@@ -314,10 +363,13 @@ pub const InsnContext = struct {
         const idx_unchecked = self.operandStack().pop(i32);
         const array_opt = self.operandStack().pop(VmObjectRef.Nullable);
 
-        const array_obj = array_opt.toStrong() orelse @panic("NPE");
+        const array_obj = array_opt.toStrong() orelse return error.NullPointer;
         const array = array_obj.get().getArrayHeader();
 
-        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len) @panic("ArrayIndexOutOfBoundsException") else @intCast(usize, idx_unchecked);
+        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len)
+            return error.ArrayIndexOutOfBounds
+        else
+            @intCast(usize, idx_unchecked);
 
         switch (opt) {
             .int => |ty| array.getElems(ty)[idx] = @intCast(ty, val),
@@ -328,7 +380,7 @@ pub const InsnContext = struct {
         std.log.debug("array store {} idx {} = {}", .{ array_obj, idx, val });
     }
 
-    fn arrayLoad(self: @This(), comptime opt: ArrayStoreLoad) void {
+    fn arrayLoad(self: @This(), comptime opt: ArrayStoreLoad) Error!void {
         const pop_ty = switch (opt) {
             .byte_bool, .int => i32,
             .specific => |ty| ty,
@@ -338,10 +390,13 @@ pub const InsnContext = struct {
         const idx_unchecked = self.operandStack().pop(i32);
         const array_opt = self.operandStack().pop(VmObjectRef.Nullable);
 
-        const array_obj = array_opt.toStrong() orelse @panic("NPE");
+        const array_obj = array_opt.toStrong() orelse return error.NullPointer;
         const array = array_obj.get().getArrayHeader();
 
-        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len) @panic("ArrayIndexOutOfBoundsException") else @intCast(usize, idx_unchecked);
+        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len)
+            return error.ArrayIndexOutOfBounds
+        else
+            @intCast(usize, idx_unchecked);
 
         self.operandStack().push(switch (opt) {
             .int => |ty| @intCast(i32, array.getElems(ty)[idx]),
@@ -447,7 +502,7 @@ pub const InsnContext = struct {
         std.log.debug("cmp: {} {s} {} = {}{s}", .{ val1, @tagName(op), val2, branch, blk: {
             var buf: [32]u8 = undefined;
             break :blk if (branch)
-                std.fmt.bufPrint(&buf, " jmp +{d}", .{self.readI16()}) catch unreachable
+                std.fmt.bufPrint(&buf, ", so jmp +{d}", .{self.readI16()}) catch unreachable
             else
                 "";
         } });
@@ -482,18 +537,18 @@ pub const InsnContext = struct {
         self.frame.setPc(pc);
     }
 
-    fn loadConstant(self: @This(), idx: u16, comptime opt: cafebabe.ConstantPool.ConstantLookupOption) void {
+    fn loadConstant(self: @This(), idx: u16, comptime opt: cafebabe.ConstantPool.ConstantLookupOption) Error!void {
         const constant = self.constantPool().lookupConstant(idx, opt) orelse unreachable;
 
         switch (constant) {
             .class => |name| {
-                const cls = self.resolveClass(name, .resolve_only);
+                const cls = try self.resolveClass(name, .resolve_only);
                 self.operandStack().push(cls.get().getClassInstance().clone());
             },
             .long => |val| self.operandStack().push(val),
             .double => |val| self.operandStack().push(val),
             .string => |val| {
-                const string_ref = self.thread.global.string_pool.getString(val);
+                const string_ref = try self.thread.global.string_pool.getString(val);
                 self.operandStack().push(string_ref);
             },
         }
@@ -522,19 +577,35 @@ pub const InsnContext = struct {
 
         self.operandStack().push(new_val);
     }
+
+    fn throwException(self: @This(), exc: VmObjectRef) void {
+        std.log.debug("throwing exception {?}", .{exc});
+
+        // find handler in this method
+        std.debug.assert(self.frame.payload == .java); // hopefully help optimiser in following function call
+        if (self.frame.findExceptionHandler(exc, self.thread)) |handler| {
+            self.operandStack().clear();
+            self.operandStack().push(exc);
+            self.gotoAbsolute(handler);
+        } else {
+            std.log.debug("no handler found, bubbling up {?}", .{exc});
+            self.thread.interpreter.setException(exc);
+            self.mutable.control_flow = .bubble_exception;
+        }
+    }
 };
 
 /// Instruction implementations, resolved in `handler_lookup`
 pub const handlers = struct {
-    pub fn _new(ctxt: InsnContext) void {
+    pub fn _new(ctxt: InsnContext) Error!void {
         const idx = ctxt.readU16();
 
         // resolve and init class
         const name = ctxt.constantPool().lookupClass(idx) orelse unreachable; // TODO infallible cp lookup for speed
-        const cls = ctxt.resolveClass(name, .ensure_initialised);
+        const cls = try ctxt.resolveClass(name, .ensure_initialised);
 
         // instantiate object and push onto stack
-        const obj = object.VmClass.instantiateObject(cls);
+        const obj = try object.VmClass.instantiateObject(cls);
 
         ctxt.operandStack().push(obj);
     }
@@ -752,8 +823,8 @@ pub const handlers = struct {
         ctxt.store(VmObjectRef.Nullable, 3);
     }
 
-    pub fn _putstatic(ctxt: InsnContext) void {
-        const info = ctxt.resolveField(ctxt.readU16(), .static);
+    pub fn _putstatic(ctxt: InsnContext) Error!void {
+        const info = try ctxt.resolveField(ctxt.readU16(), .static);
         const field = info.field;
 
         const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
@@ -761,9 +832,9 @@ pub const handlers = struct {
         field.u.value = val.value;
         std.log.debug("putstatic({}, {s}) = {x}", .{ info.cls, field.name, val });
     }
-    pub fn _getstatic(ctxt: InsnContext) void {
+    pub fn _getstatic(ctxt: InsnContext) Error!void {
         // resolve field and class
-        const info = ctxt.resolveField(ctxt.readU16(), .static);
+        const info = try ctxt.resolveField(ctxt.readU16(), .static);
         const field = info.field;
 
         std.debug.assert(field.flags.contains(.static)); // verified
@@ -808,22 +879,22 @@ pub const handlers = struct {
         _ = ctxt.operandStack().popRaw();
     }
 
-    pub fn _invokestatic(ctxt: InsnContext) void {
-        ctxt.invokeStaticMethod(ctxt.readU16());
+    pub fn _invokestatic(ctxt: InsnContext) InvokeError!void {
+        return ctxt.invokeStaticMethod(ctxt.readU16());
     }
-    pub fn _invokespecial(ctxt: InsnContext) void {
-        ctxt.invokeSpecialMethod(ctxt.readU16());
+    pub fn _invokespecial(ctxt: InsnContext) InvokeError!void {
+        return ctxt.invokeSpecialMethod(ctxt.readU16());
     }
-    pub fn _invokevirtual(ctxt: InsnContext) void {
-        ctxt.invokeVirtualMethod(ctxt.readU16());
+    pub fn _invokevirtual(ctxt: InsnContext) InvokeError!void {
+        return ctxt.invokeVirtualMethod(ctxt.readU16());
     }
 
-    pub fn _putfield(ctxt: InsnContext) void {
-        const field = ctxt.resolveField(ctxt.readU16(), .instance);
+    pub fn _putfield(ctxt: InsnContext) Error!void {
+        const field = try ctxt.resolveField(ctxt.readU16(), .instance);
 
         const val = ctxt.popPutFieldValue(field.field) orelse @panic("incompatible?");
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
-        const obj = obj_ref.toStrong() orelse @panic("NPE");
+        const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
         switch (val.ty) {
             .int => {
@@ -848,10 +919,10 @@ pub const handlers = struct {
         std.log.debug("putfield({}, {s}) = {x}", .{ obj_ref, field.field.name, val });
     }
 
-    pub fn _getfield(ctxt: InsnContext) void {
-        const field = ctxt.resolveField(ctxt.readU16(), .instance);
+    pub fn _getfield(ctxt: InsnContext) Error!void {
+        const field = try ctxt.resolveField(ctxt.readU16(), .instance);
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
-        const obj = obj_ref.toStrong() orelse @panic("NPE");
+        const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
         std.debug.assert(obj.get().class.get().isObject()); // verified
 
@@ -912,14 +983,14 @@ pub const handlers = struct {
         ctxt.binaryOp(f64, .div);
     }
 
-    pub fn _ldc(ctxt: InsnContext) void {
-        ctxt.loadConstant(ctxt.readU8(), .any_single);
+    pub fn _ldc(ctxt: InsnContext) Error!void {
+        try ctxt.loadConstant(ctxt.readU8(), .any_single);
     }
-    pub fn _ldc2_w(ctxt: InsnContext) void {
-        ctxt.loadConstant(ctxt.readU16(), .long_double);
+    pub fn _ldc2_w(ctxt: InsnContext) Error!void {
+        try ctxt.loadConstant(ctxt.readU16(), .long_double);
     }
 
-    pub fn _newarray(ctxt: InsnContext) void {
+    pub fn _newarray(ctxt: InsnContext) Error!void {
         const elem_ty = switch (ctxt.readU8()) {
             4 => "[Z",
             5 => "[C",
@@ -929,84 +1000,84 @@ pub const handlers = struct {
             9 => "[S",
             10 => "[I",
             11 => "[J",
-            else => @panic("invalid newarray type"),
+            else => unreachable,
         };
 
         const count = ctxt.operandStack().pop(i32);
-        if (count < 0) @panic("NegativeArraySizeException");
+        if (count < 0) return error.NegativeArraySize;
 
-        const array_cls = ctxt.resolveClassWithLoader(elem_ty, .resolve_only, .bootstrap);
+        const array_cls = try ctxt.resolveClassWithLoader(elem_ty, .resolve_only, .bootstrap);
 
-        const array = object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
+        const array = try object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
         ctxt.operandStack().push(array);
     }
 
-    pub fn _anewarray(ctxt: InsnContext) void {
+    pub fn _anewarray(ctxt: InsnContext) Error!void {
         const elem_cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
-        const elem_cls = ctxt.resolveClass(elem_cls_name, .resolve_only);
+        const elem_cls = try ctxt.resolveClass(elem_cls_name, .resolve_only);
         _ = elem_cls;
 
         const count = ctxt.operandStack().pop(i32);
-        if (count < 0) @panic("NegativeArraySizeException");
+        if (count < 0) return error.NegativeArraySize;
 
-        const array_cls = ctxt.thread.global.classloader.loadClassAsArrayElement(elem_cls_name, ctxt.class().loader) catch @panic("cant load array class");
+        const array_cls = try ctxt.thread.global.classloader.loadClassAsArrayElement(elem_cls_name, ctxt.class().loader);
 
-        const array = object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
+        const array = try object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
         ctxt.operandStack().push(array);
     }
 
-    pub fn _iastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .int = i32 });
+    pub fn _iastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .int = i32 });
     }
-    pub fn _sastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .int = i16 });
+    pub fn _sastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .int = i16 });
     }
-    pub fn _bastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.byte_bool);
+    pub fn _bastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.byte_bool);
     }
-    pub fn _castore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .int = u16 });
+    pub fn _castore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .int = u16 });
     }
-    pub fn _fastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .specific = f32 });
+    pub fn _fastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .specific = f32 });
     }
-    pub fn _dastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .specific = f64 });
+    pub fn _dastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .specific = f64 });
     }
-    pub fn _lastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .specific = i64 });
+    pub fn _lastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .specific = i64 });
     }
-    pub fn _aastore(ctxt: InsnContext) void {
-        ctxt.arrayStore(.{ .specific = VmObjectRef.Nullable });
+    pub fn _aastore(ctxt: InsnContext) Error!void {
+        return ctxt.arrayStore(.{ .specific = VmObjectRef.Nullable });
     }
-    pub fn _iaload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .int = i32 });
+    pub fn _iaload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .int = i32 });
     }
-    pub fn _saload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .int = i16 });
+    pub fn _saload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .int = i16 });
     }
-    pub fn _baload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.byte_bool);
+    pub fn _baload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.byte_bool);
     }
-    pub fn _caload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .int = u16 });
+    pub fn _caload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .int = u16 });
     }
-    pub fn _faload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .specific = f32 });
+    pub fn _faload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .specific = f32 });
     }
-    pub fn _daload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .specific = f64 });
+    pub fn _daload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .specific = f64 });
     }
-    pub fn _laload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .specific = i64 });
+    pub fn _laload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .specific = i64 });
     }
-    pub fn _aaload(ctxt: InsnContext) void {
-        ctxt.arrayLoad(.{ .specific = VmObjectRef.Nullable });
+    pub fn _aaload(ctxt: InsnContext) Error!void {
+        return ctxt.arrayLoad(.{ .specific = VmObjectRef.Nullable });
     }
 
-    pub fn _arraylength(ctxt: InsnContext) void {
+    pub fn _arraylength(ctxt: InsnContext) Error!void {
         const array_opt = ctxt.operandStack().pop(VmObjectRef.Nullable);
-        const array_obj = array_opt.toStrong() orelse @panic("NPE");
+        const array_obj = array_opt.toStrong() orelse return error.NullPointer;
         const len = array_obj.get().getArrayHeader().array_len;
         ctxt.operandStack().push(@intCast(i32, len));
     }
@@ -1123,30 +1194,18 @@ pub const handlers = struct {
         ctxt.operandStack().push(VmObjectRef.Nullable.nullRef());
     }
 
-    pub fn _athrow(ctxt: InsnContext) void {
+    pub fn _athrow(ctxt: InsnContext) Error!void {
         const exc = if (ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong()) |exc|
             exc
         else blk: {
             std.log.debug("trying to throw null, instantiating NPE", .{});
 
-            const npe_cls = ctxt.resolveClassWithLoader("java/lang/NullPointerException", .ensure_initialised, .bootstrap);
-            const npe = object.VmClass.instantiateObject(npe_cls);
+            const npe_cls = try ctxt.resolveClassWithLoader("java/lang/NullPointerException", .ensure_initialised, .bootstrap);
+            const npe = try object.VmClass.instantiateObject(npe_cls);
             break :blk npe;
         };
 
-        std.log.debug("athrow {?}", .{exc});
-
-        // find handler in this method
-        std.debug.assert(ctxt.frame.payload == .java); // hopefully help optimiser in function call
-        if (ctxt.frame.findExceptionHandler(exc, ctxt.thread)) |handler| {
-            ctxt.operandStack().clear();
-            ctxt.operandStack().push(exc);
-            ctxt.gotoAbsolute(handler);
-        } else {
-            std.log.debug("no handler found, bubbling up {?}", .{exc});
-            ctxt.thread.interpreter.setException(exc);
-            ctxt.mutable.control_flow = .exception;
-        }
+        ctxt.throwException(exc);
     }
 };
 

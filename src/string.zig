@@ -38,11 +38,11 @@ pub const StringPool = struct {
         return self.java_lang_String.toStrongUnchecked();
     }
 
-    pub fn getString(self: *@This(), bytes: []const u8) object.VmObjectRef {
-        const obj = object.VmClass.instantiateObject(self.stringClass());
+    pub fn getString(self: *@This(), bytes: []const u8) error{OutOfMemory}!object.VmObjectRef {
+        const obj = try object.VmClass.instantiateObject(self.stringClass());
 
         // init byte array
-        const value = object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), bytes.len);
+        const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), bytes.len);
         std.mem.copy(u8, value.get().getArrayHeader().getElems(u8), bytes);
 
         // set value field
