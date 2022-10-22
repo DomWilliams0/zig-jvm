@@ -279,23 +279,42 @@ pub const Method = struct {
     };
     const enumFromInt = enumFromIntMethod; // temporary
 
+    pub const ExceptionHandler = struct {
+        start_pc: u16,
+        end_pc: u16,
+        handler_pc: u16,
+        /// Name of class to catch, null for `finally` block
+        catch_type: ?[]const u8,
+    };
+
     pub const Code = union(enum) {
         java: struct {
             max_stack: u16,
             max_locals: u16,
             /// null if abstract
             code: ?[]const u8,
+            exception_handlers: []ExceptionHandler,
         },
 
         native: native.NativeCode,
+
+        pub fn deinit(self: @This(), alloc: Allocator) void {
+            if (self == .java) {
+                if (self.java.code) |c| alloc.free(c);
+                alloc.free(self.java.exception_handlers);
+            }
+        }
     };
 
     fn new(persistent: Allocator, arena: Allocator, class_name: []const u8, cp: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
-        var code = Code{ .java = .{
-            .max_stack = 0,
-            .max_locals = 0,
-            .code = null,
-        } };
+        var code = Code{
+            .java = .{
+                .max_stack = 0,
+                .max_locals = 0,
+                .code = null,
+                .exception_handlers = &.{}, // should be safe to alloc.free
+            },
+        };
         if (attributes.get("Code")) |attr| {
             var buf = std.io.fixedBufferStream(attr);
             var reader = buf.reader();
@@ -303,23 +322,35 @@ pub const Method = struct {
             code.java.max_stack = try reader.readIntBig(u16);
             code.java.max_locals = try reader.readIntBig(u16);
             const code_len = try reader.readIntBig(u32);
-            // TODO align code to 4
+            // align code to 4 bytes so tableswitch and lookupswitch are aligned too (4.7.3)
             const code_buf = try persistent.allocWithOptions(u8, code_len, 4, null);
             errdefer persistent.free(code_buf);
 
             const n = try reader.read(code_buf);
             if (n != code_len) return error.MalformedConstantPool;
 
-            const exc_len = try reader.readIntBig(u16);
-            // TODO parse exception table
-            try reader.skipBytes(exc_len * 8, .{});
+            var exc_len = try reader.readIntBig(u16);
+            const exc_table = try persistent.alloc(ExceptionHandler, exc_len);
+            errdefer persistent.free(exc_table);
+            while (exc_len > 0) : (exc_len -= 1) {
+                exc_table[exc_table.len - exc_len] = ExceptionHandler{
+                    .start_pc = try reader.readIntBig(u16),
+                    .end_pc = try reader.readIntBig(u16),
+                    .handler_pc = try reader.readIntBig(u16),
+                    .catch_type = blk: {
+                        const idx = try reader.readIntBig(u16);
+                        break :blk if (idx == 0) null else cp.lookupClass(idx) orelse return error.BadConstantPoolIndex;
+                    },
+                };
+            }
 
             const code_attributes = try ClassFile.parseAttributes(arena, cp, &reader, &buf);
             _ = code_attributes; // TODO use code attributes
 
             code.java.code = code_buf;
+            code.java.exception_handlers = exc_table;
         }
-        errdefer if (code == .java) if (code.java.code) |c| persistent.free(c);
+        errdefer code.deinit(persistent);
 
         const has_code = code.java.code != null;
         const should_have_code = !(flags.contains(.abstract) or flags.contains(.native));
@@ -336,7 +367,7 @@ pub const Method = struct {
     }
 
     pub fn deinit(self: @This(), persistent: Allocator) void {
-        if (self.code == .java) if (self.code.java.code) |c| persistent.free(c);
+        self.code.deinit(persistent);
     }
 };
 

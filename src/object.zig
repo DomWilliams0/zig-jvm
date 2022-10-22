@@ -404,6 +404,64 @@ pub const VmClass = struct {
     pub fn getClassInstance(self: @This()) VmObjectRef {
         return self.class_instance.toStrongUnchecked();
     }
+
+    pub fn isInstanceOf(self: VmClassRef, candidate: VmClassRef) bool {
+        if (self.cmpPtr(candidate)) return true;
+
+        const helper = struct {
+            fn isSuperInterface(checkee: VmClassRef, needle: VmClassRef) bool {
+                std.debug.assert(!checkee.cmpPtr(needle)); // should already be filtered out
+
+                for (checkee.get().interfaces) |i| {
+                    if (needle.cmpPtr(i)) return true;
+
+                    // recurse
+                    if (isSuperInterface(i, needle)) return true;
+                }
+
+                return false;
+            }
+
+            fn isSuperClass(checkee: VmClassRef, needle: VmClassRef) bool {
+                std.debug.assert(!checkee.cmpPtr(needle)); // should already be filtered out
+
+                if (checkee.get().super_cls.toStrong()) |super| {
+                    if (needle.cmpPtr(super)) return true;
+
+                    // recurse
+                    if (isSuperClass(super, needle)) return true;
+                }
+
+                return false;
+            }
+
+            fn strcmp(a: []const u8, b: []const u8) bool {
+                return std.mem.eql(u8, a, b);
+            }
+        };
+
+        const s = self.get();
+        const t = candidate.get();
+
+        return if (s.isArray())
+            if (t.isArray())
+                if (s.isPrimitive() and t.isPrimitive()) s.u.primitive == t.u.primitive // TC and SC are the same primitive type.
+                else if (!s.isPrimitive() and !t.isPrimitive()) isInstanceOf(s.u.array.elem_cls, t.u.array.elem_cls) // TC and SC are reference types, and type SC can be cast to TC by these run-time rules.
+                else false
+            else if (t.flags.contains(.interface))
+                helper.strcmp(t.name, "java/lang/Cloneable") or helper.strcmp(t.name, "java/io/Serializable") // T must be one of the interfaces implemented by arrays (JLS §4.10.3).
+            else
+                helper.strcmp(t.name, "java/lang/Object") //  T must be Object.
+        else if (s.flags.contains(.interface))
+            if (t.flags.contains(.interface))
+                helper.isSuperInterface(self, candidate) // T must be the same interface as S or a superinterface of S.
+            else
+                helper.strcmp(t.name, "java/lang/Object") // T must be Object.
+        else if (t.flags.contains(.interface))
+            helper.isSuperInterface(self, candidate) //S must implement interface T.
+        else
+            helper.isSuperClass(self, candidate); // then S must be the same class as T, or S must be a subclass of T
+    }
 };
 
 const Monitor = struct {

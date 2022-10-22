@@ -9,10 +9,13 @@ const object = @import("object.zig");
 pub const Interpreter = struct {
     frames_alloc: frame.ContiguousBufferStack,
     top_frame: ?*frame.Frame = null,
+    /// Owned instance of current exception, don't overwrite directly
+    exception: object.VmObjectRef.Nullable,
 
     pub fn new(alloc: std.mem.Allocator) !Interpreter {
         return .{
             .frames_alloc = try frame.ContiguousBufferStack.new(alloc),
+            .exception = object.VmObjectRef.Nullable.nullRef(),
         };
     }
 
@@ -130,7 +133,6 @@ pub const Interpreter = struct {
                 self.top_frame = f;
 
                 // go go go
-                std.log.debug("{?}", .{self.callstack()});
                 interpreterLoop();
 
                 return dummy_return_slot;
@@ -144,11 +146,19 @@ pub const Interpreter = struct {
 
     const PrintableCallStack = struct {
         top: ?*frame.Frame,
+        exc: object.VmObjectRef.Nullable,
         pub fn format(self_: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             var top = self_.top;
 
             var i: u32 = 0;
             try std.fmt.formatBuf("call stack: ", options, writer);
+            if (self_.exc.toStrong()) |exc|
+                try std.fmt.format(
+                    writer,
+                    " (exception={?})",
+                    .{exc},
+                );
+
             while (top) |f| {
                 try std.fmt.format(writer, "\n * {d}) {s}.{s}", .{ i, f.class.get().name, f.method.name });
                 try if (f.currentPc()) |pc| std.fmt.format(writer, " (pc={d})", .{pc}) else std.fmt.formatBuf(" (native)", .{}, writer);
@@ -160,7 +170,34 @@ pub const Interpreter = struct {
         }
     };
     fn callstack(self: @This()) PrintableCallStack {
-        return PrintableCallStack{ .top = self.top_frame };
+        return PrintableCallStack{ .top = self.top_frame, .exc = self.exception };
+    }
+
+    /// Exception reference is cloned
+    pub fn setException(self: *@This(), exception: object.VmObjectRef) void {
+        if (self.exception.toStrong()) |old| {
+            std.log.debug("overwriting old exception {?}", .{old});
+            old.drop();
+        }
+
+        self.exception = exception.clone().intoNullable();
+    }
+
+    pub fn clearException(self: *@This()) void {
+        if (self.exception.toStrong()) |old| {
+            std.log.debug("clearing old exception {?}", .{old});
+            old.drop();
+        }
+
+        self.exception = object.VmObjectRef.Nullable.nullRef();
+    }
+
+    pub fn clearExceptionNoDrop(self: *@This()) void {
+        if (self.exception.toStrong()) |old| {
+            std.log.debug("clearing old exception {?}", .{old});
+        }
+
+        self.exception = object.VmObjectRef.Nullable.nullRef();
     }
 };
 
@@ -168,46 +205,98 @@ pub const Interpreter = struct {
 //   in generated code, local var lookup should reference the caller's stack when i<param count, to avoid copying
 fn interpreterLoop() void {
     const thread = state.thread_state();
+    const top_frame_ptr = @ptrToInt(thread.interpreter.top_frame);
     var ctxt_mut = insn.InsnContextMut{};
     var ctxt = insn.InsnContext{ .thread = thread, .frame = undefined, .mutable = &ctxt_mut };
 
-    // code is verified to be correct, right? yeah...
-    while (ctxt_mut.control_flow == .continue_) {
-        // refetch on every insn, method might have changed
-        const f = if (thread.interpreter.top_frame) |f| f else break;
-        ctxt.frame = f;
-        f.payload.java.operands.log();
-        f.payload.java.local_vars.log(f.method.code.java.max_locals);
+    var root_reached = false;
+    while (!root_reached) {
+        std.log.debug("{?}", .{thread.interpreter.callstack()});
 
-        const next_insn = f.payload.java.code_window[0];
+        // check for exceptions
+        if (thread.interpreter.exception.toStrong()) |exc| handled: {
+            if (ctxt.frame.payload == .java) {
+                var java = ctxt.frame.payload.java;
+                std.log.debug("looking for exception handler for {?} at pc {} in {}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method });
 
-        // lookup handler func
-        const handler = insn.handler_lookup[next_insn];
-        if (insn.debug_logging) std.log.debug("pc={d}: {s}", .{ ctxt.frame.currentPc().?, handler.insn_name });
-
-        // invoke
-        handler.handler(ctxt);
-    }
-
-    switch (ctxt_mut.control_flow) {
-        .return_ => {
-            const this_frame = thread.interpreter.top_frame.?;
-            const caller_frame = this_frame.parent_frame;
-            std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.get().name, this_frame.method.name });
-
-            if (ctxt.frame.method.descriptor.isNotVoid()) {
-                const ret_value = this_frame.payload.java.operands.popRaw();
-                if (caller_frame) |caller| {
-                    caller.payload.java.operands.pushRaw(ret_value);
-                } else {
-                    this_frame.payload.java.dummy_return_slot.?.* = ret_value;
+                if (ctxt.frame.findExceptionHandler(exc, thread)) |pc| {
+                    ctxt.frame.setPc(pc);
+                    java.operands.push(exc); // "move" out of thread interpreter
+                    thread.interpreter.clearExceptionNoDrop();
+                    ctxt_mut.control_flow = .continue_;
+                    break :handled;
                 }
             }
 
-            popFrame(this_frame, thread);
-        },
+            // unhandled exception
+            std.log.debug("exception is unhandled, bubbling up", .{});
+            if (thread.interpreter.top_frame) |f| {
+                root_reached = @ptrToInt(f) == top_frame_ptr;
+                popFrame(
+                    f,
+                    thread,
+                );
+                continue;
+            } else {
+                // top frame reached
+                return;
+            }
+        }
 
-        .continue_ => unreachable,
+        // code is verified to be correct, right? yeah...
+        while (ctxt_mut.control_flow == .continue_) {
+            // refetch on every insn, method might have changed
+            const f = if (thread.interpreter.top_frame) |f| f else break;
+            ctxt.frame = f;
+            f.payload.java.operands.log();
+            f.payload.java.local_vars.log(f.method.code.java.max_locals);
+
+            const next_insn = f.payload.java.code_window[0];
+
+            // lookup handler func
+            const handler = insn.handler_lookup[next_insn];
+            if (insn.debug_logging) std.log.debug("pc={d}: {s}", .{ ctxt.frame.currentPc().?, handler.insn_name });
+
+            // invoke
+            handler.handler(ctxt);
+        }
+
+        switch (ctxt_mut.control_flow) {
+            .return_ => {
+                const this_frame = thread.interpreter.top_frame.?;
+                const caller_frame = this_frame.parent_frame;
+                std.log.debug("returning to caller from {s}.{s}", .{ this_frame.class.get().name, this_frame.method.name });
+
+                if (ctxt.frame.method.descriptor.isNotVoid()) {
+                    const ret_value = this_frame.payload.java.operands.popRaw();
+                    if (caller_frame) |caller| {
+                        caller.payload.java.operands.pushRaw(ret_value);
+                    } else {
+                        this_frame.payload.java.dummy_return_slot.?.* = ret_value;
+                    }
+                }
+
+                root_reached = @ptrToInt(this_frame) == top_frame_ptr;
+                popFrame(
+                    this_frame,
+                    thread,
+                );
+                return;
+            },
+            .exception => {
+                // threadlocal exception has been set
+                std.debug.assert(!thread.interpreter.exception.isNull());
+
+                const this_frame = thread.interpreter.top_frame.?;
+                std.log.debug("bubbling exception {} to caller from {s}.{s}", .{ thread.interpreter.exception, this_frame.class.get().name, this_frame.method.name });
+                root_reached = @ptrToInt(this_frame) == top_frame_ptr;
+                popFrame(this_frame, thread);
+
+                // keep looping
+            },
+
+            .continue_ => unreachable,
+        }
     }
 }
 

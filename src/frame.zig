@@ -37,6 +37,35 @@ pub const Frame = struct {
         };
     }
 
+    /// Must be java and not abstract
+    pub fn setPc(self: *@This(), pc: u32) void {
+        std.debug.assert(self.payload == .java);
+        const base = self.method.code.java.code.?; // cant be abstract
+        self.payload.java.code_window = base.ptr + pc;
+    }
+
+    pub fn findExceptionHandler(self: @This(), exception: object.VmObjectRef, thread: *@import("state.zig").ThreadEnv) ?u16 {
+        if (self.payload == .java) {
+            const pc = self.currentPc().?;
+            for (self.method.code.java.exception_handlers) |h| {
+                if (!(pc >= h.start_pc and pc < h.end_pc)) continue;
+
+                const matches = if (h.catch_type) |cls_name| blk: {
+                    const handler_cls = thread.global.classloader.loadClass(cls_name, self.class.get().loader) catch return null;
+                    // TODO cache this resolution in handler entry
+                    break :blk object.VmClass.isInstanceOf(exception.get().class, handler_cls);
+                } else true;
+
+                if (matches) {
+                    std.log.debug("found handler for exception {?} at pc {}", .{ exception, h.handler_pc });
+                    return h.handler_pc;
+                }
+            }
+        }
+
+        return null;
+    }
+
     // TODO move this out of frame as a generic VM type
     pub const StackEntry = struct {
         value: usize,
@@ -164,6 +193,20 @@ pub const Frame = struct {
             return self.depth == 0;
         }
 
+        pub fn clear(self: *@This()) void {
+            if (logging) {
+                var i: usize = 0;
+                while (i < self.depth) {
+                    _ = self.popRaw();
+                }
+            } else {
+                self.stack -= self.depth;
+            }
+
+            std.log.debug("operand stack: cleared", .{});
+            self.depth = 0;
+        }
+
         pub fn log(self: @This()) void {
             if (!logging) return;
 
@@ -249,6 +292,7 @@ pub const Frame = struct {
 
             // shrink source
             self.stack -= param_count;
+            self.depth -= param_count;
         }
     };
 

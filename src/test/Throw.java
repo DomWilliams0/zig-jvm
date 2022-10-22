@@ -1,9 +1,19 @@
 
 public class Throw {
 
-    public static int vmTest() {
+    static void hehe() {
         throw new RuntimeException("oof");
-        // throw null;
-        // String s = "nice".concat(null);
+
+    }
+
+    public static int vmTest() {
+        try {
+            hehe();
+            return 1;
+            // throw null;
+
+        } catch (RuntimeException exc) {
+            return 0;
+        }
     }
 }

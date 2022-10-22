@@ -77,7 +77,7 @@ pub const InsnContextMut = struct {
     pub const ControlFlow = enum {
         continue_,
         return_,
-        // TODO exception
+        exception,
     };
 };
 
@@ -477,6 +477,9 @@ pub const InsnContext = struct {
         } else {
             self.frame.payload.java.code_window -= @intCast(usize, -offset);
         }
+    }
+    fn gotoAbsolute(self: @This(), pc: u32) void {
+        self.frame.setPc(pc);
     }
 
     fn loadConstant(self: @This(), idx: u16, comptime opt: cafebabe.ConstantPool.ConstantLookupOption) void {
@@ -1114,6 +1117,36 @@ pub const handlers = struct {
     }
     pub fn _l2i(ctxt: InsnContext) void {
         ctxt.convertPrimitive(i64, i32);
+    }
+
+    pub fn _aconst_null(ctxt: InsnContext) void {
+        ctxt.operandStack().push(VmObjectRef.Nullable.nullRef());
+    }
+
+    pub fn _athrow(ctxt: InsnContext) void {
+        const exc = if (ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong()) |exc|
+            exc
+        else blk: {
+            std.log.debug("trying to throw null, instantiating NPE", .{});
+
+            const npe_cls = ctxt.resolveClassWithLoader("java/lang/NullPointerException", .ensure_initialised, .bootstrap);
+            const npe = object.VmClass.instantiateObject(npe_cls);
+            break :blk npe;
+        };
+
+        std.log.debug("athrow {?}", .{exc});
+
+        // find handler in this method
+        std.debug.assert(ctxt.frame.payload == .java); // hopefully help optimiser in function call
+        if (ctxt.frame.findExceptionHandler(exc, ctxt.thread)) |handler| {
+            ctxt.operandStack().clear();
+            ctxt.operandStack().push(exc);
+            ctxt.gotoAbsolute(handler);
+        } else {
+            std.log.debug("no handler found, bubbling up {?}", .{exc});
+            ctxt.thread.interpreter.setException(exc);
+            ctxt.mutable.control_flow = .exception;
+        }
     }
 };
 

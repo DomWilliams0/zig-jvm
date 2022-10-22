@@ -602,6 +602,7 @@ pub const insns = [_]Insn{
     .{
         .name = "athrow",
         .id = 191,
+        .jmps = true,
     },
     .{ .name = "multianewarray", .id = 197, .sz = 3 },
     .{
