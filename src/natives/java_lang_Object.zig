@@ -9,6 +9,10 @@ pub export fn Java_java_lang_Object_getClass(_: *anyopaque, this: sys.jobject) s
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{
-    // TODO auto declare these from javap with a script, allow unimplemented funcs
-    .{.method = "Java_java_lang_Object_getClass", .desc = "()Ljava/lang/Class;"},
+    .{ .method = "Java_java_lang_Object_getClass", .desc = "()Ljava/lang/Class;" },
+    .{ .method = "Java_java_lang_Object_hashCode", .desc = "()I" },
+    .{ .method = "Java_java_lang_Object_clone", .desc = "()Ljava/lang/Object;" },
+    .{ .method = "Java_java_lang_Object_notify", .desc = "()V" },
+    .{ .method = "Java_java_lang_Object_notifyAll", .desc = "()V" },
+    .{ .method = "Java_java_lang_Object_wait", .desc = "(J)V" },
 };

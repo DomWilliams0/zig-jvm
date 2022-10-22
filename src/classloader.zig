@@ -435,7 +435,7 @@ pub const ClassLoader = struct {
         return try entry.value_ptr.lookupOrLoad("jvm");
     }
 
-    const NativeMangling = struct {
+    pub const NativeMangling = struct {
         /// Null terminated
         buf: std.ArrayList(u8),
 
@@ -461,15 +461,15 @@ pub const ClassLoader = struct {
             }
         }
 
-        fn deinit(self: *@This()) void {
+        pub fn deinit(self: *@This()) void {
             self.buf.deinit();
         }
 
-        fn strZ(self: *const @This()) [:0]const u8 {
+        pub fn strZ(self: *const @This()) [:0]const u8 {
             return self.buf.items[0 .. self.buf.items.len - 1 :0];
         }
 
-        fn initShort(alloc: std.mem.Allocator, class_name: []const u8, method_name: []const u8) !@This() {
+        pub fn initShort(alloc: std.mem.Allocator, class_name: []const u8, method_name: []const u8) !@This() {
             var this = NativeMangling{ .buf = std.ArrayList(u8).init(alloc) };
             errdefer this.deinit();
 
@@ -484,7 +484,7 @@ pub const ClassLoader = struct {
             return this;
         }
 
-        fn appendLong(self: *@This(), desc: descriptor.MethodDescriptor) !void {
+        pub fn appendLong(self: *@This(), desc: descriptor.MethodDescriptor) !void {
             // truncate null byte
             const nul = self.buf.pop();
             std.debug.assert(nul == 0);

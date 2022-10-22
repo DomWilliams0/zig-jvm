@@ -33,7 +33,11 @@ fn validateFunctionSignatures(comptime module: type) void {
         // lookup in decls
         const decl = for (decls) |d, i| {
             if (std.mem.eql(u8, d.name, m.method)) break .{ .idx = i, .method = @field(module, m.method) };
-        } else @compileError("missing method decl " ++ @typeName(module) ++ "." ++ m.method);
+        } else {
+            // TODO generate a panicking stub instead
+            continue;
+            // @compileError("missing method decl " ++ @typeName(module) ++ "." ++ m.method);
+        };
 
         const method_info = @typeInfo(@TypeOf(decl.method));
 

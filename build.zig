@@ -67,6 +67,21 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run JVM (or test runner with -testrunner)");
     run_step.dependOn(&run_cmd.step);
 
+    const native_finder = b.addExecutable("native-finder", "src/scripts/native-finder.zig");
+    inline for (pkgs) |pkg| native_finder.addPackage(pkg);
+    native_finder.setTarget(target);
+    native_finder.setBuildMode(mode);
+    native_finder.linkLibC();
+    native_finder.install();
+    const native_finder_cmd = native_finder.run();
+    native_finder_cmd.step.dependOn(b.getInstallStep());
+    if (args) |a| {
+        native_finder_cmd.addArgs(a);
+    }
+
+    const native_finder_step = b.step("find-natives", "Discover native methods");
+    native_finder_step.dependOn(&native_finder_cmd.step);
+
     const exe_tests = b.addTest("src/object.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
