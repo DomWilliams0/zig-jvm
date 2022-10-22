@@ -24,7 +24,29 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("zig-jvm", "src/main.zig");
+    var test_runner = false;
+    var args = if (b.args) |args|
+        for (args) |a, i| {
+            if (std.mem.eql(u8, a, "-testrunner")) {
+                test_runner = true;
+
+                // remove this arg
+                var args_mut = args;
+                var j = i + 1;
+                while (j < args_mut.len) : (j += 1)
+                    args_mut[j - 1] = args_mut[j];
+                args_mut.len -= 1;
+                break args_mut;
+            }
+        } else args
+    else
+        null;
+
+    const exe = if (test_runner)
+        b.addExecutable("jvm-test-runner", "src/test-runner.zig")
+    else
+        b.addExecutable("java", "src/main.zig");
+
     inline for (pkgs) |pkg| exe.addPackage(pkg);
     exe.setTarget(target);
     exe.setBuildMode(mode);
@@ -33,32 +55,14 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkSystemLibrary("ffi");
     exe.install();
 
-    const test_runner = b.addExecutable("jvm-test-runner", "src/test-runner.zig");
-    inline for (pkgs) |pkg| test_runner.addPackage(pkg);
-    test_runner.setTarget(target);
-    test_runner.setBuildMode(mode);
-    test_runner.linkLibC();
-    test_runner.rdynamic = true;
-    test_runner.linkSystemLibrary("ffi");
-    test_runner.install();
-
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+    if (args) |a| {
+        run_cmd.addArgs(a);
     }
 
-    const testrunner_cmd = test_runner.run();
-    testrunner_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        testrunner_cmd.addArgs(args);
-    }
-
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run JVM (or test runner with -testrunner)");
     run_step.dependOn(&run_cmd.step);
-
-    const testrunner_step = b.step("run-tests", "Runs the test runner");
-    testrunner_step.dependOn(&testrunner_cmd.step);
 
     const exe_tests = b.addTest("src/object.zig");
     exe_tests.setTarget(target);
