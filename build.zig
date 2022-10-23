@@ -5,17 +5,11 @@ const pkg_jvm = Pkg{
     .name = "jvm",
     .source = .{ .path = "src/root.zig" },
 };
-const pkg_jni = Pkg{
-    .name = "sys",
-    .source = .{ .path = "src/sys/root.zig" },
-    .dependencies = &[_]Pkg{pkg_jvm},
-};
 const pkg_natives = Pkg{ .name = "natives", .source = .{ .path = "src/natives/root.zig" }, .dependencies = &[_]Pkg{
-    pkg_jni,
     pkg_jvm,
 } };
 
-const pkgs = [3]Pkg{ pkg_jni, pkg_jvm, pkg_natives };
+const pkgs = [2]Pkg{ pkg_jvm, pkg_natives };
 
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose

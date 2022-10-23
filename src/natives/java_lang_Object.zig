@@ -1,8 +1,9 @@
 const std = @import("std");
-const sys = @import("sys");
 const jvm = @import("jvm");
+const sys = jvm.sys;
 
-pub export fn Java_java_lang_Object_getClass(_: *anyopaque, this: sys.jobject) sys.jclass {
+pub export fn Java_java_lang_Object_getClass(raw_env: sys.api.JniEnvPtr, this: sys.jobject) sys.jclass {
+    _ = raw_env;
     const obj = sys.convert(sys.jobject).from(this).toStrongUnchecked(); // `this` can't be null
     const class = obj.get().class.get().getClassInstance().clone();
     return sys.convert(sys.jobject).to(class.intoNullable());

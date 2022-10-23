@@ -12,7 +12,7 @@ pub const JniMethod = struct {
 fn validateFunctionSignatures(comptime module: type) void {
     @setEvalBranchQuota(10000);
     const std = @import("std");
-    const sys = @import("sys");
+    const sys = @import("jvm").sys;
 
     // method names and descriptors declared
     const descriptors = @field(module, "methods");

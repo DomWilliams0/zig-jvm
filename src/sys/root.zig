@@ -1,9 +1,9 @@
-const jvm = @import("jvm");
 const jni = @import("jni.zig");
 pub const api = @import("api.zig");
 pub usingnamespace jni;
 
-const VmObjectRef = jvm.object.VmObjectRef;
+const object = @import("../object.zig");
+const VmObjectRef = object.VmObjectRef;
 pub fn convert(comptime jni_type: type) type {
     switch (jni_type) {
         jni.jobject => return struct {

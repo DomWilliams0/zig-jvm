@@ -1,6 +1,6 @@
 const std = @import("std");
-const sys = @import("sys");
 const jvm = @import("jvm");
+const sys = jvm.sys;
 
 pub export fn Java_java_lang_Class_registerNatives() void {}
 
@@ -16,15 +16,16 @@ fn convertClassName(global: *jvm.state.GlobalState, name: []const u8) jvm.state.
 
     return try global.string_pool.getString(buf);
 }
-pub export fn Java_java_lang_Class_initClassName(_: *anyopaque, this: sys.jobject) sys.jobject {
+
+pub export fn Java_java_lang_Class_initClassName(raw_env: sys.api.JniEnvPtr, this: sys.jobject) sys.jobject {
     const obj = sys.convert(sys.jobject).from(this).toStrongUnchecked(); // `this` can't be null
     const name = obj.get().class.get().name;
 
     const thread = jvm.state.thread_state();
     const str_obj = convertClassName(thread.global, name) catch |err| {
-        // TODO use jni funcs
-        const exc = jvm.state.errorToException(err) ;
-        thread.interpreter.setException(exc);
+        const exc = jvm.state.errorToException(err);
+        // TODO wew, make this more ergonomic
+        _ = sys.api.convertEnv(raw_env).Throw(raw_env, sys.convert(sys.jobject).to(exc.intoNullable()));
         return null;
     };
 

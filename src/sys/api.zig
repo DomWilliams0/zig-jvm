@@ -1,14 +1,15 @@
 const std = @import("std");
-const jni = @import("jni.zig");
+const sys = @import("jni.zig");
+const jni = @import("root.zig");
 
-pub const JniEnvPtr = [*c][*c]const jni.struct_JNINativeInterface_;
+pub const JniEnvPtr = [*c][*c]const sys.struct_JNINativeInterface_;
 
 /// A struct just like the original JNINativeInterface_, except function pointers are not optional
 pub const JniEnv = blk: {
-    const field_count = @typeInfo(jni.struct_JNINativeInterface_).Struct.fields.len;
+    const field_count = @typeInfo(sys.struct_JNINativeInterface_).Struct.fields.len;
     var fields: [field_count]std.builtin.Type.StructField = .{undefined} ** field_count;
 
-    inline for (@typeInfo(jni.struct_JNINativeInterface_).Struct.fields) |f, i| {
+    inline for (@typeInfo(sys.struct_JNINativeInterface_).Struct.fields) |f, i| {
         var new_field = f;
         const non_optional = @typeInfo(f.field_type).Optional.child;
 
@@ -63,11 +64,23 @@ pub fn convertEnv(raw_env: JniEnvPtr) *const JniEnv {
     return @ptrCast(*const JniEnv, raw_env.*);
 }
 const impl = struct {
-    pub export fn ExceptionCheck(raw_env: JniEnvPtr) jni.jboolean {
-        // TODO actually implement
-        const env = convertEnv(raw_env);
-        _ = env.ExceptionOccurred(raw_env);
-        unreachable;
+    const state = @import("../state.zig");
+    pub export fn ExceptionCheck(raw_env: JniEnvPtr) sys.jboolean {
+        _ = raw_env;
+        // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
+        const thread = state.thread_state();
+        return if (thread.interpreter.exception.isNull()) sys.JNI_FALSE else sys.JNI_TRUE;
+    }
+
+    pub export fn Throw(raw_env: JniEnvPtr, exc: sys.jobject) sys.jint {
+        _ = raw_env;
+        if (jni.convert(sys.jobject).from(exc).toStrong()) |exception| {
+            // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
+            const thread = state.thread_state();
+            thread.interpreter.setException(exception);
+            return 0;
+        }
+        return -1;
     }
 };
 
