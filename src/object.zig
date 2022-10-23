@@ -100,14 +100,31 @@ pub const VmClass = struct {
         }
     }
 
+    /// Looks in superinterfaces and Object (5.4.3.4. Interface Method Resolution).
+    /// Does NOT check if class is an interface, the caller should do this if needed
+    pub fn findInterfaceMethodRecursive(self: VmClassRef, name: []const u8, desc: []const u8) ?SelectedMethod {
+
+        // check self
+        if (findMethodInThisOnly(self.get(), name, desc, .{})) |m| return .{ .method = m, .cls = self };
+
+        // check object
+        const java_lang_Object = self.get().super_cls.toStrongUnchecked();
+        std.debug.assert(std.mem.eql(u8, java_lang_Object.get().name, "java/lang/Object"));
+        if (findMethodInThisOnly(java_lang_Object.get(), name, desc, .{ .public = true, .static = false })) |m| return .{ .method = m, .cls = java_lang_Object };
+
+        // check superinterfaces
+        // TODO return specific error if finds "multiple maximally-specific superinterface methods"
+        @panic("TODO find method in super interfaces");
+    }
+
     /// Looks in superclasses and interfaces (5.4.3.3. Method Resolution).
     /// Does NOT check if class is not an interface, the caller should do this if needed
-    pub fn findMethodRecursive(self: @This(), name: []const u8, desc: []const u8) ?*const Method {
+    pub fn findMethodRecursive(self: VmClassRef, name: []const u8, desc: []const u8) ?SelectedMethod {
 
         // TODO if signature polymorphic, resolve class names mentioned in descriptor too
 
         // check self and supers recursively first
-        if (self.findMethodInSelfOrSupers(name, desc)) |m| return m;
+        if (findMethodInSelfOrSupers(self, name, desc)) |m| return m;
 
         // check superinterfaces
         // TODO return specific error if finds "multiple maximally-specific superinterface methods"
@@ -116,19 +133,19 @@ pub const VmClass = struct {
 
     /// Checks self and super classes only
     pub fn findMethodInSelfOrSupers(
-        self: @This(),
+        self: VmClassRef,
         name: []const u8,
         desc: []const u8,
-    ) ?*const Method {
+    ) ?SelectedMethod {
         // check self
-        if (self.findMethodInThisOnly(name, desc, .{})) |m| return m;
+        if (self.get().findMethodInThisOnly(name, desc, .{})) |m| return .{ .method = m, .cls = self };
 
         // check super recursively
-        return if (self.super_cls.toStrong()) |super| super.get().findMethodRecursive(name, desc) else null;
+        return if (self.get().super_cls.toStrong()) |super| findMethodRecursive(super, name, desc) else null;
     }
 
     pub fn findMethodInThisOnly(
-        self: @This(),
+        self: *const @This(),
         name: []const u8,
         desc: []const u8,
         flags: anytype,
@@ -145,9 +162,10 @@ pub const VmClass = struct {
         } else null;
     }
 
-    /// For invokevirtual and invokeinterface (5.4.6).
     /// Returned class ref is borrowed
-    pub const SelectedMethod = struct { method: *const cafebabe.Method, cls: VmClassRef.Nullable };
+    pub const SelectedMethod = struct { method: *const cafebabe.Method, cls: VmClassRef };
+
+    /// For invokevirtual and invokeinterface (5.4.6).
     pub fn selectMethod(self: VmClassRef, resolved_method: *const cafebabe.Method) SelectedMethod {
         if (!resolved_method.flags.contains(.private)) {
             const helper = struct {
@@ -167,7 +185,7 @@ pub const VmClass = struct {
                     const cls = cls_ref.get();
                     // check own methods
                     for (cls.u.obj.methods) |m, i| {
-                        if (canMethodOverride(&m, method)) return .{ .method = &cls.u.obj.methods[i], .cls = cls_ref.intoNullable() };
+                        if (canMethodOverride(&m, method)) return .{ .method = &cls.u.obj.methods[i], .cls = cls_ref };
                     }
 
                     // recurse on super class
@@ -184,7 +202,7 @@ pub const VmClass = struct {
 
         }
 
-        return .{ .method = resolved_method, .cls = VmClassRef.Nullable.nullRef() };
+        return .{ .method = resolved_method, .cls = self };
     }
 
     const FindSearchResult = struct {

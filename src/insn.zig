@@ -211,24 +211,25 @@ pub const InsnContext = struct {
     fn invokeStaticMethod(self: @This(), idx: u16) InvokeError!void {
         // lookup method name/type/class
         const info = self.constantPool().lookupMethodOrInterfaceMethod(idx) orelse unreachable;
-        if (info.is_interface) @panic("TODO interface method resolution");
 
         // resolve class and ensure initialised
         const class_ref = try self.resolveClass(info.cls, .ensure_initialised);
         const cls = class_ref.get();
 
-        if (cls.flags.contains(.interface)) return error.IncompatibleClassChange;
-
         // find method in class/superclasses/interfaces
-        const method = cls.findMethodRecursive(info.name, info.ty) orelse return error.NoSuchMethod;
+        if (info.is_interface != cls.flags.contains(.interface)) return error.IncompatibleClassChange;
+        const method = (if (info.is_interface)
+            object.VmClass.findInterfaceMethodRecursive(class_ref, info.name, info.ty)
+        else
+            object.VmClass.findMethodRecursive(class_ref, info.name, info.ty)) orelse return error.NoSuchMethod;
 
         // ensure callable
-        if (!method.flags.contains(.static)) return error.IncompatibleClassChange;
-        if (method.flags.contains(.abstract)) return error.NoSuchMethod;
+        if (!method.method.flags.contains(.static)) return error.IncompatibleClassChange;
+        if (method.method.flags.contains(.abstract)) return error.NoSuchMethod;
         // TODO check access control?
 
         // invoke with caller frame
-        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(class_ref, method, self.operandStack())) == null)
+        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(method.cls, method.method, self.operandStack())) == null)
             return error.InvocationException;
     }
 
@@ -249,16 +250,16 @@ pub const InsnContext = struct {
             referenced_cls_ref;
 
         // resolve method on this class
-        const method: *const cafebabe.Method = blk: {
+        const selected_method: object.VmClass.SelectedMethod = blk: {
             const c = cls.get();
 
             // check self and supers
-            if (c.findMethodInSelfOrSupers(info.name, info.ty)) |m| break :blk m;
+            if (object.VmClass.findMethodInSelfOrSupers(cls, info.name, info.ty)) |m| break :blk m;
 
             // special case for invokespecial: check Object
             if (c.flags.contains(.interface)) {
                 const java_lang_Object = self.thread.global.classloader.getLoadedBootstrapClass("java/lang/Object") orelse unreachable; // TODO faster lookup
-                if (java_lang_Object.get().findMethodInThisOnly(info.name, info.ty, .{ .public = true })) |m| break :blk m;
+                if (java_lang_Object.get().findMethodInThisOnly(info.name, info.ty, .{ .public = true })) |m| break :blk .{ .method = m, .cls = java_lang_Object };
             }
 
             // check for maximally-specific in superinterfaces
@@ -266,10 +267,8 @@ pub const InsnContext = struct {
             // break :blk null;
         }; // orelse @panic("no such method exception?");
 
-        std.log.debug("resolved method to {s}.{s}", .{ cls.get().name, method.name });
-
         // invoke with caller frame
-        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(cls, method, self.operandStack())) == null)
+        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_method.cls, selected_method.method, self.operandStack())) == null)
             return error.InvocationException;
     }
 
@@ -284,7 +283,7 @@ pub const InsnContext = struct {
         if (cls.flags.contains(.interface)) return error.IncompatibleClassChange;
 
         // find method in class/superclasses/interfaces
-        const method = cls.findMethodRecursive(info.name, info.ty) orelse return error.NoSuchMethod;
+        const method = (object.VmClass.findMethodRecursive(cls_ref, info.name, info.ty) orelse return error.NoSuchMethod).method;
         if (method.flags.contains(.static)) return error.IncompatibleClassChange;
         if (method.flags.contains(.abstract)) return error.AbstractMethod;
         // TODO check access control?
@@ -294,9 +293,8 @@ pub const InsnContext = struct {
         const this_obj = this_obj_ref.get();
 
         // select method (5.4.6)
-        const this_obj_cls_ref = this_obj.class;
-        const selected_method = object.VmClass.selectMethod(this_obj_cls_ref, method);
-        const selected_cls = selected_method.cls.toStrong() orelse this_obj_cls_ref;
+        const selected_method = object.VmClass.selectMethod(this_obj.class, method);
+        const selected_cls = selected_method.cls;
         std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.method.descriptor.str));
 
         std.log.debug("resolved method to {s}.{s}", .{ selected_cls.get().name, selected_method.method.name });

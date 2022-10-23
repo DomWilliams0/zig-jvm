@@ -367,6 +367,12 @@ pub const Method = struct {
         return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code, .class_name = class_name };
     }
 
+    pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = options;
+        _ = fmt;
+        return std.fmt.format(writer, "{s}.{s}", .{ self.class_name, self.name });
+    }
+
     pub fn deinit(self: @This(), persistent: Allocator) void {
         self.code.deinit(persistent);
     }

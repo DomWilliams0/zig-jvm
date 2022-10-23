@@ -222,7 +222,7 @@ fn interpreterLoop() void {
         if (thread.interpreter.exception.toStrong()) |exc| handled: {
             if (ctxt.frame.payload == .java) {
                 var java = &ctxt.frame.payload.java;
-                std.log.debug("looking for exception handler for {?} at pc {} in {s}.{s}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method.class_name, ctxt.frame.method.name });
+                std.log.debug("looking for exception handler for {?} at pc {} in {?}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method });
 
                 if (ctxt.frame.findExceptionHandler(exc, thread)) |pc| {
                     ctxt.frame.setPc(pc);

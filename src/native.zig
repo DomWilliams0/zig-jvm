@@ -135,7 +135,7 @@ pub const NativeCode = struct {
         defer self.lock.unlock();
 
         const code = code_res catch |err| {
-            std.log.warn("failed to bind native method {s}.{s}: {any}", .{ method.class_name, method.name, err });
+            std.log.warn("failed to bind native method {?}: {any}", .{ method, err });
             self.inner = .{ .failed_to_bind = err };
             return err;
         };
