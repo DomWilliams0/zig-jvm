@@ -217,7 +217,7 @@ pub const InsnContext = struct {
         const cls = class_ref.get();
 
         // find method in class/superclasses/interfaces
-        if (info.is_interface != cls.flags.contains(.interface)) return error.IncompatibleClassChange;
+        if (info.is_interface != cls.isInterface()) return error.IncompatibleClassChange;
         const method = (if (info.is_interface)
             object.VmClass.findInterfaceMethodRecursive(class_ref, info.name, info.ty)
         else
@@ -244,7 +244,7 @@ pub const InsnContext = struct {
 
         // decide which class to use
         // ignore ACC_SUPER
-        const cls = if (!std.mem.eql(u8, info.name, "<init>") and !referenced_cls_ref.get().flags.contains(.interface) and !current_supercls.isNull() and current_supercls.toStrongUnchecked().cmpPtr(referenced_cls_ref)) //
+        const cls = if (!std.mem.eql(u8, info.name, "<init>") and !referenced_cls_ref.get().isInterface() and !current_supercls.isNull() and current_supercls.toStrongUnchecked().cmpPtr(referenced_cls_ref)) //
             current_supercls.toStrongUnchecked() // checked
         else
             referenced_cls_ref;
@@ -257,7 +257,7 @@ pub const InsnContext = struct {
             if (object.VmClass.findMethodInSelfOrSupers(cls, info.name, info.ty)) |m| break :blk m;
 
             // special case for invokespecial: check Object
-            if (c.flags.contains(.interface)) {
+            if (c.isInterface()) {
                 const java_lang_Object = self.thread.global.classloader.getLoadedBootstrapClass("java/lang/Object") orelse unreachable; // TODO faster lookup
                 if (java_lang_Object.get().findMethodInThisOnly(info.name, info.ty, .{ .public = true })) |m| break :blk .{ .method = m, .cls = java_lang_Object };
             }
@@ -280,7 +280,7 @@ pub const InsnContext = struct {
         const cls_ref = try self.resolveClass(info.cls, .resolve_only);
         const cls = cls_ref.get();
 
-        if (cls.flags.contains(.interface)) return error.IncompatibleClassChange;
+        if (cls.isInterface()) return error.IncompatibleClassChange;
 
         // find method in class/superclasses/interfaces
         const method = (object.VmClass.findMethodRecursive(cls_ref, info.name, info.ty) orelse return error.NoSuchMethod).method;

@@ -283,6 +283,9 @@ pub const VmClass = struct {
     pub fn isArray(self: @This()) bool {
         return self.status.ty == .array;
     }
+    pub fn isInterface(self: @This()) bool {
+        return self.flags.contains(.interface);
+    }
 
     pub fn ensureInitialised(self: VmClassRef) Error!void {
         var self_mut = self.get();
@@ -321,7 +324,7 @@ pub const VmClass = struct {
         // TODO set static field values from ConstantValue attrs
 
         // ensure superclass is initialised already
-        if (!self_mut.flags.contains(.interface)) {
+        if (!self_mut.isInterface()) {
             if (self_mut.super_cls.toStrong()) |super| {
                 // std.log.debug("initialising super class {s} on thread {d}", .{ super.get().name, std.Thread.getCurrentId() });
                 try ensureInitialised(super);
@@ -468,16 +471,16 @@ pub const VmClass = struct {
                 if (s.isPrimitive() and t.isPrimitive()) s.u.primitive == t.u.primitive // TC and SC are the same primitive type.
                 else if (!s.isPrimitive() and !t.isPrimitive()) isInstanceOf(s.u.array.elem_cls, t.u.array.elem_cls) // TC and SC are reference types, and type SC can be cast to TC by these run-time rules.
                 else false
-            else if (t.flags.contains(.interface))
+            else if (t.isInterface())
                 helper.strcmp(t.name, "java/lang/Cloneable") or helper.strcmp(t.name, "java/io/Serializable") // T must be one of the interfaces implemented by arrays (JLS §4.10.3).
             else
                 helper.strcmp(t.name, "java/lang/Object") //  T must be Object.
-        else if (s.flags.contains(.interface))
-            if (t.flags.contains(.interface))
+        else if (s.isInterface())
+            if (t.isInterface())
                 helper.isSuperInterface(self, candidate) // T must be the same interface as S or a superinterface of S.
             else
                 helper.strcmp(t.name, "java/lang/Object") // T must be Object.
-        else if (t.flags.contains(.interface))
+        else if (t.isInterface())
             helper.isSuperInterface(self, candidate) //S must implement interface T.
         else
             helper.isSuperClass(self, candidate); // then S must be the same class as T, or S must be a subclass of T
