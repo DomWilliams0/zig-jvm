@@ -1,10 +1,34 @@
 const std = @import("std");
 const sys = @import("sys");
+const jvm = @import("jvm");
 
 pub export fn Java_java_lang_Class_registerNatives() void {}
 
 pub export fn Java_java_lang_Class_desiredAssertionStatus0() sys.jboolean {
     return sys.JNI_FALSE;
+}
+
+fn convertClassName(global: *jvm.state.GlobalState, name: []const u8) jvm.state.Error!jvm.VmObjectRef {
+    // copy locally to replace / with .
+    const buf = try global.classloader.alloc.dupe(u8, name);
+    defer global.classloader.alloc.free(buf);
+    std.mem.replaceScalar(u8, buf, '/', '.');
+
+    return try global.string_pool.getString(buf);
+}
+pub export fn Java_java_lang_Class_initClassName(_: *anyopaque, this: sys.jobject) sys.jobject {
+    const obj = sys.convert(sys.jobject).from(this).toStrongUnchecked(); // `this` can't be null
+    const name = obj.get().class.get().name;
+
+    const thread = jvm.state.thread_state();
+    const str_obj = convertClassName(thread.global, name) catch |err| {
+        // TODO use jni funcs
+        const exc = jvm.state.errorToException(err) ;
+        thread.interpreter.setException(exc);
+        return null;
+    };
+
+    return sys.convert(sys.jobject).to(str_obj.intoNullable());
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

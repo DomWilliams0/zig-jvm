@@ -566,6 +566,44 @@ pub const VmObject = struct {
         std.debug.assert(self.class.get().isArray());
         return @ptrCast(*const ArrayHeader, @alignCast(@alignOf(ArrayHeader), &self.storage));
     }
+
+    /// Runs `toString()` and returns the string ref. Slow, for debugging.
+    /// Null if interface or primitive or method not found
+    pub fn toString(self: VmObjectRef) Error!VmObjectRef.Nullable {
+        const obj = self.get();
+        const cls = obj.class.get();
+
+        if (cls.isInterface())
+            return nullRef(VmObject);
+
+        const toString_method = VmClass.findMethodRecursive(obj.class, "toString", "()Ljava/lang/String;") orelse return nullRef(VmObject);
+        const selected_method = VmClass.selectMethod(obj.class, toString_method.method);
+
+        const args = [1]StackEntry{StackEntry.new(self)};
+        const ret = state.thread_state().interpreter.executeUntilReturnWithArgs(selected_method.cls, selected_method.method, 1, args) catch |err| {
+            std.log.warn("exception invoking toString() on {?}: {any}", .{ self, err });
+            return nullRef(VmObject);
+        } orelse {
+            const exc = state.thread_state().interpreter.exception.toStrongUnchecked();
+            std.log.warn("exception invoking toString() on {?}: {?}", .{ self, exc });
+            return nullRef(VmObject);
+        };
+
+        return ret.convertTo(VmObjectRef.Nullable);
+    }
+
+    /// Borrowed unmodified slice to value of this java.lang.String.
+    pub fn getStringValue(
+        self: *@This(),
+    ) ?[]const u8 {
+        const strings = &state.thread_state().global.string_pool;
+        if (!self.class.cmpPtr(strings.java_lang_String.toStrongUnchecked())) return null;
+        var byte_array = self.getField(VmObjectRef.Nullable, strings.field_value).*.toStrong() orelse return null;
+        const array = byte_array.get().getArrayHeader();
+        const raw_bytes = array.getElems(u8);
+        // TODO decode utf16
+        return raw_bytes;
+    }
 };
 
 const ArrayHeader = packed struct {

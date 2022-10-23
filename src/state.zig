@@ -154,27 +154,33 @@ comptime {
     }
 }
 
-/// Abort if this returns an error. TODO within here, alloc and return OutOfMemoryError and StackOverflowError
-pub fn errorToException(err: Error) ExecutionError!object.VmObjectRef {
-    if (errorToExceptionClass(err)) |cls| {
-        const thread = thread_state();
-        const loader = if (thread.interpreter.top_frame) |f| f.class.get().loader else .bootstrap;
-        const exc_class = thread.global.classloader.loadClass(cls, loader) catch |load_error| {
-            std.log.warn("failed to load exception class {s} while instantiating: {any}", .{ cls, load_error });
+/// Aborts if instantiating an error fails. TODO within here, alloc and return OutOfMemoryError and StackOverflowError
+pub fn errorToException(err: Error) object.VmObjectRef {
+    const S = struct {
+        fn tryConvert(e: Error) ExecutionError!object.VmObjectRef {
+            if (errorToExceptionClass(e)) |cls| {
+                const thread = thread_state();
+                const loader = if (thread.interpreter.top_frame) |f| f.class.get().loader else .bootstrap;
+                const exc_class = thread.global.classloader.loadClass(cls, loader) catch |load_error| {
+                    std.log.warn("failed to load exception class {s} while instantiating: {any}", .{ cls, load_error });
 
-            // propagate fatal errors instantiating new exception
-            // TODO ensure recursion isn't infinite
-            // TODO special case for stack overflow error
-            const new_exception = try errorToException(load_error);
+                    // propagate fatal errors instantiating new exception
+                    // TODO ensure recursion isn't infinite
+                    // TODO special case for stack overflow error
+                    const new_exception = errorToException(load_error);
 
-            // TODO set new exception as cause
-            return new_exception;
-        };
-        const exc_obj = try object.VmClass.instantiateObject(exc_class);
+                    // TODO set new exception as cause
+                    return new_exception;
+                };
+                const exc_obj = try object.VmClass.instantiateObject(exc_class);
 
-        // TODO invoke constructor
-        return exc_obj;
-    } else return @errSetCast(ExecutionError, err);
+                // TODO invoke constructor
+                return exc_obj;
+            } else return @errSetCast(ExecutionError, e);
+        }
+    };
+
+    return S.tryConvert(err) catch |fatal| std.debug.panic("vm error: {any}", .{fatal});
 }
 
 pub fn checkException() bool {

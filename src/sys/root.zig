@@ -10,6 +10,7 @@ pub fn convert(comptime jni_type: type) type {
                 return VmObjectRef.Nullable{ .ptr = @ptrCast(VmObjectRef.NullablePtr, @alignCast(@alignOf(VmObjectRef.NullablePtr), obj)) };
             }
 
+            // TODO allow non nullable too
             pub fn to(obj: VmObjectRef.Nullable) jni.jobject {
                 return @ptrCast(jni.jobject, obj.ptr);
             }

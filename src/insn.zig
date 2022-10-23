@@ -64,7 +64,7 @@ pub const Handler = struct {
 
                         // instantiate exception and throw
                         const e = @errSetCast(Error, err);
-                        const exc = state.errorToException(e) catch |fatal| std.debug.panic("vm error: {any}", .{fatal});
+                        const exc = state.errorToException(e);
                         ctxt.throwException(exc);
                     },
                 }
@@ -1204,6 +1204,14 @@ pub const handlers = struct {
         };
 
         ctxt.throwException(exc);
+    }
+    pub fn _monitorenter(ctxt: InsnContext) Error!void {
+        const obj = ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong() orelse return error.NullPointer;
+        std.log.warn("monitorenter {?} not implemented", .{obj});
+    }
+    pub fn _monitorexit(ctxt: InsnContext) Error!void {
+        const obj = ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong() orelse return error.NullPointer;
+        std.log.warn("monitorexit {?} not implemented", .{obj});
     }
 };
 

@@ -9,6 +9,7 @@ const Allocator = std.mem.Allocator;
 pub const log_level: std.log.Level = .debug;
 
 pub fn main() !void {
+    std.log.info("running test runner", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
@@ -113,13 +114,13 @@ const Test = struct {
         // load test class
         const cls = try jvm.state.thread_state().global.classloader.loadClass(self.testName(), .bootstrap);
         jvm.object.VmClass.ensureInitialised(cls) catch |err| {
-            if (jvm.state.thread_state().interpreter.exception.toStrong()) |exc|
-                std.log.err("test {s} threw exception during initialisation: {?})", .{ self.testName(), exc })
-            else
-                std.log.err("test {s} failed: {any}", .{
-                    self.testName(),
-                    err,
-                });
+            if (jvm.state.thread_state().interpreter.exception.toStrong()) |exc| {
+                const exc_str = exceptionToString(exc) orelse "<error calling toString>";
+                std.log.err("test {s} threw exception {?} during initialisation: \"{s}\")", .{ self.testName(), exc, exc_str });
+            } else std.log.err("test {s} failed: {any}", .{
+                self.testName(),
+                err,
+            });
             return E.Failed;
         };
 
@@ -130,7 +131,8 @@ const Test = struct {
         const ret_value = try jvm.state.thread_state().interpreter.executeUntilReturn(cls, entrypoint);
         const ret_code = if (ret_value) |val| val.convertTo(i32) else {
             const exc = jvm.state.thread_state().interpreter.exception.toStrongUnchecked();
-            std.log.err("test {s} threw exception {?}", .{ self.testName(), exc });
+            const exc_str = exceptionToString(exc) orelse "<error calling toString>";
+            std.log.err("test {s} threw exception {?}: \"{s}\"", .{ self.testName(), exc, exc_str });
             return E.Failed;
         };
 
@@ -139,5 +141,11 @@ const Test = struct {
             std.log.err("test {s} returned {d}", .{ self.testName(), ret_code });
             return E.Failed;
         }
+    }
+
+    fn exceptionToString(exc: jvm.VmObjectRef) ?[]const u8 {
+        const exc_str_obj = (jvm.object.VmObject.toString(exc) catch return null).toStrong() orelse return null;
+        const exc_str = exc_str_obj.get().getStringValue();
+        return exc_str;
     }
 };

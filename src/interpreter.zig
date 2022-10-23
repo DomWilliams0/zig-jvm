@@ -23,13 +23,25 @@ pub const Interpreter = struct {
         self.frames_alloc.deinit();
     }
 
-    /// Returns null if an exception was thrown
+    /// Returns null if an exception was thrown and set in this thread's interpreter.
     pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) state.Error!?frame.Frame.StackEntry {
         return self.executeUntilReturnWithCallerFrame(class, method, null);
     }
 
-    /// Returns null if an exception was thrown
+    /// Returns null if an exception was thrown and set in this thread's interpreter.
+    pub fn executeUntilReturnWithArgs(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, comptime arg_count: usize, args: [arg_count]frame.Frame.StackEntry) state.Error!?frame.Frame.StackEntry {
+
+        // setup a fake stack to pass args
+        var stack_backing = [_]frame.Frame.StackEntry{frame.Frame.StackEntry.notPresent()} ** arg_count;
+        var stack = frame.Frame.OperandStack.new(&stack_backing);
+        for (args) |arg| stack.pushRaw(arg);
+
+        return executeUntilReturnWithCallerFrame(self, class, method, &stack);
+    }
+
+    /// Returns null if an exception was thrown and set in this thread's interpreter.
     pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) state.Error!?frame.Frame.StackEntry {
+
         // TODO format on method to show class.method
         std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
         defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
@@ -213,6 +225,8 @@ fn interpreterLoop() void {
     const top_frame_ptr = @ptrToInt(thread.interpreter.top_frame);
     var ctxt_mut = insn.InsnContextMut{};
     var ctxt = insn.InsnContext{ .thread = thread, .frame = undefined, .mutable = &ctxt_mut };
+
+    thread.interpreter.clearException();
 
     var root_reached = false;
     while (!root_reached) {

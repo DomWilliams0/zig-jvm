@@ -48,7 +48,9 @@ pub const StringPool = struct {
         // set value field
         obj.get().getField(object.VmObjectRef, self.field_value).* = value;
         // no need to set coder field, it is always UTF16
+        // TODO encode utf16 then!
 
+        std.log.debug("created new string {?} with value '{s}'", .{ obj, bytes });
         return obj;
     }
 };

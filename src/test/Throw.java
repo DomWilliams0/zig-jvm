@@ -31,8 +31,7 @@ public class Throw {
     }
 
     static void throwingCls() throws ClassNotFoundException {
-        Object o = new Object();
-        // TODO Class.forName("oof");
+        Class.forName("oof");
     }
 
     public static int vmTest() {

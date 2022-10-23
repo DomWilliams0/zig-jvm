@@ -12,6 +12,7 @@ const pkg_jni = Pkg{
 };
 const pkg_natives = Pkg{ .name = "natives", .source = .{ .path = "src/natives/root.zig" }, .dependencies = &[_]Pkg{
     pkg_jni,
+    pkg_jvm,
 } };
 
 const pkgs = [3]Pkg{ pkg_jni, pkg_jvm, pkg_natives };
