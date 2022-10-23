@@ -1,5 +1,6 @@
 const jvm = @import("jvm");
 const jni = @import("jni.zig");
+pub const api = @import("api.zig");
 pub usingnamespace jni;
 
 const VmObjectRef = jvm.object.VmObjectRef;

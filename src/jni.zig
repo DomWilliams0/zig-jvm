@@ -38,13 +38,6 @@ fn typeCharToFfi(ty: []const u8) [*c]libffi.ffi_type {
     };
 }
 
-/// Thread local instance
-const JniInstance = struct {
-    dummy: u32 = 0,
-};
-
-threadlocal var thread_jni = JniInstance{};
-
 pub const NativeMethodCode = struct {
     cif: libffi.ffi_cif,
     arg_types: [][*c]libffi.ffi_type,
@@ -69,8 +62,6 @@ pub const NativeMethodCode = struct {
 
         arg_types[0] = &libffi.ffi_type_pointer; // jni table
         arg_types[1] = &libffi.ffi_type_pointer; // cls/this
-
-        args[0] = &thread_jni;
 
         var i: usize = 2;
         var arg_iter = desc.iterateParamTypes();
@@ -113,6 +104,9 @@ pub const NativeMethodCode = struct {
 
     pub fn invoke(self: *@This(), caller: *frame.Frame.OperandStack, static_class: ?object.VmObjectRef) void {
         // populate args with ptrs to caller stack
+        var jnienv = &&state.thread_state().jni;
+        self.args[0] = @ptrCast(*const anyopaque, jnienv);
+
         // 0 is already initialised to jni table ptr
         var i: u16 = if (static_class) |static| blk: {
             // class is arg 1

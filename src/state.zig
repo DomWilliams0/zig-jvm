@@ -3,6 +3,7 @@ const classloader = @import("classloader.zig");
 const vm_alloc = @import("alloc.zig");
 const object = @import("object.zig");
 const interp = @import("interpreter.zig");
+const jni = @import("sys/api.zig");
 const string = @import("string.zig");
 const JvmArgs = @import("arg.zig").JvmArgs;
 const Allocator = std.mem.Allocator;
@@ -25,6 +26,7 @@ pub const GlobalState = struct {
 pub const ThreadEnv = struct {
     global: *GlobalState,
     interpreter: interp.Interpreter,
+    jni: *jni.JniEnv,
 
     fn init(global: *GlobalState) ThreadEnv {
         return ThreadEnv{ .global = global };
@@ -32,6 +34,7 @@ pub const ThreadEnv = struct {
 
     fn deinit(self: *@This()) void {
         self.interpreter.deinit();
+        self.global.allocator.inner.destroy(self.jni);
     }
 
     pub fn initMainThread(alloc: Allocator, args: *const JvmArgs) !JvmHandle {
@@ -58,9 +61,14 @@ pub const ThreadEnv = struct {
     /// Inits threadlocal
     pub fn initThread(global: *GlobalState) !*ThreadEnv {
         if (inited) @panic("init once only");
+        const jni_env = try global.allocator.inner.create(jni.JniEnv);
+        errdefer global.allocator.inner.destroy(jni_env);
+        jni_env.* = jni.makeEnv();
+
         thread_env = .{
             .global = global,
             .interpreter = try interp.Interpreter.new(global.allocator.inner),
+            .jni = jni_env,
         };
         inited = true;
 
