@@ -81,8 +81,13 @@ pub const Frame = struct {
         }
 
         pub fn convertTo(self: @This(), comptime T: type) T {
-            if (self.ty != types.DataType.fromType(T)) std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
+            if (self.ty != types.DataType.fromType(T)) typeMismatch(T, self.ty);
             return convert(T).from(self.value);
+        }
+
+        fn typeMismatch(comptime expected: type, actual: types.DataType) noreturn {
+            @setCold(true);
+            std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(expected), @tagName(actual) });
         }
 
         pub fn convertToInt(self: @This()) i32 {
@@ -97,7 +102,7 @@ pub const Frame = struct {
             else if (self.ty == .int)
                 convert(i32).from(self.value)
             else
-                std.debug.panic("type mismatch, expected integer but found {s}", .{@tagName(self.ty)});
+                typeMismatch(i32, self.ty);
         }
 
         // Doesn't check ty
@@ -106,7 +111,7 @@ pub const Frame = struct {
         }
 
         fn convertToPtr(self: *@This(), comptime T: type) *T {
-            if (self.ty != types.DataType.fromType(T)) std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
+            if (self.ty != types.DataType.fromType(T)) typeMismatch(T, self.ty);
             return @ptrCast(*T, &self.value);
         }
 
@@ -114,7 +119,7 @@ pub const Frame = struct {
         fn convertToPtrFfi(self: *@This(), comptime T: type) *T {
             if (self.ty != types.DataType.fromType(T)) {
                 if (T == i8 and self.ty == .boolean) {} // allow
-                else std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(T), @tagName(self.ty) });
+                else typeMismatch(T, self.ty);
             }
             return @ptrCast(*T, &self.value);
         }
