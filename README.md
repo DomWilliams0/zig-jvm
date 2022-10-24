@@ -1,10 +1,90 @@
 # zig-jvm
 
-A Java Virtual Machine implementation in Zig. The goal is to eventually be able to run Minecraft.
+A Java Virtual Machine implementation in Zig.
+
+## Goals
+
+* Run Minecraft with **playable** performance
+    * Ideally the opcode interpreter will be fast enough, but a JIT isn't out of the question.
+* Provide an API to **create and destroy multiple JVMs within the same process**
+    * Every existing JVM I've looked at uses globals, doesn't clean up after shutdown, and can't be
+        coexist with other instances in the same process.
 
 This makes use of the system Java class files from `OpenJDK 18`, and reimplements all native code.
 
 Linux only for now.
+
+## Features
+
+* ✅ Class parsing and loading
+* 🚧 Module support
+* 🚧 Implement all opcodes
+    * ✅ Implement most important (field access, method calling, conditionals, arithmetic)
+    * 🚧 Implement the rest of them
+* ✅ Exceptions (see test case [src/test/Throw.java]([src/test/Throw.java]))
+* ✅ Native function resolving and invoking (via `libffi`)
+* 🚧 Java Native Interface (JNI)
+    * ✅ `JNIEnv*` passed to native functions
+    * 🚧 Actually implement these native functions
+* 🚧 Multiple threads, monitors, `synchronized` methods
+
+(🚧 = in progress or planned)
+
+
+### Example logfile
+
+A snippet from the logs to show the current capabilities:
+
+```
+...
+debug: executing java/lang/Throwable.fillInStackTrace
+debug: call stack:
+ * 0) java/lang/Throwable.fillInStackTrace (pc=0)
+ * 1) java/lang/Throwable.<init> (pc=24)
+ * 2) java/lang/Exception.<init> (pc=2)
+ * 3) java/io/IOException.<init> (pc=2)
+ * 4) java/io/FileNotFoundException.<init> (pc=2)
+ * 5) Throw.vmTest (pc=6)
+debug: operand stack: {}
+debug: local vars: [#0: reference, java/io/FileNotFoundException@7f4ab77b7f00]
+debug: pc=0: aload_0
+debug: operand stack: pushed #1 (reference): java/io/FileNotFoundException@7f4ab77b7f00
+debug: operand stack: {#0: reference, java/io/FileNotFoundException@7f4ab77b7f00}
+debug: local vars: [#0: reference, java/io/FileNotFoundException@7f4ab77b7f00]
+debug: pc=1: getfield
+debug: resolving class java/lang/Throwable
+debug: operand stack: popped #0 (reference): java/io/FileNotFoundException@7f4ab77b7f00
+debug: operand stack: pushed #1 (reference): [java/lang/StackTraceElement@7f4ab780ce00
+debug: getfield(java/io/FileNotFoundException@7f4ab77b7f00, stackTrace) = [java/lang/StackTraceElement@7f4ab780ce00
+debug: operand stack: {#0: reference, [java/lang/StackTraceElement@7f4ab780ce00}
+debug: local vars: [#0: reference, java/io/FileNotFoundException@7f4ab77b7f00]
+debug: pc=4: ifnonnull
+debug: operand stack: popped #0 (reference): [java/lang/StackTraceElement@7f4ab780ce00
+debug: operand stack: {}
+debug: local vars: [#0: reference, java/io/FileNotFoundException@7f4ab77b7f00]
+debug: pc=14: aload_0
+debug: operand stack: pushed #1 (reference): java/io/FileNotFoundException@7f4ab77b7f00
+debug: operand stack: {#0: reference, java/io/FileNotFoundException@7f4ab77b7f00}
+debug: local vars: [#0: reference, java/io/FileNotFoundException@7f4ab77b7f00]
+debug: pc=15: iconst_0
+debug: operand stack: pushed #2 (int): 0
+debug: operand stack: {#0: reference, java/io/FileNotFoundException@7f4ab77b7f00, #1: int, 0}
+debug: local vars: [#0: reference, java/io/FileNotFoundException@7f4ab77b7f00]
+debug: pc=16: invokevirtual
+debug: resolving class java/lang/Throwable
+debug: resolved method to java/io/FileNotFoundException.fillInStackTrace
+debug: executing java/io/FileNotFoundException.fillInStackTrace
+debug: binding native method
+debug: looking for 'Java_java_lang_Throwable_fillInStackTrace'
+debug: call stack:
+ * 0) java/io/FileNotFoundException.fillInStackTrace (native)
+ * 1) java/lang/Throwable.fillInStackTrace (pc=16)
+ * 2) java/lang/Throwable.<init> (pc=24)
+ * 3) java/lang/Exception.<init> (pc=2)
+ * 4) java/io/IOException.<init> (pc=2)
+ * 5) java/io/FileNotFoundException.<init> (pc=2)
+ * 6) Throw.vmTest (pc=6)
+```
 
 ## Usage
 
