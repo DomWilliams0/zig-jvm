@@ -130,6 +130,7 @@ pub const ExceptionError = error{
     NegativeArraySize,
     ArrayIndexOutOfBounds,
     AbstractMethod,
+    Arithmetic,
 };
 
 /// Either exceptions or fatal errors
@@ -148,6 +149,7 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
         error.NegativeArraySize => "java/lang/NegativeArraySizeException",
         error.ArrayIndexOutOfBounds => "java/lang/ArrayIndexOutOfBoundsException",
         error.AbstractMethod => "java/lang/AbstractMethodError",
+        error.Arithmetic => "java/lang/ArithmeticException",
 
         else => return null,
     };
