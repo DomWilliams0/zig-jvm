@@ -450,6 +450,7 @@ pub const ClassLoader = struct {
                     else if (it[0] == '_') out.appendSlice("_1") //
                     else if (it[0] == ';') out.appendSlice("_2") //
                     else if (it[0] == '[') out.appendSlice("_3") //
+                    else if (it[0] == '$') out.appendSlice("_00024") //
                     else out.append(it[0]),
                     2 => {
                         const enc = try std.unicode.utf8Decode(it);
@@ -553,17 +554,17 @@ test "native mangling class name" {
 
 test "native mangling full method" {
     std.testing.log_level = .debug;
-    const cls_name = "my/package/Cool";
+    const cls_name = "my/package/Cool$Inner";
     const method = "doThings_lol";
     const desc = descriptor.MethodDescriptor.new("(ILjava/lang/String;[J)D") orelse unreachable;
 
     var mangled = try ClassLoader.NativeMangling.initShort(std.testing.allocator, cls_name, method);
     defer mangled.deinit();
 
-    try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_doThings_1lol", mangled.strZ());
+    try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_00024Inner_doThings_1lol", mangled.strZ());
 
     try mangled.appendLong(desc);
-    try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_doThings_1lol__ILjava_lang_String_2_3J", mangled.strZ());
+    try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_00024Inner_doThings_1lol__ILjava_lang_String_2_3J", mangled.strZ());
 }
 
 // test "find native method in self" {
