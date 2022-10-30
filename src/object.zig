@@ -621,9 +621,13 @@ pub const VmObject = struct {
     }
 };
 
-const ArrayHeader = packed struct {
+comptime {
+    std.debug.assert(@sizeOf(ArrayHeader) == 6); // packed
+}
+
+const ArrayHeader = struct {
     // TODO actually max length is a u31
-    array_len: u32,
+    array_len: u32 align(1),
     /// Size of each element
     elem_sz: u8,
     /// Padding between start of this header and the elements
