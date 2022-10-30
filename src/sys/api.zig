@@ -116,6 +116,33 @@ const impl = struct {
 
         return jni.convertObject(sys.jobjectArray, array.intoNullable());
     }
+
+    pub fn GetStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, is_copy: [*c]sys.jboolean) callconv(.C) [*c]const u8 {
+        _ = raw_env;
+        const name_obj = jni.convert(string).toStrongUnchecked();
+        const raw_bytes = name_obj.get().getStringValue() orelse @panic("not a string");
+
+        // always copy to null terminate :(
+        // TODO encode?
+        // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
+        const thread = state.thread_state();
+
+        const buf_copy = thread.global.allocator.inner.dupeZ(u8, raw_bytes) catch |e| {
+            thread.interpreter.setException(state.errorToException(e));
+            return null;
+        };
+
+        if (is_copy) |ptr| ptr.* = sys.JNI_TRUE;
+        return buf_copy.ptr;
+    }
+
+    pub fn ReleaseStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, utf: [*c]const u8) callconv(.C) void {
+        _ = string;
+        _ = raw_env;
+        const thread = state.thread_state();
+        // is always a copy
+        thread.global.allocator.inner.free(std.mem.span(utf));
+    }
 };
 
 test "env" {

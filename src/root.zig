@@ -11,6 +11,7 @@ pub const string = @import("string.zig");
 pub const jni = @import("sys/root.zig");
 pub const native = @import("native.zig");
 pub const object = @import("object.zig");
+pub const properties = @import("properties.zig");
 pub const types = @import("type.zig");
 
 pub const VmObjectRef = object.VmObjectRef;

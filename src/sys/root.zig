@@ -19,6 +19,7 @@ fn ConversionType(comptime from: type) type {
         VmObjectRef => sys.jobject,
 
         sys.jobjectArray => VmObjectRef.Nullable,
+        sys.jstring => VmObjectRef.Nullable,
         else => @compileError("TODO convert type: " ++ @typeName(from)),
     };
 }
@@ -42,6 +43,7 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
         VmClassRef => vmRefToRaw(sys.jclass, val.get().getClassInstance().clone()),
 
         sys.jobjectArray => rawToVmRef(VmObjectRef, val),
+        sys.jstring => rawToVmRef(VmObjectRef, val),
 
         sys.jobject => rawToVmRef(VmObjectRef, val),
         VmObjectRef => vmRefToRaw(sys.jobject, val),
@@ -49,7 +51,6 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
         else => @compileError("TODO convert from " ++ @typeName(@TypeOf(val))),
     };
 }
-
 
 pub fn convertObject(comptime T: type, val: VmObjectRef.Nullable) T {
     switch (T) {

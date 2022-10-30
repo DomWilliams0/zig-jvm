@@ -1,6 +1,8 @@
+const std = @import("std");
 const classloader = @import("classloader.zig");
 const vm_type = @import("type.zig");
 const object = @import("object.zig");
+const state = @import("state.zig");
 
 const Preload = struct {
     cls: []const u8,
@@ -9,7 +11,7 @@ const Preload = struct {
 };
 
 // TODO more
-const preload_classes: [1]Preload = .{.{ .cls = "[I" }};
+const preload_classes: [2]Preload = .{ .{ .cls = "[I" }, .{ .cls = "java/lang/System", .initialise = true } };
 
 pub const Options = struct {
     /// Skip initialising
@@ -61,8 +63,27 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
     try load(opts, .{ .cls = "[B" }, loader);
     try load(opts, .{ .cls = "java/lang/String", .initialise = true }, loader);
 
-    @import("state.zig").thread_state().global.string_pool.postBootstrapInit();
+    const thread = state.thread_state();
+    thread.global.string_pool.postBootstrapInit();
 
     inline for (preload_classes) |preload|
         try load(opts, preload, loader);
+
+    // setup System class
+    {
+        const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
+        const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
+        if ((try thread.interpreter.executeUntilReturn(java_lang_System, method)) == null) {
+            const exc = thread.interpreter.exception.toStrongUnchecked();
+            const exc_str = exceptionToString(exc);
+            std.log.err("initialising System threw exception {?}: \"{s}\"", .{ exc, exc_str });
+            return error.InvocationError;
+        }
+    }
+}
+
+pub fn exceptionToString(exc: object.VmObjectRef) []const u8 {
+    const ERR = "<error calling toString>";
+    const exc_str_obj = (object.VmObject.toString(exc) catch return ERR).toStrong() orelse return ERR;
+    return exc_str_obj.get().getStringValue() orelse ERR;
 }

@@ -132,6 +132,7 @@ pub const ExceptionError = error{
     AbstractMethod,
     Arithmetic,
     ClassCast,
+    ClassNotFound,
 };
 
 /// Either exceptions or fatal errors
@@ -152,6 +153,7 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
         error.AbstractMethod => "java/lang/AbstractMethodError",
         error.Arithmetic => "java/lang/ArithmeticException",
         error.ClassCast => "java/lang/ClassCastException",
+        error.ClassNotFound => "java/lang/ClassNotFoundException",
 
         else => return null,
     };

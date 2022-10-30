@@ -36,6 +36,29 @@ pub export fn Java_java_lang_Class_initClassName(raw_env: JniEnvPtr, this: sys.j
 
     return jni.convert(str_obj);
 }
+pub export fn Java_java_lang_Class_getPrimitiveClass(raw_env: JniEnvPtr, cls: sys.jclass, name: sys.jstring) sys.jclass {
+    _ = cls;
+    const env = jni.convert(raw_env);
+    if (name == null) {
+        // TODO wew, make this more ergonomic
+        const exc = jvm.state.errorToException(error.NullPointer);
+        _ = env.Throw(raw_env, jni.convert(exc));
+        return null;
+    }
+
+    const string = env.GetStringUTFChars(raw_env, name, null);
+    defer env.ReleaseStringUTFChars(raw_env, name, string);
+
+    std.log.debug("GetPrimitiveClass({s})", .{string});
+    const ty = jvm.types.DataType.fromName(std.mem.span(string), true) orelse {
+        _ = env.Throw(raw_env, jni.convert(jvm.state.errorToException(error.ClassNotFound)));
+        return null;
+    };
+    const prim = ty.asPrimitive() orelse unreachable; // impossible
+
+    const prim_cls = jvm.state.thread_state().global.classloader.getLoadedPrimitive(prim);
+    return jni.convert(prim_cls);
+}
 
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Class_registerNatives", .desc = "()V" },

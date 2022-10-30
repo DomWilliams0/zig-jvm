@@ -292,6 +292,13 @@ pub const ClassLoader = struct {
         return self.loadPrimitiveWithType(name, ty);
     }
 
+    /// Must be already loaded.
+    /// Returns BORROWED class reference
+    pub fn getLoadedPrimitive(self: *Self, ty: vm_type.PrimitiveDataType) VmClassRef {
+        var entry = &self.primitives[@enumToInt(ty)];
+        return entry.toStrongUnchecked();
+    }
+
     /// Name should be static if loading for the first time (during startup).
     /// Returns BORROWED class reference
     pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.PrimitiveDataType) state.Error!VmClassRef {

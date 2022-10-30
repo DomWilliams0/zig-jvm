@@ -424,7 +424,7 @@ pub const InsnContext = struct {
         };
     }
 
-    const BinaryOp = enum { add, sub, mul, div };
+    const BinaryOp = enum { add, sub, mul, div, lshr, shr, shl };
 
     /// There is no overhead to returning and handling Error!void for binary ops that never return an error
     /// (all non .div ones)
@@ -440,11 +440,15 @@ pub const InsnContext = struct {
                 error.Overflow => val1,
                 error.DivisionByZero => return error.Arithmetic,
             },
+            .shr => val1 >> @truncate(u5, @intCast(u32, val2 & 0x3f)), // TODO verify
+            .shl => val1 << @truncate(u5, @intCast(u32, val2 & 0x3f)), // TODO verify
+            .lshr => val1 >> @truncate(u5, @intCast(u32, val2 & 0x3f)), // TODO verify (definitely wrong)
         } else if (@typeInfo(T) == .Float) switch (op) {
             .add => val1 + val2,
             .sub => val1 - val2,
             .mul => val1 * val2,
             .div => val1 / val2,
+            .shl, .shr, .lshr => @compileError("unsupported shift op"),
         } else @compileError("not int or float");
 
         std.log.debug("{} {s} {} = {}", .{ val1, switch (op) {
@@ -452,6 +456,9 @@ pub const InsnContext = struct {
             .sub => "-",
             .mul => "*",
             .div => "/",
+            .lshr => "logical>>",
+            .shr => ">>",
+            .shl => "<<",
         }, val2, result });
 
         self.operandStack().push(result);
@@ -551,6 +558,14 @@ pub const InsnContext = struct {
         }
     }
 
+    fn fcmp(self: @This(), comptime nan_result: i32) void {
+        const val2 = self.operandStack().pop(f32);
+        const val1 = self.operandStack().pop(f32);
+
+        const result: i32 = if (std.math.isNan(val1) or std.math.isNan(val2)) nan_result else if (val1 > val2) 1 else if (val1 == val2) 0 else -1;
+        self.operandStack().push(result);
+    }
+
     /// Adds offset to pc
     fn goto(self: @This(), offset: i16) void {
         if (offset >= 0) {
@@ -573,6 +588,8 @@ pub const InsnContext = struct {
             },
             .long => |val| self.operandStack().push(val),
             .double => |val| self.operandStack().push(val),
+            .float => |val| self.operandStack().push(val),
+            .int => |val| self.operandStack().push(val),
             .string => |val| {
                 const string_ref = try self.thread.global.string_pool.getString(val);
                 self.operandStack().push(string_ref);
@@ -923,16 +940,11 @@ pub const handlers = struct {
         const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
         switch (val.ty) {
-            .int => {
-                obj.get().getField(i32, field.fid).* = val.convertToUnchecked(i32);
-            },
-            .reference => {
-                obj.get().getField(VmObjectRef.Nullable, field.fid).* = val.convertToUnchecked(VmObjectRef.Nullable);
-            },
-            .long,
-            .float,
-            .double,
-            => @panic("TODO"),
+            .int => obj.get().getField(i32, field.fid).* = val.convertToUnchecked(i32),
+            .reference => obj.get().getField(VmObjectRef.Nullable, field.fid).* = val.convertToUnchecked(VmObjectRef.Nullable),
+            .float => obj.get().getField(f32, field.fid).* = val.convertToUnchecked(f32),
+            .double => obj.get().getField(f64, field.fid).* = val.convertToUnchecked(f64),
+            .long => obj.get().getField(i64, field.fid).* = val.convertToUnchecked(i64),
 
             .boolean,
             .byte,
@@ -969,6 +981,15 @@ pub const handlers = struct {
     pub fn _idiv(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i32, .div);
     }
+    pub fn _iushr(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i32, .lshr);
+    }
+    pub fn _ishr(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i32, .shr);
+    }
+    pub fn _ishl(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i32, .shl);
+    }
 
     pub fn _ladd(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i64, .add);
@@ -981,6 +1002,15 @@ pub const handlers = struct {
     }
     pub fn _ldiv(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i64, .div);
+    }
+    pub fn _lushr(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i64, .lshr);
+    }
+    pub fn _lshr(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i64, .shr);
+    }
+    pub fn _lshl(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i64, .shl);
     }
 
     pub fn _fadd(ctxt: InsnContext) Error!void {
@@ -1011,6 +1041,9 @@ pub const handlers = struct {
 
     pub fn _ldc(ctxt: InsnContext) Error!void {
         try ctxt.loadConstant(ctxt.readU8(), .any_single);
+    }
+    pub fn _ldc_w(ctxt: InsnContext) Error!void {
+        try ctxt.loadConstant(ctxt.readU16(), .any_single);
     }
     pub fn _ldc2_w(ctxt: InsnContext) Error!void {
         try ctxt.loadConstant(ctxt.readU16(), .long_double);
@@ -1158,6 +1191,12 @@ pub const handlers = struct {
     }
     pub fn _if_acmpne(ctxt: InsnContext) void {
         ctxt.ifACmp(.ne);
+    }
+    pub fn _fcmpg(ctxt: InsnContext) void {
+        ctxt.fcmp(1);
+    }
+    pub fn _fcmpl(ctxt: InsnContext) void {
+        ctxt.fcmp(-1);
     }
 
     pub fn _iinc(ctxt: InsnContext) void {

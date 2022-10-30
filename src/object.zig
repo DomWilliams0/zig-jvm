@@ -537,9 +537,13 @@ pub const VmObject = struct {
         const offset = field.u.layout_offset;
         return switch (field.descriptor.getType()) {
             .primitive => |prim| switch (prim) {
-                .int => StackEntry.new(self.getRawFieldCopy(i32, offset)),
+                .boolean, .byte => StackEntry.new(self.getRawFieldCopy(i8, offset)),
                 .short => StackEntry.new(self.getRawFieldCopy(i16, offset)),
-                else => @panic("TODO prim"),
+                .int => StackEntry.new(self.getRawFieldCopy(i32, offset)),
+                .long => StackEntry.new(self.getRawFieldCopy(i64, offset)),
+                .char => StackEntry.new(self.getRawFieldCopy(u16, offset)),
+                .float => StackEntry.new(self.getRawFieldCopy(f32, offset)),
+                .double => StackEntry.new(self.getRawFieldCopy(f64, offset)),
             },
             .reference, .array => StackEntry.new(self.getRawFieldCopy(VmObjectRef.Nullable, offset)),
         };
