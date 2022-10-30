@@ -168,10 +168,25 @@ pub const ClassLoader = struct {
         var loader = if (array_type == .primitive) .bootstrap else requested_loader;
 
         if (array_type == .reference) {
-            unreachable; // TODO load element class first
+            // load element class first
+            const elem_name = elementClassNameFromArray(name) orelse return error.ClassFormat;
+            _ = try self.loadClass(elem_name, requested_loader);
         }
 
         return self.loadClassInternal(name, loader, array_type);
+    }
+
+    /// Must start with [ already
+    fn elementClassNameFromArray(array_name: []const u8) ?[]const u8 {
+        std.debug.assert(array_name[0] == '[');
+
+        const s = array_name[1..];
+        return if (s[0] == '[')
+            s // nested array
+        else if (s[0] == 'L') blk: {
+            if (s[s.len - 1] != ';') return null;
+            break :blk s[1 .. s.len - 1]; // [L...;
+        } else s; // primitive
     }
 
     fn loadClassInternal(self: *Self, name: []const u8, loader: WhichLoader, array_type: ArrayType) state.Error!VmClassRef {
@@ -241,7 +256,7 @@ pub const ClassLoader = struct {
     // TODO set exception
     fn loadArrayClass(self: *Self, name: []const u8, is_primitive: bool, loader: WhichLoader) state.Error!VmClassRef {
         std.debug.assert(name[0] == '[');
-        const elem_name = name[1..];
+        const elem_name = elementClassNameFromArray(name) orelse return error.ClassFormat;
 
         const elem_class_ref = try if (is_primitive) self.loadPrimitive(elem_name) else self.loadClass(elem_name, loader);
         const elem_class = elem_class_ref.get();
