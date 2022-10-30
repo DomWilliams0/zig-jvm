@@ -1,6 +1,8 @@
 const std = @import("std");
 const jvm = @import("jvm");
-const sys = jvm.sys;
+const jni = jvm.jni;
+const sys = jni.sys;
+const JniEnvPtr = jvm.jni.JniEnvPtr;
 
 pub export fn Java_java_lang_Class_registerNatives() void {}
 
@@ -17,24 +19,22 @@ fn convertClassName(global: *jvm.state.GlobalState, name: []const u8) jvm.state.
     return try global.string_pool.getString(buf);
 }
 
-pub export fn Java_java_lang_Class_initClassName(raw_env: sys.api.JniEnvPtr, this: sys.jobject) sys.jobject {
-    const obj = sys.convert(sys.jobject).from(this).toStrongUnchecked(); // `this` can't be null
-
-    // TODO cache this somewhere
-    const classdata_field = obj.get().class.get().findFieldRecursively("classData", "Ljava/lang/Object;", .{ .private = true, .static = false }) orelse @panic("no classData in java/lang/Class");
-
-    const classdata = obj.get().getField(jvm.object.VmClassRef, classdata_field.id);
-    const name = classdata.get().name;
+pub export fn Java_java_lang_Class_initClassName(raw_env: JniEnvPtr, this: sys.jobject) sys.jobject {
+    const obj = jni.convert(this).toStrongUnchecked(); // `this` can't be null
 
     const thread = jvm.state.thread_state();
+
+    const classdata = obj.get().getClassDataUnchecked();
+    const name = classdata.get().name;
+
     const str_obj = convertClassName(thread.global, name) catch |err| {
         const exc = jvm.state.errorToException(err);
         // TODO wew, make this more ergonomic
-        _ = sys.api.convertEnv(raw_env).Throw(raw_env, sys.convert(sys.jobject).to(exc.intoNullable()));
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(exc));
         return null;
     };
 
-    return sys.convert(sys.jobject).to(str_obj.intoNullable());
+    return jni.convert(str_obj);
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

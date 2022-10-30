@@ -1,12 +1,12 @@
 const std = @import("std");
 const jvm = @import("jvm");
-const sys = jvm.sys;
+const jni = jvm.jni;
+const sys = jni.sys;
 
-pub export fn Java_java_lang_Object_getClass(raw_env: sys.api.JniEnvPtr, this: sys.jobject) sys.jclass {
+pub export fn Java_java_lang_Object_getClass(raw_env: jni.JniEnvPtr, this: sys.jobject) sys.jclass {
     _ = raw_env;
-    const obj = sys.convert(sys.jobject).from(this).toStrongUnchecked(); // `this` can't be null
-    const class = obj.get().class.get().getClassInstance().clone();
-    return sys.convert(sys.jobject).to(class.intoNullable());
+    const obj = jni.convert(this).toStrongUnchecked(); // `this` can't be null
+    return jni.convert(obj.get().class);
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

@@ -62,6 +62,10 @@ pub const ClassLoader = struct {
     /// Initialised during startup so not mutex protected
     primitives: [vm_type.primitives.len]VmClassRef.Nullable = [_]VmClassRef.Nullable{VmClassRef.Nullable.nullRef()} ** vm_type.primitives.len,
 
+    // TODO have a separate struct for cached field and method ids
+    /// Set in bootstrap process
+    java_lang_Class_classData: object.FieldId = undefined,
+
     const ClassesContext = struct {
         pub fn hash(_: @This(), key: Key) u32 {
             var hasher = std.hash.Wyhash.init(4);
@@ -134,6 +138,7 @@ pub const ClassLoader = struct {
         var array_cls_name: []u8 = try self.alloc.alloc(u8, elem_name.len + 1);
         array_cls_name[0] = '[';
         std.mem.copy(u8, array_cls_name[1..], elem_name);
+        // TODO this is leaked if the class is already loaded
 
         return self.loadClassInternal(array_cls_name, requested_loader, .reference);
     }
@@ -253,6 +258,8 @@ pub const ClassLoader = struct {
         const elem_dims = if (elem_class.name[0] == '[') elem_class.u.array.dims else 0;
 
         var class = try object.VmClassRef.new();
+        errdefer class.drop();
+
         const padding = elem_class.calculateArrayPreElementPadding();
         class.get().* = .{
             .flags = flags,
@@ -264,7 +271,7 @@ pub const ClassLoader = struct {
             .loader = loader.clone(),
             .class_instance = undefined, // set next
         };
-        class.get().class_instance = try self.allocJavaLangClassInstance(class);
+        try self.assignClassInstance(class);
 
         return class;
     }
@@ -294,6 +301,7 @@ pub const ClassLoader = struct {
         std.log.debug("loading primitive {s}", .{name});
 
         var class = try object.VmClassRef.new();
+        errdefer class.drop();
         class.get().* = .{
             .flags = cafebabe.BitSet(cafebabe.ClassFile.Flags).init(.{
                 .public = true,
@@ -308,22 +316,28 @@ pub const ClassLoader = struct {
             .loader = .bootstrap,
             .class_instance = undefined, // set next
         };
-        class.get().class_instance = try self.allocJavaLangClassInstance(class);
+        try self.assignClassInstance(class);
 
         entry.* = class.intoNullable();
         return class; // borrowed
     }
 
-    pub fn allocJavaLangClassInstance(self: *Self, cls: VmClassRef) error{OutOfMemory}!VmObjectRef.Nullable {
-        const java_lang_Class = self.getLoadedBootstrapClass("java/lang/Class") orelse return VmObjectRef.Nullable.nullRef();
+    /// Sets class_instance field. Sets to null if java/lang/Class is not yet loaded
+    pub fn assignClassInstance(self: *Self, cls: VmClassRef) error{OutOfMemory}!void {
+        // instantiate class object
+        const java_lang_Class = self.getLoadedBootstrapClass("java/lang/Class") orelse {
+            // set to null for now
+            cls.get().class_instance = VmObjectRef.Nullable.nullRef();
+            return;
+        };
 
-        const obj = try object.VmClass.instantiateObject(java_lang_Class);
+        const class_obj = try object.VmClass.instantiateObject(java_lang_Class);
 
-        // classdata = VmClassRef
-        const class_data_field = java_lang_Class.get().findFieldRecursively("classData", "Ljava/lang/Object;", .{ .private = true, .static = false }) orelse @panic("no classData in java/lang/Class"); // TODO method to find guaranteed field or panic with this msg
-        obj.get().getField(VmObjectRef, class_data_field.id).* = cls.clone().cast(object.VmObject);
+        // classdata = VmClassRef TODO is this safe?
+        const fid = state.thread_state().global.classloader.java_lang_Class_classData;
+        class_obj.get().getField(VmObjectRef, fid).* = cls.clone().cast(object.VmObject);
 
-        return obj.intoNullable();
+        cls.get().class_instance = class_obj.intoNullable();
     }
 
     /// Class bytes are the callers responsiblity to clean up.
@@ -347,6 +361,7 @@ pub const ClassLoader = struct {
         var super_class = if (classfile.super_cls) |super| (try self.loadClass(super, loader)).clone().intoNullable() else VmClassRef.Nullable.nullRef();
 
         var class = try object.VmClassRef.new();
+        errdefer class.drop();
         class.get().* = .{
             .flags = classfile.flags,
             .name = classfile.this_cls,
@@ -364,7 +379,7 @@ pub const ClassLoader = struct {
             .loader = loader.clone(),
             .class_instance = undefined, // set next
         };
-        class.get().class_instance = try self.allocJavaLangClassInstance(class);
+        try self.assignClassInstance(class);
 
         // preparation
         var layout: object.ObjectLayout = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class.toStrong()) |super| super.get().u.obj.layout else .{};

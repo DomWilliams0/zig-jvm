@@ -26,7 +26,7 @@ pub const GlobalState = struct {
 pub const ThreadEnv = struct {
     global: *GlobalState,
     interpreter: interp.Interpreter,
-    jni: *jni_sys.api.JniEnv,
+    jni: *jni_sys.JniEnv,
 
     fn init(global: *GlobalState) ThreadEnv {
         return ThreadEnv{ .global = global };
@@ -61,7 +61,7 @@ pub const ThreadEnv = struct {
     /// Inits threadlocal
     pub fn initThread(global: *GlobalState) !*ThreadEnv {
         if (inited) @panic("init once only");
-        const jni_env = try global.allocator.inner.create(jni_sys.api.JniEnv);
+        const jni_env = try global.allocator.inner.create(jni_sys.JniEnv);
         errdefer global.allocator.inner.destroy(jni_env);
         jni_env.* = jni_sys.api.makeEnv();
 

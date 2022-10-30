@@ -72,21 +72,22 @@ pub const jfloat = f32;
 pub const jdouble = f64;
 pub const jsize = jint;
 pub const struct__jobject = opaque {};
-pub const jobject = ?*struct__jobject;
-pub const jclass = jobject;
+// these have been changed to be explicitly differently from each other
+pub const jobject = ?*opaque {};
+pub const jclass = ?*opaque {};
 pub const jthrowable = jobject;
-pub const jstring = jobject;
-pub const jarray = jobject;
-pub const jbooleanArray = jarray;
-pub const jbyteArray = jarray;
-pub const jcharArray = jarray;
-pub const jshortArray = jarray;
-pub const jintArray = jarray;
-pub const jlongArray = jarray;
-pub const jfloatArray = jarray;
-pub const jdoubleArray = jarray;
-pub const jobjectArray = jarray;
-pub const jweak = jobject;
+pub const jstring = ?*opaque {};
+pub const jarray = ?*opaque {};
+pub const jbooleanArray = ?*opaque {};
+pub const jbyteArray = ?*opaque {};
+pub const jcharArray = ?*opaque {};
+pub const jshortArray = ?*opaque {};
+pub const jintArray = ?*opaque {};
+pub const jlongArray = ?*opaque {};
+pub const jfloatArray = ?*opaque {};
+pub const jdoubleArray = ?*opaque {};
+pub const jobjectArray = ?*opaque {};
+pub const jweak = ?*opaque {};
 pub const union_jvalue = extern union {
     z: jboolean,
     b: jbyte,

@@ -37,7 +37,6 @@ pub fn main() !void {
     var jvm_handle = try jvm.state.ThreadEnv.initMainThread(alloc, &jvm_args);
     defer jvm_handle.deinit();
 
-    // TODO exception
     try jvm.bootstrap.initBootstrapClasses(
         &jvm_handle.global.classloader,
         .{},

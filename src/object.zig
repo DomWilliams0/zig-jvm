@@ -487,6 +487,7 @@ pub const VmClass = struct {
 };
 
 const Monitor = struct {
+    // TODO should be reentrant
     mutex: std.Thread.Mutex = .{},
     condition: std.Thread.Condition = .{},
 
@@ -602,6 +603,17 @@ pub const VmObject = struct {
         const raw_bytes = array.getElems(u8);
         // TODO decode utf16
         return raw_bytes;
+    }
+
+    /// Must be an instance of java/lang/Class, and must be called post-bootstrap. Returns borrowed ref
+    pub fn getClassDataUnchecked(self: *@This()) VmClassRef {
+        std.debug.assert(std.mem.eql(u8, self.class.get().name, "java/lang/Class"));
+
+        const fid = state.thread_state().global.classloader.java_lang_Class_classData;
+        var self_mut = self;
+        const field_opt = self_mut.getField(VmObjectRef.Nullable, fid);
+        const field = field_opt.toStrongUnchecked();
+        return field.cast(VmClass);
     }
 };
 

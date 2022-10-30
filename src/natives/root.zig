@@ -12,7 +12,7 @@ pub const JniMethod = struct {
 fn validateFunctionSignatures(comptime module: type) void {
     @setEvalBranchQuota(10000);
     const std = @import("std");
-    const sys = @import("jvm").sys;
+    const sys = @import("jvm").jni.sys;
 
     // method names and descriptors declared
     const descriptors = @field(module, "methods");
@@ -43,19 +43,28 @@ fn validateFunctionSignatures(comptime module: type) void {
         const method_info = @typeInfo(@TypeOf(decl.method));
 
         const expected_return_type = m.desc[std.mem.lastIndexOfScalar(u8, m.desc, ')').? + 1];
-        const actual_return_type = switch (method_info.Fn.return_type.?) {
+        var actual_return_types: [2]u8 = .{0} ** 2;
+        actual_return_types[0] = switch (method_info.Fn.return_type.?) {
             void => 'V',
-            sys.jobject => 'L',
+            sys.jobject => blk: {
+                // also allow arrays? TODO is this irrelevant with unique opaque types for everything now
+                // actual_return_types[1] = '[';
+                break :blk 'L';
+            },
+            sys.jclass => 'L',
+            sys.jobjectArray => '[',
             sys.jboolean => 'Z',
             sys.jint => 'I',
             sys.jfloat => 'F',
             sys.jdouble => 'D',
             sys.jlong => 'J',
-            else => @compileError("TODO"),
+            else => @compileError("TODO ret type " ++ @typeName(method_info.Fn.return_type.?)),
         };
 
-        if (expected_return_type != actual_return_type)
-            @compileError("method return type mismatch on " ++ @typeName(module) ++ "." ++ m.method);
+        if (std.mem.indexOfScalar(u8, &actual_return_types, expected_return_type) == null) {
+            var expected: [1]u8 = .{expected_return_type};
+            @compileError("method return type mismatch on " ++ @typeName(module) ++ "." ++ m.method ++ ": expected " ++ expected ++ " but found " ++ actual_return_types);
+        }
 
         visited[decl.idx] = true;
     }

@@ -11,7 +11,7 @@ pub const JniEnv = blk: {
 
     inline for (@typeInfo(sys.struct_JNINativeInterface_).Struct.fields) |f, i| {
         var new_field = f;
-        const non_optional = @typeInfo(f.field_type).Optional.child;
+        comptime var non_optional = @typeInfo(f.field_type).Optional.child;
 
         switch (@typeInfo(non_optional)) {
             .Pointer => |p| {
@@ -60,21 +60,19 @@ pub fn makeEnv() JniEnv {
     return result;
 }
 
-pub fn convertEnv(raw_env: JniEnvPtr) *const JniEnv {
-    return @ptrCast(*const JniEnv, raw_env.*);
-}
 const impl = struct {
     const state = @import("../state.zig");
-    pub export fn ExceptionCheck(raw_env: JniEnvPtr) sys.jboolean {
+    const object = @import("../object.zig");
+    pub fn ExceptionCheck(raw_env: JniEnvPtr) callconv(.C) sys.jboolean {
         _ = raw_env;
         // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
         const thread = state.thread_state();
         return if (thread.interpreter.exception.isNull()) sys.JNI_FALSE else sys.JNI_TRUE;
     }
 
-    pub export fn Throw(raw_env: JniEnvPtr, exc: sys.jobject) sys.jint {
+    pub fn Throw(raw_env: JniEnvPtr, exc: sys.jthrowable) callconv(.C) sys.jint {
         _ = raw_env;
-        if (jni.convert(sys.jobject).from(exc).toStrong()) |exception| {
+        if (jni.convert(exc).toStrong()) |exception| {
             // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
             const thread = state.thread_state();
             thread.interpreter.setException(exception);
@@ -82,12 +80,48 @@ const impl = struct {
         }
         return -1;
     }
+
+    pub fn FindClass(raw_env: JniEnvPtr, cls_name: [*c]const u8) callconv(.C) sys.jclass {
+        _ = raw_env;
+        // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
+        const thread = state.thread_state();
+        const loader = if (thread.interpreter.top_frame) |f| f.class.get().loader else @panic("TODO use getSystemClassLoader instead");
+        const loaded = thread.global.classloader.loadClass(std.mem.span(cls_name), loader) catch |e| {
+            thread.interpreter.setException(state.errorToException(e));
+            return null;
+        };
+        return jni.convert(loaded.clone());
+    }
+
+    pub fn NewObjectArray(raw_env: JniEnvPtr, size: sys.jsize, elem: sys.jclass, initial_elem: sys.jobject) callconv(.C) sys.jobjectArray {
+        _ = raw_env;
+
+        const elem_cls = jni.convert(elem).toStrongUnchecked();
+
+        // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
+        const thread = state.thread_state();
+
+        const array_cls = thread.global.classloader.loadClassAsArrayElement(elem_cls.get().name, elem_cls.get().loader) catch |e| {
+            thread.interpreter.setException(state.errorToException(e));
+            return null;
+        };
+
+        const len = @intCast(usize, size); // expected to be valid
+        const array = object.VmClass.instantiateArray(array_cls, len) catch |e| {
+            thread.interpreter.setException(state.errorToException(e));
+            return null;
+        };
+
+        if (!jni.convert(initial_elem).isNull()) @panic("TODO array initial elem");
+
+        return jni.convertObject(sys.jobjectArray, array.intoNullable());
+    }
 };
 
-// test "env" {
-//     var env = makeEnv();
-//     var a: [*c]JniEnv = &env;
-//     var b: [*c][*c]const JniEnv = &a;
-//     var c: [*c][*c]const jni.struct_JNINativeInterface_ = @ptrCast([*c][*c]const jni.struct_JNINativeInterface_, b);
-//     _ = env.ExceptionCheck(c);
-// }
+test "env" {
+    var env = makeEnv();
+    var a: [*c]JniEnv = &env;
+    var b: [*c][*c]const JniEnv = &a;
+    var c: [*c][*c]const jni.struct_JNINativeInterface_ = @ptrCast([*c][*c]const jni.struct_JNINativeInterface_, b);
+    _ = env.ExceptionCheck(c);
+}

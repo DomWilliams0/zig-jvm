@@ -43,9 +43,12 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
         const java_lang_Object = loader.getLoadedBootstrapClass("java/lang/Object").?;
         const java_lang_Class = loader.getLoadedBootstrapClass("java/lang/Class").?;
 
+        // init cached field ids
+        loader.java_lang_Class_classData = (java_lang_Class.get().findFieldRecursively("classData", "Ljava/lang/Object;", .{ .static = false }) orelse @panic("classData not found in java.lang.Class")).id;
+
         // fix up class vmdata pointers
-        java_lang_Object.get().class_instance = try loader.allocJavaLangClassInstance(java_lang_Object);
-        java_lang_Class.get().class_instance = try loader.allocJavaLangClassInstance(java_lang_Class);
+        try loader.assignClassInstance(java_lang_Object);
+        try loader.assignClassInstance(java_lang_Class);
 
         // initialise
         try object.VmClass.ensureInitialised(java_lang_Object);

@@ -1,8 +1,12 @@
 const std = @import("std");
-const sys = @import("jvm").sys;
+const jvm = @import("jvm");
+const jni = jvm.jni;
+const sys = jni.sys;
 
-pub export fn Java_java_lang_Throwable_fillInStackTrace(_: *anyopaque, this: sys.jobject) sys.jobject {
-    std.log.warn("TODO fill in stack trace", .{});
+pub export fn Java_java_lang_Throwable_fillInStackTrace(env: *const jni.JniEnv, this: sys.jobject) sys.jobject {
+    _ = env;
+    const obj = jni.convert(this).toStrong();
+    std.log.warn("TODO fill in stack trace on {?}", .{obj});
     return this;
 }
 

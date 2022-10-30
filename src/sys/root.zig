@@ -1,21 +1,61 @@
-const jni = @import("jni.zig");
 pub const api = @import("api.zig");
-pub usingnamespace jni;
+pub const sys = @import("jni.zig");
+
+pub const JniEnv = api.JniEnv;
+pub const JniEnvPtr = api.JniEnvPtr;
 
 const object = @import("../object.zig");
 const VmObjectRef = object.VmObjectRef;
-pub fn convert(comptime jni_type: type) type {
-    switch (jni_type) {
-        jni.jobject => return struct {
-            pub fn from(obj: jni.jobject) VmObjectRef.Nullable {
-                return VmObjectRef.Nullable{ .ptr = @ptrCast(VmObjectRef.NullablePtr, @alignCast(@alignOf(VmObjectRef.NullablePtr), obj)) };
-            }
+const VmClassRef = object.VmClassRef;
 
-            // TODO allow non nullable too
-            pub fn to(obj: VmObjectRef.Nullable) jni.jobject {
-                return @ptrCast(jni.jobject, obj.ptr);
-            }
+fn ConversionType(comptime from: type) type {
+    return switch (from) {
+        JniEnvPtr => *const JniEnv,
+
+        sys.jclass => VmClassRef.Nullable,
+        VmClassRef => sys.jclass,
+
+        sys.jobject => VmObjectRef.Nullable,
+        VmObjectRef => sys.jobject,
+
+        sys.jobjectArray => VmObjectRef.Nullable,
+        else => @compileError("TODO convert type: " ++ @typeName(from)),
+    };
+}
+
+fn vmRefToRaw(comptime T: type, vmref: anytype) T {
+    return @ptrCast(T, vmref.ptr);
+}
+
+fn rawToVmRef(comptime T: type, raw: anytype) T.Nullable {
+    return T.Nullable{ .ptr = @ptrCast(T.NullablePtr, @alignCast(@alignOf(T.NullablePtr), raw)) };
+}
+
+pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
+    return switch (@TypeOf(val)) {
+        JniEnvPtr => @ptrCast(*const JniEnv, val.*),
+        sys.jclass => blk: {
+            const java_lang_Class_instance = rawToVmRef(VmObjectRef, val).toStrong() orelse break :blk VmClassRef.Nullable.nullRef();
+            const cls = java_lang_Class_instance.get().getClassDataUnchecked();
+            break :blk cls.clone().intoNullable(); // TODO need to clone?
         },
-        else => @compileError("TODO convert jni type: " ++ @typeName(jni_type)),
+        VmClassRef => vmRefToRaw(sys.jclass, val.get().getClassInstance().clone()),
+
+        sys.jobjectArray => rawToVmRef(VmObjectRef, val),
+
+        sys.jobject => rawToVmRef(VmObjectRef, val),
+        VmObjectRef => vmRefToRaw(sys.jobject, val),
+
+        else => @compileError("TODO convert from " ++ @typeName(@TypeOf(val))),
+    };
+}
+
+
+pub fn convertObject(comptime T: type, val: VmObjectRef.Nullable) T {
+    switch (T) {
+        sys.jclass, sys.jthrowable, sys.jstring, sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray, sys.jweak => {},
+        else => @compileError("cannot convert " ++ @typeName(T) ++ " to jobject"),
     }
+
+    return vmRefToRaw(T, val);
 }
