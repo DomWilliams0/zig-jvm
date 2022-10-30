@@ -185,8 +185,8 @@ pub const InsnContext = struct {
     /// Returns BORROWED reference
     fn resolveClassWithLoader(self: @This(), name: []const u8, comptime resolution: ClassResolution, loader: classloader.WhichLoader) Error!VmClassRef {
         // resolve
-        std.log.debug("resolving class {s}", .{name});
-        const loaded = self.thread.global.classloader.loadClass(name, loader) catch std.debug.panic("cant load", .{});
+        std.log.debug("resolving class '{s}'", .{name});
+        const loaded = try self.thread.global.classloader.loadClass(name, loader);
         // TODO cache in constant pool
 
         switch (resolution) {

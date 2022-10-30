@@ -3,6 +3,7 @@ comptime {
     validateFunctionSignatures(@import("java_lang_Class.zig"));
     validateFunctionSignatures(@import("java_lang_Object.zig"));
     validateFunctionSignatures(@import("java_lang_System.zig"));
+    validateFunctionSignatures(@import("jdk_internal_misc_Unsafe.zig"));
     validateFunctionSignatures(@import("jdk_internal_util_SystemProps.zig"));
 }
 
@@ -45,15 +46,9 @@ fn validateFunctionSignatures(comptime module: type) void {
         const method_info = @typeInfo(@TypeOf(decl.method));
 
         const expected_return_type = m.desc[std.mem.lastIndexOfScalar(u8, m.desc, ')').? + 1];
-        var actual_return_types: [2]u8 = .{0} ** 2;
-        actual_return_types[0] = switch (method_info.Fn.return_type.?) {
+        const actual_return_type = switch (method_info.Fn.return_type.?) {
             void => 'V',
-            sys.jobject => blk: {
-                // also allow arrays? TODO is this irrelevant with unique opaque types for everything now
-                // actual_return_types[1] = '[';
-                break :blk 'L';
-            },
-            sys.jclass => 'L',
+            sys.jobject, sys.jclass => 'L',
             sys.jobjectArray => '[',
             sys.jboolean => 'Z',
             sys.jint => 'I',
@@ -63,9 +58,10 @@ fn validateFunctionSignatures(comptime module: type) void {
             else => @compileError("TODO ret type " ++ @typeName(method_info.Fn.return_type.?)),
         };
 
-        if (std.mem.indexOfScalar(u8, &actual_return_types, expected_return_type) == null) {
+        if (actual_return_type != expected_return_type) {
             var expected: [1]u8 = .{expected_return_type};
-            @compileError("method return type mismatch on " ++ @typeName(module) ++ "." ++ m.method ++ ": expected " ++ expected ++ " but found " ++ actual_return_types);
+            var actual: [1]u8 = .{actual_return_type};
+            @compileError("method return type mismatch on " ++ @typeName(module) ++ "." ++ m.method ++ ": expected " ++ expected ++ " but found " ++ actual);
         }
 
         visited[decl.idx] = true;

@@ -484,6 +484,23 @@ pub const VmClass = struct {
         else
             helper.isSuperClass(self, candidate); // then S must be the same class as T, or S must be a subclass of T
     }
+
+    /// Must be array class
+    pub fn getArrayBaseOffset(self: @This()) usize {
+        std.debug.assert(self.isArray());
+        std.log.info("ARRAY OF {s} = {d}", .{ self.name, self.u.array.padding });
+        return @offsetOf(VmObject, "storage") + @sizeOf(ArrayHeader) + self.u.array.padding;
+    }
+
+    /// Must be array class
+    pub fn getArrayStride(self: @This()) usize {
+        std.debug.assert(self.isArray());
+        const elem_cls = self.u.array.elem_cls;
+        return if (elem_cls.get().isPrimitive())
+            elem_cls.get().u.primitive.size()
+        else
+            @sizeOf(usize);
+    }
 };
 
 const Monitor = struct {
