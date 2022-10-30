@@ -16,6 +16,8 @@ const preload_classes: [2]Preload = .{ .{ .cls = "[I" }, .{ .cls = "java/lang/Sy
 pub const Options = struct {
     /// Skip initialising
     no_initialise: bool = false,
+
+    skip_system: bool = false,
 };
 
 fn load(comptime opts: Options, preload: Preload, loader: *classloader.ClassLoader) !void {
@@ -70,7 +72,7 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
         try load(opts, preload, loader);
 
     // setup System class
-    {
+    if (!opts.skip_system) {
         const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
         const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
         if ((try thread.interpreter.executeUntilReturn(java_lang_System, method)) == null) {

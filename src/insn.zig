@@ -440,9 +440,16 @@ pub const InsnContext = struct {
                 error.Overflow => val1,
                 error.DivisionByZero => return error.Arithmetic,
             },
-            .shr => val1 >> @truncate(u5, @intCast(u32, val2 & 0x3f)), // TODO verify
-            .shl => val1 << @truncate(u5, @intCast(u32, val2 & 0x3f)), // TODO verify
-            .lshr => val1 >> @truncate(u5, @intCast(u32, val2 & 0x3f)), // TODO verify (definitely wrong)
+            .shr => val1 >> @truncate(u5, @intCast(u32, val2 & 0x3f)),
+            .shl => val1 << @truncate(u5, @intCast(u32, val2 & 0x3f)),
+            .lshr => blk: {
+                @setRuntimeSafety(false);
+                const x = @truncate(u5, @intCast(u32, val2 & 0x1f));
+                break :blk if (val1 >= 0)
+                    val1 >> x
+                else
+                    (val1 >> x) + (@as(i32, 2) << ~x);
+            },
         } else if (@typeInfo(T) == .Float) switch (op) {
             .add => val1 + val2,
             .sub => val1 - val2,
