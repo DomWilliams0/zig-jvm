@@ -1,12 +1,11 @@
 const std = @import("std");
-const object = @import("object.zig");
 const state = @import("state.zig");
 const Allocator = std.mem.Allocator;
 
 /// Verbose reference counting logging
 pub var logging = false;
 
-/// Never null! Pass around `Nullable`
+/// Never null! Pass around `Nullable`.
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
     return struct {
@@ -193,6 +192,11 @@ pub fn VmRef(comptime T: type) type {
         pub fn format(self: Strong, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             return Nullable.format(self.intoNullable(), fmt, options, writer);
         }
+
+        /// Pretty dangerous
+        pub fn cast(self: Strong, comptime S: type) VmRef(S) {
+            return VmRef(S){ .ptr = @ptrCast(*VmRef(S).InnerRef, self.ptr) };
+        }
     };
 }
 
@@ -203,6 +207,9 @@ pub const VmAllocator = struct {
 };
 
 test "alloc class" {
+    // TODO move this test
+    const object = @import("object.zig");
+
     // TODO undefined class instance crashes on drop, sort this out
     if (true) return error.SkipZigTest;
 

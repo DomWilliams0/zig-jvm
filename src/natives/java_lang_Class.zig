@@ -19,7 +19,12 @@ fn convertClassName(global: *jvm.state.GlobalState, name: []const u8) jvm.state.
 
 pub export fn Java_java_lang_Class_initClassName(raw_env: sys.api.JniEnvPtr, this: sys.jobject) sys.jobject {
     const obj = sys.convert(sys.jobject).from(this).toStrongUnchecked(); // `this` can't be null
-    const name = obj.get().class.get().name;
+
+    // TODO cache this somewhere
+    const classdata_field = obj.get().class.get().findFieldRecursively("classData", "Ljava/lang/Object;", .{ .private = true, .static = false }) orelse @panic("no classData in java/lang/Class");
+
+    const classdata = obj.get().getField(jvm.object.VmClassRef, classdata_field.id);
+    const name = classdata.get().name;
 
     const thread = jvm.state.thread_state();
     const str_obj = convertClassName(thread.global, name) catch |err| {

@@ -10,6 +10,7 @@ const pkg_natives = Pkg{ .name = "natives", .source = .{ .path = "src/natives/ro
 } };
 
 const pkgs = [2]Pkg{ pkg_jvm, pkg_natives };
+var build_helpers = false;
 
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
@@ -62,20 +63,22 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run JVM (or test runner with -testrunner)");
     run_step.dependOn(&run_cmd.step);
 
-    const native_finder = b.addExecutable("native-finder", "src/scripts/native-finder.zig");
-    inline for (pkgs) |pkg| native_finder.addPackage(pkg);
-    native_finder.setTarget(target);
-    native_finder.setBuildMode(mode);
-    native_finder.linkLibC();
-    native_finder.install();
-    const native_finder_cmd = native_finder.run();
-    native_finder_cmd.step.dependOn(b.getInstallStep());
-    if (args) |a| {
-        native_finder_cmd.addArgs(a);
-    }
+    if (build_helpers) {
+        const native_finder = b.addExecutable("native-finder", "src/scripts/native-finder.zig");
+        inline for (pkgs) |pkg| native_finder.addPackage(pkg);
+        native_finder.setTarget(target);
+        native_finder.setBuildMode(mode);
+        native_finder.linkLibC();
+        native_finder.install();
+        const native_finder_cmd = native_finder.run();
+        native_finder_cmd.step.dependOn(b.getInstallStep());
+        if (args) |a| {
+            native_finder_cmd.addArgs(a);
+        }
 
-    const native_finder_step = b.step("find-natives", "Discover native methods");
-    native_finder_step.dependOn(&native_finder_cmd.step);
+        const native_finder_step = b.step("find-natives", "Discover native methods");
+        native_finder_step.dependOn(&native_finder_cmd.step);
+    }
 
     const exe_tests = b.addTest("src/object.zig");
     exe_tests.setTarget(target);

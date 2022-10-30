@@ -44,8 +44,8 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
         const java_lang_Class = loader.getLoadedBootstrapClass("java/lang/Class").?;
 
         // fix up class vmdata pointers
-        java_lang_Object.get().class_instance = try loader.allocJavaLangClassInstance();
-        java_lang_Class.get().class_instance = try loader.allocJavaLangClassInstance();
+        java_lang_Object.get().class_instance = try loader.allocJavaLangClassInstance(java_lang_Object);
+        java_lang_Class.get().class_instance = try loader.allocJavaLangClassInstance(java_lang_Class);
 
         // initialise
         try object.VmClass.ensureInitialised(java_lang_Object);

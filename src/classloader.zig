@@ -262,8 +262,9 @@ pub const ClassLoader = struct {
             .super_cls = java_lang_Object.clone().intoNullable(),
             .interfaces = &.{}, // TODO
             .loader = loader.clone(),
-            .class_instance = try self.allocJavaLangClassInstance(),
+            .class_instance = undefined, // set next
         };
+        class.get().class_instance = try self.allocJavaLangClassInstance(class);
 
         return class;
     }
@@ -305,19 +306,22 @@ pub const ClassLoader = struct {
             .status = .{ .ty = .primitive },
             .interfaces = &.{},
             .loader = .bootstrap,
-            .class_instance = try self.allocJavaLangClassInstance(),
+            .class_instance = undefined, // set next
         };
+        class.get().class_instance = try self.allocJavaLangClassInstance(class);
 
         entry.* = class.intoNullable();
         return class; // borrowed
     }
 
-    pub fn allocJavaLangClassInstance(self: *Self) error{OutOfMemory}!VmObjectRef.Nullable {
+    pub fn allocJavaLangClassInstance(self: *Self, cls: VmClassRef) error{OutOfMemory}!VmObjectRef.Nullable {
         const java_lang_Class = self.getLoadedBootstrapClass("java/lang/Class") orelse return VmObjectRef.Nullable.nullRef();
 
         const obj = try object.VmClass.instantiateObject(java_lang_Class);
 
-        // TODO set fields
+        // classdata = VmClassRef
+        const class_data_field = java_lang_Class.get().findFieldRecursively("classData", "Ljava/lang/Object;", .{ .private = true, .static = false }) orelse @panic("no classData in java/lang/Class"); // TODO method to find guaranteed field or panic with this msg
+        obj.get().getField(VmObjectRef, class_data_field.id).* = cls.clone().cast(object.VmObject);
 
         return obj.intoNullable();
     }
@@ -358,8 +362,9 @@ pub const ClassLoader = struct {
                 },
             },
             .loader = loader.clone(),
-            .class_instance = try self.allocJavaLangClassInstance(),
+            .class_instance = undefined, // set next
         };
+        class.get().class_instance = try self.allocJavaLangClassInstance(class);
 
         // preparation
         var layout: object.ObjectLayout = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class.toStrong()) |super| super.get().u.obj.layout else .{};

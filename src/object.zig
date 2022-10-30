@@ -28,7 +28,6 @@ pub const VmClass = struct {
     /// Null only during early preload before java/lang/Class is loaded
     class_instance: VmObjectRef.Nullable,
 
-    /// Only fields for this class
     u: union {
         /// Object class with fields
         obj: struct {
