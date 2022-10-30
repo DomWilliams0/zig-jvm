@@ -429,7 +429,10 @@ pub const InsnContext = struct {
     /// There is no overhead to returning and handling Error!void for binary ops that never return an error
     /// (all non .div ones)
     fn binaryOp(self: @This(), comptime T: type, comptime op: BinaryOp) Error!void {
-        const val2 = self.operandStack().popWiden(T);
+        // special case for i64 ops, where val2 is an int instead of a long
+        const val2_ty = if (T == i64 and (op == .shl or op == .shr or op == .lshr)) i32 else T;
+
+        const val2 = self.operandStack().popWiden(val2_ty);
         const val1 = self.operandStack().popWiden(T);
 
         const result = if (@typeInfo(T) == .Int) switch (op) {
@@ -444,11 +447,12 @@ pub const InsnContext = struct {
             .shl => val1 << @truncate(u5, @intCast(u32, val2 & 0x3f)),
             .lshr => blk: {
                 @setRuntimeSafety(false);
-                const x = @truncate(u5, @intCast(u32, val2 & 0x1f));
+                const unsigned = std.meta.Int(.unsigned, std.meta.bitCount(T));
+                const x = @truncate(u5, @intCast(unsigned, val2 & 0x1f));
                 break :blk if (val1 >= 0)
                     val1 >> x
                 else
-                    (val1 >> x) + (@as(i32, 2) << ~x);
+                    (val1 >> x) + (@as(T, 2) << ~x);
             },
             .bit_and => val1 & val2,
             .bit_or => val1 | val2,
