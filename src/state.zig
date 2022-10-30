@@ -131,6 +131,7 @@ pub const ExceptionError = error{
     ArrayIndexOutOfBounds,
     AbstractMethod,
     Arithmetic,
+    ClassCast,
 };
 
 /// Either exceptions or fatal errors
@@ -150,6 +151,7 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
         error.ArrayIndexOutOfBounds => "java/lang/ArrayIndexOutOfBoundsException",
         error.AbstractMethod => "java/lang/AbstractMethodError",
         error.Arithmetic => "java/lang/ArithmeticException",
+        error.ClassCast => "java/lang/ClassCastException",
 
         else => return null,
     };

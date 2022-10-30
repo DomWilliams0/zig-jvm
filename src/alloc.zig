@@ -123,6 +123,10 @@ pub fn VmRef(comptime T: type) type {
                 return Strong{ .ptr = self.ptr.? };
             }
 
+            pub fn cmpPtr(self: Nullable, other: Nullable) bool {
+                return self.ptr == other.ptr;
+            }
+
             pub fn format(self: Nullable, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
                 _ = fmt;
                 if (self.toStrong()) |strong| {

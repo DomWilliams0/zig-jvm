@@ -514,6 +514,32 @@ pub const InsnContext = struct {
             self.goto(2 + 1);
         }
     }
+
+    fn ifACmp(self: @This(), comptime op: BinaryCmp) void {
+        const val2 = self.operandStack().pop(VmObjectRef.Nullable);
+        const val1 = self.operandStack().pop(VmObjectRef.Nullable);
+
+        const branch = switch (op) {
+            .eq => val1.cmpPtr(val2),
+            .ne => !val1.cmpPtr(val2),
+            else => @compileError("invalid op for acmp"),
+        };
+
+        std.log.debug("acmp: {} {s} {} = {}{s}", .{ val1, @tagName(op), val2, branch, blk: {
+            var buf: [32]u8 = undefined;
+            break :blk if (branch)
+                std.fmt.bufPrint(&buf, ", so jmp +{d}", .{self.readI16()}) catch unreachable
+            else
+                "";
+        } });
+
+        if (branch) {
+            self.goto(self.readI16());
+        } else {
+            // manually increment pc past this insn (and size 2)
+            self.goto(2 + 1);
+        }
+    }
     fn ifNull(self: @This(), comptime inverse: bool) void {
         const val = self.operandStack().pop(VmObjectRef.Nullable);
         const branch = val.isNull() != inverse;
@@ -1127,6 +1153,13 @@ pub const handlers = struct {
         ctxt.ifNull(true);
     }
 
+    pub fn _if_acmpeq(ctxt: InsnContext) void {
+        ctxt.ifACmp(.eq);
+    }
+    pub fn _if_acmpne(ctxt: InsnContext) void {
+        ctxt.ifACmp(.ne);
+    }
+
     pub fn _iinc(ctxt: InsnContext) void {
         var lvar = ctxt.localVars().get(i32, ctxt.readU8());
         const offset = @intCast(i32, ctxt.readSecondI8());
@@ -1214,6 +1247,29 @@ pub const handlers = struct {
     pub fn _monitorexit(ctxt: InsnContext) Error!void {
         const obj = ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong() orelse return error.NullPointer;
         std.log.warn("monitorexit {?} not implemented", .{obj});
+    }
+
+    pub fn _instanceof(ctxt: InsnContext) Error!void {
+        const obj = ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong() orelse {
+            ctxt.operandStack().push(@as(i32, 0));
+            return;
+        };
+
+        const cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
+        const cls = try ctxt.resolveClass(cls_name, .resolve_only);
+        const result = object.VmClass.isInstanceOf(cls, obj.get().class);
+        std.log.debug("isinstanceof({?}, {s}) = {any}", .{ obj, cls.get().name, result });
+        ctxt.operandStack().push(@as(i32, @boolToInt(result)));
+    }
+    pub fn _checkcast(ctxt: InsnContext) Error!void {
+        const obj = ctxt.operandStack().peekAt(VmObjectRef.Nullable, 0).toStrong() orelse return;
+
+        const cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
+        const cls = try ctxt.resolveClass(cls_name, .resolve_only);
+        const result = object.VmClass.isInstanceOf(cls, obj.get().class);
+        std.log.debug("checkcast({?}, {s}) = {any}", .{ obj, cls.get().name, result });
+        if (!result)
+            return error.ClassCast;
     }
 };
 
