@@ -176,6 +176,24 @@ pub const Frame = struct {
             }
         }
 
+        pub fn insertAt(self: *@This(), comptime idx: usize, val: Frame.StackEntry) void {
+            // move up elements
+            comptime var i = 1;
+            inline while (i <= idx) : (i += 1) {
+                const src = (self.stack - i)[0];
+                var dst = &(self.stack - i + 1)[0];
+                dst.* = src;
+            }
+
+            // insert new element
+            (self.stack - idx)[0] = val;
+            self.stack += 1;
+
+            if (logging) {
+                std.log.debug("operand stack: inserted at #{d} ({s}): {?}", .{ self.depth() - 1 - idx, @tagName(val.ty), val });
+            }
+        }
+
         pub fn peekRaw(self: @This()) Frame.StackEntry {
             std.debug.assert(!self.isEmpty());
             return (self.stack - 1)[0];

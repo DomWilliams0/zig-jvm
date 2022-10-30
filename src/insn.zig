@@ -424,7 +424,7 @@ pub const InsnContext = struct {
         };
     }
 
-    const BinaryOp = enum { add, sub, mul, div, lshr, shr, shl };
+    const BinaryOp = enum { add, sub, mul, div, lshr, shr, shl, bit_and, bit_or, bit_xor };
 
     /// There is no overhead to returning and handling Error!void for binary ops that never return an error
     /// (all non .div ones)
@@ -450,12 +450,15 @@ pub const InsnContext = struct {
                 else
                     (val1 >> x) + (@as(i32, 2) << ~x);
             },
+            .bit_and => val1 & val2,
+            .bit_or => val1 | val2,
+            .bit_xor => val1 ^ val2,
         } else if (@typeInfo(T) == .Float) switch (op) {
             .add => val1 + val2,
             .sub => val1 - val2,
             .mul => val1 * val2,
             .div => val1 / val2,
-            .shl, .shr, .lshr => @compileError("unsupported shift op"),
+            else => @compileError("unsupported float op"),
         } else @compileError("not int or float");
 
         std.log.debug("{} {s} {} = {}", .{ val1, switch (op) {
@@ -466,6 +469,9 @@ pub const InsnContext = struct {
             .lshr => "logical>>",
             .shr => ">>",
             .shl => "<<",
+            .bit_and => "&",
+            .bit_or => "|",
+            .bit_xor => "^",
         }, val2, result });
 
         self.operandStack().push(result);
@@ -924,6 +930,11 @@ pub const handlers = struct {
         var stack = ctxt.operandStack();
         stack.pushRaw(stack.peekRaw());
     }
+    pub fn _dup_x1(ctxt: InsnContext) void {
+        var stack = ctxt.operandStack();
+        const val = stack.peekRaw();
+        stack.insertAt(2, val);
+    }
 
     pub fn _pop(ctxt: InsnContext) void {
         _ = ctxt.operandStack().popRaw();
@@ -997,6 +1008,15 @@ pub const handlers = struct {
     pub fn _ishl(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i32, .shl);
     }
+    pub fn _iand(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i32, .bit_and);
+    }
+    pub fn _ior(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i32, .bit_or);
+    }
+    pub fn _ixor(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i32, .bit_xor);
+    }
 
     pub fn _ladd(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i64, .add);
@@ -1018,6 +1038,15 @@ pub const handlers = struct {
     }
     pub fn _lshl(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i64, .shl);
+    }
+    pub fn _land(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i64, .bit_and);
+    }
+    pub fn _lor(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i64, .bit_or);
+    }
+    pub fn _lxor(ctxt: InsnContext) Error!void {
+        return ctxt.binaryOp(i64, .bit_xor);
     }
 
     pub fn _fadd(ctxt: InsnContext) Error!void {
