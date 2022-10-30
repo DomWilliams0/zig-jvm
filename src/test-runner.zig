@@ -7,8 +7,32 @@ const arg = @import("arg.zig");
 const Allocator = std.mem.Allocator;
 
 pub const log_level: std.log.Level = .debug;
+var log_file: ?std.fs.File = null;
+var log_mutex: std.Thread.Mutex = .{};
+
+fn openLogFile() !void {
+    if (log_file != null) @panic("log file already initialised");
+
+    const file = try std.fs.createFileAbsolute("/tmp/jvmlog", .{});
+    log_file = file;
+}
+
+fn closeLogFile() void {
+    log_mutex.lock();
+    defer log_mutex.unlock();
+
+    if (log_file) |f| {
+        f.close();
+        log_file = null;
+    }
+}
 
 pub fn main() !void {
+    openLogFile() catch |e| {
+        std.log.warn("couldn't open log file: {any}", .{e});
+    };
+    defer closeLogFile();
+
     std.log.info("running test runner", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
@@ -142,10 +166,22 @@ const Test = struct {
             return E.Failed;
         }
     }
-
-    fn exceptionToString(exc: jvm.VmObjectRef) ?[]const u8 {
-        const exc_str_obj = (jvm.object.VmObject.toString(exc) catch return null).toStrong() orelse return null;
-        const exc_str = exc_str_obj.get().getStringValue();
-        return exc_str;
-    }
 };
+
+pub fn log(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    std.log.defaultLog(message_level, scope, format, args);
+
+    if (log_file) |f| {
+        log_mutex.lock();
+        defer log_mutex.unlock();
+
+        const level_txt = comptime message_level.asText();
+        const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+        nosuspend f.writer().print(level_txt ++ prefix2 ++ format ++ "\n", args) catch {};
+    }
+}
