@@ -60,6 +60,15 @@ pub export fn Java_java_lang_Class_getPrimitiveClass(raw_env: JniEnvPtr, cls: sy
     return jni.convert(prim_cls);
 }
 
+pub export fn Java_java_lang_Class_isPrimitive(raw_env: JniEnvPtr, jcls: sys.jclass) sys.jboolean {
+    const cls = jni.convert(jcls).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return sys.JNI_FALSE;
+    };
+
+    return jni.convert(cls.get().isPrimitive());
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Class_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_Class_forName0", .desc = "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;" },

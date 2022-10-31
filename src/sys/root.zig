@@ -20,6 +20,8 @@ fn ConversionType(comptime from: type) type {
 
         sys.jobjectArray => VmObjectRef.Nullable,
         sys.jstring => VmObjectRef.Nullable,
+
+        bool => sys.jboolean,
         else => @compileError("TODO convert type: " ++ @typeName(from)),
     };
 }
@@ -47,6 +49,8 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
 
         sys.jobject => rawToVmRef(VmObjectRef, val),
         VmObjectRef => vmRefToRaw(sys.jobject, val),
+
+        bool => if (val) sys.JNI_TRUE else sys.JNI_FALSE,
 
         else => @compileError("TODO convert from " ++ @typeName(@TypeOf(val))),
     };

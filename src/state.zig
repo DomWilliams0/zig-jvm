@@ -129,10 +129,12 @@ pub const ExceptionError = error{
     NullPointer,
     NegativeArraySize,
     ArrayIndexOutOfBounds,
+    ArrayStore,
     AbstractMethod,
     Arithmetic,
     ClassCast,
     ClassNotFound,
+    IndexOutOfBounds,
 };
 
 /// Either exceptions or fatal errors
@@ -150,10 +152,12 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
         error.NullPointer => "java/lang/NullPointerException",
         error.NegativeArraySize => "java/lang/NegativeArraySizeException",
         error.ArrayIndexOutOfBounds => "java/lang/ArrayIndexOutOfBoundsException",
+        error.ArrayStore => "java/lang/ArrayStoreException",
         error.AbstractMethod => "java/lang/AbstractMethodError",
         error.Arithmetic => "java/lang/ArithmeticException",
         error.ClassCast => "java/lang/ClassCastException",
         error.ClassNotFound => "java/lang/ClassNotFoundException",
+        error.IndexOutOfBounds => "java/lang/IndexOutOfBoundsException",
 
         else => return null,
     };

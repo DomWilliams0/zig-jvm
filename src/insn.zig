@@ -575,11 +575,23 @@ pub const InsnContext = struct {
         }
     }
 
-    fn fcmp(self: @This(), comptime nan_result: i32) void {
-        const val2 = self.operandStack().pop(f32);
-        const val1 = self.operandStack().pop(f32);
+    fn compare(self: @This(), comptime behaviour: union(enum) { nan_is_1: type, nan_is_m1: type, long }) void {
+        const T = switch (behaviour) {
+            .nan_is_1 => |t| t,
+            .nan_is_m1 => |t| t,
+            .long => i64,
+        };
+        const val2 = self.operandStack().pop(T);
+        const val1 = self.operandStack().pop(T);
 
-        const result: i32 = if (std.math.isNan(val1) or std.math.isNan(val2)) nan_result else if (val1 > val2) 1 else if (val1 == val2) 0 else -1;
+        const result: i32 = if (@typeInfo(T) == .Float and (std.math.isNan(val1) or std.math.isNan(val2)))
+            switch (behaviour) {
+                .nan_is_1 => 1,
+                .nan_is_m1 => -1,
+                else => unreachable,
+            }
+        else if (val1 > val2) 1 else if (val1 == val2) 0 else -1;
+
         self.operandStack().push(result);
     }
 
@@ -1244,10 +1256,19 @@ pub const handlers = struct {
         ctxt.ifACmp(.ne);
     }
     pub fn _fcmpg(ctxt: InsnContext) void {
-        ctxt.fcmp(1);
+        ctxt.compare(.{ .nan_is_1 = f32 });
     }
     pub fn _fcmpl(ctxt: InsnContext) void {
-        ctxt.fcmp(-1);
+        ctxt.compare(.{ .nan_is_m1 = f32 });
+    }
+    pub fn _dcmpg(ctxt: InsnContext) void {
+        ctxt.compare(.{ .nan_is_1 = f64 });
+    }
+    pub fn _dcmpl(ctxt: InsnContext) void {
+        ctxt.compare(.{ .nan_is_m1 = f64 });
+    }
+    pub fn _lcmp(ctxt: InsnContext) void {
+        ctxt.compare(.long);
     }
 
     pub fn _iinc(ctxt: InsnContext) void {
