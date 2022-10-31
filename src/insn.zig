@@ -635,6 +635,17 @@ pub const InsnContext = struct {
         else
             @floatCast(to, val);
 
+        if (from == i32) {
+            if (to_int) |i| {
+                if (i.bits < 32) {
+                    // i2X extends back up to int again
+                    const extended_val = @intCast(i32, new_val);
+                    self.operandStack().push(extended_val);
+                    return;
+                }
+            }
+        }
+
         self.operandStack().push(new_val);
     }
 
