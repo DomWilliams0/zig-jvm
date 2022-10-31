@@ -1,0 +1,47 @@
+const std = @import("std");
+const jvm = @import("jvm");
+const jni = jvm.jni;
+const sys = jni.sys;
+const JniEnvPtr = jvm.jni.JniEnvPtr;
+
+pub const methods = [_]@import("root.zig").JniMethod{
+    .{ .method = "Java_sun_nio_ch_Net_isIPv6Available0", .desc = "()Z" },
+    .{ .method = "Java_sun_nio_ch_Net_isReusePortAvailable0", .desc = "()Z" },
+    .{ .method = "Java_sun_nio_ch_Net_isExclusiveBindAvailable", .desc = "()I" },
+    .{ .method = "Java_sun_nio_ch_Net_shouldSetBothIPv4AndIPv6Options0", .desc = "()Z" },
+    .{ .method = "Java_sun_nio_ch_Net_canIPv6SocketJoinIPv4Group0", .desc = "()Z" },
+    .{ .method = "Java_sun_nio_ch_Net_canJoin6WithIPv4Group0", .desc = "()Z" },
+    .{ .method = "Java_sun_nio_ch_Net_canUseIPv6OptionsWithIPv4LocalAddress0", .desc = "()Z" },
+    .{ .method = "Java_sun_nio_ch_Net_socket0", .desc = "(ZZZZ)I" },
+    .{ .method = "Java_sun_nio_ch_Net_bind0", .desc = "(Ljava/io/FileDescriptor;ZZLjava/net/InetAddress;I)V" },
+    .{ .method = "Java_sun_nio_ch_Net_listen", .desc = "(Ljava/io/FileDescriptor;I)V" },
+    .{ .method = "Java_sun_nio_ch_Net_connect0", .desc = "(ZLjava/io/FileDescriptor;Ljava/net/InetAddress;I)I" },
+    .{ .method = "Java_sun_nio_ch_Net_accept", .desc = "(Ljava/io/FileDescriptor;Ljava/io/FileDescriptor;[Ljava/net/InetSocketAddress;)I" },
+    .{ .method = "Java_sun_nio_ch_Net_shutdown", .desc = "(Ljava/io/FileDescriptor;I)V" },
+    .{ .method = "Java_sun_nio_ch_Net_localPort", .desc = "(Ljava/io/FileDescriptor;)I" },
+    .{ .method = "Java_sun_nio_ch_Net_localInetAddress", .desc = "(Ljava/io/FileDescriptor;)Ljava/net/InetAddress;" },
+    .{ .method = "Java_sun_nio_ch_Net_remotePort", .desc = "(Ljava/io/FileDescriptor;)I" },
+    .{ .method = "Java_sun_nio_ch_Net_remoteInetAddress", .desc = "(Ljava/io/FileDescriptor;)Ljava/net/InetAddress;" },
+    .{ .method = "Java_sun_nio_ch_Net_getIntOption0", .desc = "(Ljava/io/FileDescriptor;ZII)I" },
+    .{ .method = "Java_sun_nio_ch_Net_setIntOption0", .desc = "(Ljava/io/FileDescriptor;ZIIIZ)V" },
+    .{ .method = "Java_sun_nio_ch_Net_poll", .desc = "(Ljava/io/FileDescriptor;IJ)I" },
+    .{ .method = "Java_sun_nio_ch_Net_pollConnect", .desc = "(Ljava/io/FileDescriptor;J)Z" },
+    .{ .method = "Java_sun_nio_ch_Net_available", .desc = "(Ljava/io/FileDescriptor;)I" },
+    .{ .method = "Java_sun_nio_ch_Net_sendOOB", .desc = "(Ljava/io/FileDescriptor;B)I" },
+    .{ .method = "Java_sun_nio_ch_Net_discardOOB", .desc = "(Ljava/io/FileDescriptor;)Z" },
+    .{ .method = "Java_sun_nio_ch_Net_joinOrDrop4", .desc = "(ZLjava/io/FileDescriptor;III)I" },
+    .{ .method = "Java_sun_nio_ch_Net_blockOrUnblock4", .desc = "(ZLjava/io/FileDescriptor;III)I" },
+    .{ .method = "Java_sun_nio_ch_Net_joinOrDrop6", .desc = "(ZLjava/io/FileDescriptor;[BI[B)I" },
+    .{ .method = "Java_sun_nio_ch_Net_blockOrUnblock6", .desc = "(ZLjava/io/FileDescriptor;[BI[B)I" },
+    .{ .method = "Java_sun_nio_ch_Net_setInterface4", .desc = "(Ljava/io/FileDescriptor;I)V" },
+    .{ .method = "Java_sun_nio_ch_Net_getInterface4", .desc = "(Ljava/io/FileDescriptor;)I" },
+    .{ .method = "Java_sun_nio_ch_Net_setInterface6", .desc = "(Ljava/io/FileDescriptor;I)V" },
+    .{ .method = "Java_sun_nio_ch_Net_getInterface6", .desc = "(Ljava/io/FileDescriptor;)I" },
+    .{ .method = "Java_sun_nio_ch_Net_initIDs", .desc = "()V" },
+    .{ .method = "Java_sun_nio_ch_Net_pollinValue", .desc = "()S" },
+    .{ .method = "Java_sun_nio_ch_Net_polloutValue", .desc = "()S" },
+    .{ .method = "Java_sun_nio_ch_Net_pollerrValue", .desc = "()S" },
+    .{ .method = "Java_sun_nio_ch_Net_pollhupValue", .desc = "()S" },
+    .{ .method = "Java_sun_nio_ch_Net_pollnvalValue", .desc = "()S" },
+    .{ .method = "Java_sun_nio_ch_Net_pollconnValue", .desc = "()S" },
+};

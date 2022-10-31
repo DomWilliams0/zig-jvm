@@ -481,7 +481,7 @@ pub const ClassLoader = struct {
         /// Null terminated
         buf: std.ArrayList(u8),
 
-        fn escape(out: *std.ArrayList(u8), name: []const u8) !void {
+        pub fn escape(out: *std.ArrayList(u8), name: []const u8) !void {
             try out.ensureUnusedCapacity(name.len);
 
             var utf8 = (try std.unicode.Utf8View.init(name)).iterator();
