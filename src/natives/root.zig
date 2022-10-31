@@ -38,9 +38,15 @@ fn validateFunctionSignatures(comptime module: type) void {
         const decl = for (decls) |d, i| {
             if (std.mem.eql(u8, d.name, m.method)) break .{ .idx = i, .method = @field(module, m.method) };
         } else {
-            // TODO generate a panicking stub instead
+            // generate a panicking stub instead
+            const S = struct {
+                fn panic_stub() callconv(.C) noreturn {
+                    std.debug.panic("unimplemented native method {s}", .{m.method});
+                }
+            };
+
+            @export(S.panic_stub, .{ .name = m.method });
             continue;
-            // @compileError("missing method decl " ++ @typeName(module) ++ "." ++ m.method);
         };
 
         const method_info = @typeInfo(@TypeOf(decl.method));
