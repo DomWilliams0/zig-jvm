@@ -14,13 +14,11 @@ const Preload = struct {
 const preload_classes: [2]Preload = .{ .{ .cls = "[I" }, .{ .cls = "java/lang/System", .initialise = true } };
 
 pub const Options = struct {
-    /// Skip initialising
-    no_initialise: bool = false,
-
     skip_system: bool = false,
 };
 
 fn load(comptime opts: Options, preload: Preload, loader: *classloader.ClassLoader) !void {
+    _ = opts;
     // TODO check for array
     // TODO handle user loader
 
@@ -28,7 +26,7 @@ fn load(comptime opts: Options, preload: Preload, loader: *classloader.ClassLoad
     // TODO variant with comptime bootstrap loader
     const cls = try loader.loadClass(preload.cls, .bootstrap);
 
-    if (!opts.no_initialise and preload.initialise)
+    if (preload.initialise)
         try object.VmClass.ensureInitialised(cls);
 }
 
