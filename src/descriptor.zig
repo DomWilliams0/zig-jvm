@@ -87,7 +87,7 @@ pub const FieldDescriptor = struct {
             'J' => .{ .primitive = .long },
             'S' => .{ .primitive = .short },
             'Z' => .{ .primitive = .boolean },
-            'L' => .{ .reference = self.str[1 .. self.str.len - 2] },
+            'L' => .{ .reference = self.str[1 .. self.str.len - 1] },
             '[' => .{ .array = self.str[1..] },
             else => unreachable, // verified
         };
@@ -235,8 +235,19 @@ test "valid method descriptors" {
 }
 
 test "getType" {
-    try std.testing.expectEqual(.{ .primitive = .int }, FieldDescriptor.new("I").?.getType());
-    try std.testing.expectEqual(.{ .reference = "java/lang/String" }, FieldDescriptor.new("Ljava/lang/String;").?.getType());
-    try std.testing.expectEqual(.{ .array = "S" }, FieldDescriptor.new("[S").?.getType());
-    try std.testing.expectEqual(.{ .array = "[I" }, FieldDescriptor.new("[[I").?.getType());
+    const S = struct {
+        fn check(desc: []const u8, expected: @typeInfo(@TypeOf(FieldDescriptor.getType)).Fn.return_type.?) !void {
+            const ty = FieldDescriptor.new(desc).?.getType();
+
+            try switch (expected) {
+                .primitive => std.testing.expectEqual(ty, expected),
+                .array => |s| std.testing.expectEqualStrings(s, ty.array),
+                .reference => |s| std.testing.expectEqualStrings(s, ty.reference),
+            };
+        }
+    };
+    try S.check("I", .{ .primitive = .int });
+    try S.check("Ljava/lang/String;", .{ .reference = "java/lang/String" });
+    try S.check("[S", .{ .array = "S" });
+    try S.check("[[I", .{ .array = "[I" });
 }
