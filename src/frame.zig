@@ -5,7 +5,7 @@ const desc = @import("descriptor.zig");
 const types = @import("type.zig");
 const Allocator = std.mem.Allocator;
 
-pub const logging = std.log.level == .debug and !@import("builtin").is_test;
+pub const logging = std.log.level == .debug; // and !@import("builtin").is_test;
 
 pub const Frame = struct {
     method: *const cafebabe.Method,
@@ -278,7 +278,6 @@ pub const Frame = struct {
         }
 
         pub fn transferToCallee(self: *@This(), callee: *LocalVars, method: desc.MethodDescriptor, implicit_this: bool) void {
-            // TODO cache u8 indices of wide args in method
             var src: u16 = 0;
             var dst: u16 = 0;
             var last_copy: u16 = 0;
@@ -295,6 +294,14 @@ pub const Frame = struct {
                     // wide, copy everything up to here including this double
                     const n = src - last_copy + 1;
                     std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+
+                    // mark as initialised for logging
+                    if (logging) {
+                        var i: u16 = dst;
+                        while (i < dst + n) : (i += 1)
+                            callee.setInitialised(i);
+                    }
+
                     dst += n + 1;
                     src += 1;
                     last_copy = src;
@@ -303,14 +310,15 @@ pub const Frame = struct {
                     src += 1;
                 }
             }
-
-            // copy final args
+            // final args
             const n = src - last_copy;
-            std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
-            if (logging) {
-                var i: u16 = 0;
-                while (i < param_count) : (i += 1)
-                    callee.setInitialised(i);
+            if (n > 0) {
+                std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+                if (logging) {
+                    var i: u16 = dst;
+                    while (i < dst + n) : (i += 1)
+                        callee.setInitialised(i);
+                }
             }
 
             // shrink source
@@ -346,10 +354,13 @@ pub const Frame = struct {
             return &self.vars[idx];
         }
 
+        /// Nop if not logging
+        pub fn deinit(self: *@This()) void {
+            if (logging) self.initialised.deinit();
+        }
+
         pub fn log(self: @This(), max: u16) void {
             if (!logging) return;
-
-            // TODO track if written yet when logging, to not print undefined memory
 
             var ptr = self.vars;
             _ = ptr;
@@ -610,7 +621,7 @@ test "operand stack" {
     try std.testing.expect(stack.isEmpty());
 }
 
-test "operands to callee local vars" {
+test "operands to callee local vars IDFJZS" {
     const method = desc.MethodDescriptor.new("(IDFJZS)V").?;
 
     // setup stack
@@ -625,7 +636,8 @@ test "operands to callee local vars" {
 
     // setup local vars
     var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
-    var vars = try Frame.LocalVars.new(&o_lvars, std.testing.allocator, 3);
+    var vars = try Frame.LocalVars.new(&o_lvars, std.testing.allocator, 10);
+    defer vars.deinit();
 
     stack.transferToCallee(&vars, method, false);
 }
@@ -644,12 +656,42 @@ test "operands to callee local vars II" {
     // setup local vars
     var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var vars = try Frame.LocalVars.new(&o_lvars, std.testing.allocator, 10);
+    defer vars.deinit();
 
     stack.transferToCallee(&vars, method, true); // implicit this
 
     try std.testing.expectEqual(vars.get(object.VmObjectRef.Nullable, 0).*, object.VmObjectRef.Nullable.nullRef());
     try std.testing.expectEqual(vars.get(i32, 1).*, 10);
     try std.testing.expectEqual(vars.get(i32, 2).*, 25);
+}
+
+test "operands to callee local vars JZ" {
+    const method = desc.MethodDescriptor.new("(JZ)J").?;
+
+    // setup stack
+    var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&o_backing);
+    // static method so no ths
+    stack.push(@as(i64, 5_000_000));
+    stack.push(@as(bool, true)); // top of stack
+    stack.log();
+
+    // setup local vars
+    var o_lvars = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var vars = try Frame.LocalVars.new(&o_lvars, std.testing.allocator, 10);
+    defer vars.deinit();
+
+    stack.transferToCallee(&vars, method, false); // implicit this
+
+    try std.testing.expectEqual(vars.get(i64, 0).*, 5_000_000);
+    try std.testing.expectEqual(vars.get(bool, 2).*, true);
+
+    if (logging) {
+        try std.testing.expect(vars.initialised.isSet(0));
+        try std.testing.expect(!vars.initialised.isSet(1));
+        try std.testing.expect(vars.initialised.isSet(2));
+        try std.testing.expect(!vars.initialised.isSet(3));
+    }
 }
 
 test "operand stack push and pop" {
