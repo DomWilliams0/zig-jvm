@@ -590,12 +590,20 @@ pub const VmObject = struct {
 
     /// Runs `toString()` and returns the string ref. Slow, for debugging.
     /// Null if interface or primitive or method not found
-    pub fn toString(self: VmObjectRef) Error!VmObjectRef.Nullable {
+    pub fn toString(self: VmObjectRef) VmObjectRef.Nullable {
         const obj = self.get();
         const cls = obj.class.get();
 
-        if (cls.isInterface())
+        // TODO support arrays?
+        if (cls.isInterface() or cls.isArray())
             return nullRef(VmObject);
+
+        if (state.thread_state().interpreter.top_frame) |f| {
+            if (std.mem.eql(u8, f.method.name, "toString")) {
+                // avoid recursive call
+                return nullRef(VmObject);
+            }
+        }
 
         const toString_method = VmClass.findMethodRecursive(obj.class, "toString", "()Ljava/lang/String;") orelse return nullRef(VmObject);
         const selected_method = VmClass.selectMethod(obj.class, toString_method.method);
@@ -613,17 +621,20 @@ pub const VmObject = struct {
         return ret.convertTo(VmObjectRef.Nullable);
     }
 
-    /// Borrowed unmodified slice to value of this java.lang.String.
-    pub fn getStringValue(
+    /// Copy of string encoded to utf8
+    /// Returns null if not a string
+    pub fn getStringValueUtf8(
         self: *@This(),
-    ) ?[]const u8 {
-        const strings = &state.thread_state().global.string_pool;
+        alloc: std.mem.Allocator,
+    ) error{ OutOfMemory, IllegalArgument }!?[:0]const u8 {
+        const global = state.thread_state().global;
+        const strings = global.string_pool;
         if (!self.class.cmpPtr(strings.java_lang_String.toStrongUnchecked())) return null;
         var byte_array = self.getField(VmObjectRef.Nullable, strings.field_value).*.toStrong() orelse return null;
         const array = byte_array.get().getArrayHeader();
-        const raw_bytes = array.getElems(u8);
-        // TODO decode utf16
-        return raw_bytes;
+        return std.unicode.utf16leToUtf8AllocZ(alloc, array.getElems(u16)) catch |e| {
+            return if (e == error.OutOfMemory) error.OutOfMemory else error.IllegalArgument;
+        };
     }
 
     /// Must be an instance of java/lang/Class, and must be called post-bootstrap. Returns borrowed ref
@@ -635,6 +646,41 @@ pub const VmObject = struct {
         const field_opt = self_mut.getField(VmObjectRef.Nullable, fid);
         const field = field_opt.toStrongUnchecked();
         return field.cast(VmClass);
+    }
+};
+
+pub const ToString = struct {
+    str: []const u8,
+    alloc: ?std.mem.Allocator,
+
+    const ERR: @This() = .{ .str = "<error calling toString>", .alloc = null };
+
+    /// Returns constant error string on any error
+    pub fn new(alloc: std.mem.Allocator, obj: VmObjectRef) ToString {
+        const str = (try_new(alloc, obj) catch return ERR) orelse return ERR;
+        return .{ .str = str, .alloc = alloc };
+    }
+
+    /// Fills up and truncates
+    pub fn new_truncate(buf: []u8, obj: VmObjectRef) ?ToString {
+        var alloc = std.heap.FixedBufferAllocator.init(buf);
+        const str = (try_new(alloc.allocator(), obj) catch |e|
+            if (e == error.OutOfMemory)
+        blk: {
+            if (buf.len > 3)
+                std.mem.set(u8, buf[buf.len - 3 ..], '.');
+            break :blk buf;
+        } else return null) orelse return null;
+        return .{ .str = str, .alloc = null };
+    }
+
+    fn try_new(alloc: std.mem.Allocator, obj: VmObjectRef) !?[]const u8 {
+        const as_string = VmObject.toString(obj).toStrong() orelse return null;
+        return as_string.get().getStringValueUtf8(alloc);
+    }
+
+    pub fn deinit(self: @This()) void {
+        if (self.alloc) |a| a.free(self.str);
     }
 };
 

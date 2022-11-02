@@ -139,8 +139,9 @@ const Test = struct {
         const cls = try jvm.state.thread_state().global.classloader.loadClass(self.testName(), .bootstrap);
         jvm.object.VmClass.ensureInitialised(cls) catch |err| {
             if (jvm.state.thread_state().interpreter.exception.toStrong()) |exc| {
-                const exc_str = jvm.bootstrap.exceptionToString(exc);
-                std.log.err("test {s} threw exception {?} during initialisation: \"{s}\")", .{ self.testName(), exc, exc_str });
+                const exc_str = jvm.object.ToString.new(alloc, exc);
+                defer exc_str.deinit();
+                std.log.err("test {s} threw exception {?} during initialisation: \"{s}\")", .{ self.testName(), exc, exc_str.str });
             } else std.log.err("test {s} failed: {any}", .{
                 self.testName(),
                 err,
@@ -155,8 +156,9 @@ const Test = struct {
         const ret_value = try jvm.state.thread_state().interpreter.executeUntilReturn(cls, entrypoint);
         const ret_code = if (ret_value) |val| val.convertTo(i32) else {
             const exc = jvm.state.thread_state().interpreter.exception.toStrongUnchecked();
-            const exc_str = jvm.bootstrap.exceptionToString(exc);
-            std.log.err("test {s} threw exception {?}: \"{s}\"", .{ self.testName(), exc, exc_str });
+            const exc_str = jvm.object.ToString.new(alloc, exc);
+            defer exc_str.deinit();
+            std.log.err("test {s} threw exception {?}: \"{s}\"", .{ self.testName(), exc, exc_str.str });
             return E.Failed;
         };
 

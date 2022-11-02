@@ -75,15 +75,10 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
         const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
         if ((try thread.interpreter.executeUntilReturn(java_lang_System, method)) == null) {
             const exc = thread.interpreter.exception.toStrongUnchecked();
-            const exc_str = exceptionToString(exc);
-            std.log.err("initialising System threw exception {?}: \"{s}\"", .{ exc, exc_str });
+            const exc_str = object.ToString.new(thread.global.allocator.inner, exc);
+            defer exc_str.deinit();
+            std.log.err("initialising System threw exception {?}: \"{s}\"", .{ exc, exc_str.str });
             return error.InvocationError;
         }
     }
-}
-
-pub fn exceptionToString(exc: object.VmObjectRef) []const u8 {
-    const ERR = "<error calling toString>";
-    const exc_str_obj = (object.VmObject.toString(exc) catch return ERR).toStrong() orelse return ERR;
-    return exc_str_obj.get().getStringValue() orelse ERR;
 }

@@ -135,6 +135,7 @@ pub const ExceptionError = error{
     ClassCast,
     ClassNotFound,
     IndexOutOfBounds,
+    IllegalArgument,
 };
 
 /// Either exceptions or fatal errors
@@ -158,6 +159,7 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
         error.ClassCast => "java/lang/ClassCastException",
         error.ClassNotFound => "java/lang/ClassNotFoundException",
         error.IndexOutOfBounds => "java/lang/IndexOutOfBoundsException",
+        error.IllegalArgument => "java/lang/IllegalArgumentException",
 
         else => return null,
     };

@@ -38,19 +38,20 @@ pub const StringPool = struct {
         return self.java_lang_String.toStrongUnchecked();
     }
 
-    pub fn getString(self: *@This(), bytes: []const u8) error{OutOfMemory}!object.VmObjectRef {
+    pub fn getString(self: *@This(), utf8: []const u8) error{OutOfMemory, IllegalArgument}!object.VmObjectRef {
         const obj = try object.VmClass.instantiateObject(self.stringClass());
 
-        // init byte array
-        const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), bytes.len);
-        std.mem.copy(u8, value.get().getArrayHeader().getElems(u8), bytes);
+        // encode to utf16
+        const utf16_len =std.unicode.calcUtf16LeLen(utf8) catch return error.IllegalArgument;
+        const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), utf16_len*2);
+        var utf16_slice = value.get().getArrayHeader().getElems(u16);
+        _ = std.unicode.utf8ToUtf16Le(utf16_slice, utf8) catch return error.IllegalArgument;
 
         // set value field
         obj.get().getField(object.VmObjectRef, self.field_value).* = value;
         // no need to set coder field, it is always UTF16
-        // TODO encode utf16 then!
 
-        std.log.debug("created new string {?} with value '{s}'", .{ obj, bytes });
+        std.log.debug("created new string {?} with value '{s}'", .{ obj, utf8 });
         return obj;
     }
 };
