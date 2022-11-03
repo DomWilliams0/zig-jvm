@@ -59,7 +59,7 @@ pub fn main() !void {
 
     try jvm.bootstrap.initBootstrapClasses(
         &jvm_handle.global.classloader,
-        .{ .skip_system = true },
+        .{ .skip_system = true }, // skip until string concat helper actually works
     );
 
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};

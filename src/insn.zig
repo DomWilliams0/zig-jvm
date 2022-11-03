@@ -907,6 +907,7 @@ pub const handlers = struct {
     pub fn _putstatic(ctxt: InsnContext) Error!void {
         const info = try ctxt.resolveField(ctxt.readU16(), .static);
         const field = info.field;
+        std.log.debug("putstatic({}, {s}) {s}", .{ info.cls, field.name, field.descriptor.str });
 
         const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
 

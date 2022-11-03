@@ -11,7 +11,11 @@ const Preload = struct {
 };
 
 // TODO more
-const preload_classes: [2]Preload = .{ .{ .cls = "[I" }, .{ .cls = "java/lang/System", .initialise = true } };
+const preload_classes: []const Preload = &.{
+    .{ .cls = "[I" },
+    .{ .cls = "java/lang/System", .initialise = true },
+    .{ .cls = "jdk/internal/misc/UnsafeConstants", .initialise = true },
+};
 
 pub const Options = struct {
     skip_system: bool = false,
@@ -69,16 +73,42 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Opt
     inline for (preload_classes) |preload|
         try load(opts, preload, loader);
 
+    // setup jdk/internal/misc/UnsafeConstants
+    {
+        const jdk_internal_misc_UnsafeConstants = loader.getLoadedBootstrapClass("jdk/internal/misc/UnsafeConstants").?;
+        set_static(jdk_internal_misc_UnsafeConstants, "ADDRESS_SIZE0", @as(i32, @sizeOf(*u8)));
+        set_static(jdk_internal_misc_UnsafeConstants, "PAGE_SIZE", @as(i32, std.mem.page_size));
+        set_static(jdk_internal_misc_UnsafeConstants, "BIG_ENDIAN", @import("builtin").cpu.arch.endian() == .Big);
+        set_static(jdk_internal_misc_UnsafeConstants, "UNALIGNED_ACCESS", false); // TODO
+        set_static(jdk_internal_misc_UnsafeConstants, "DATA_CACHE_LINE_FLUSH_SIZE", @as(i32, 0)); // TODO
+    }
+
     // setup System class
     if (!opts.skip_system) {
-        const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
-        const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
-        if ((try thread.interpreter.executeUntilReturn(method)) == null) {
-            const exc = thread.interpreter.exception.toStrongUnchecked();
-            const exc_str = object.ToString.new(thread.global.allocator.inner, exc);
-            defer exc_str.deinit();
-            std.log.err("initialising System threw exception {?}: \"{s}\"", .{ exc, exc_str.str });
-            return error.InvocationError;
+        {
+            const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
+            const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
+            if ((try thread.interpreter.executeUntilReturn(method)) == null) {
+                const exc = thread.interpreter.exception.toStrongUnchecked();
+                const exc_str = object.ToString.new(thread.global.allocator.inner, exc);
+                defer exc_str.deinit();
+                std.log.err("initialising System threw exception {?}: \"{s}\"", .{ exc, exc_str.str });
+                return error.InvocationError;
+            }
         }
     }
+}
+
+fn set_static(cls: object.VmClassRef, name: []const u8, val: anytype) void {
+    const val_ty = @TypeOf(val);
+    const desc = switch (val_ty) {
+        i32 => "I",
+        bool => "Z",
+        else => @compileError("bad value type"),
+    };
+
+    const field = cls.get().findFieldRecursively(name, desc, .{ .static = true }) orelse std.debug.panic("missing {s} field on {s}", .{ name, cls.get().name });
+    const field_value = object.VmClass.getStaticField(val_ty, field.id);
+    field_value.* = val;
+    std.log.debug("set static field {s}.{s} = {any}", .{ cls.get().name, name, val });
 }
