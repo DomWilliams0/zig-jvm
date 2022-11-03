@@ -328,8 +328,15 @@ pub const InsnContext = struct {
     }
 
     /// If method returns not void, takes return value from top of stack
-    fn returnToCaller(self: @This()) void {
+    fn returnToCaller(self: @This(), comptime T: type) void {
         self.mutable.control_flow = .return_;
+
+        if (T == i32) {
+            const ret_val = self.operandStack().peekRawPtr();
+            const int_val = ret_val.convertToInt();
+            if (ret_val.ty != .int) std.log.debug("converted {d} {s} return value to i32", .{int_val, @tagName(ret_val.ty)});
+            ret_val.* = frame.Frame.StackEntry.new(int_val);
+        }
     }
 
     fn store(self: @This(), comptime T: type, idx: u16) void {
@@ -934,22 +941,22 @@ pub const handlers = struct {
     }
 
     pub fn _return(ctxt: InsnContext) void {
-        ctxt.returnToCaller();
+        ctxt.returnToCaller(void);
     }
     pub fn _ireturn(ctxt: InsnContext) void {
-        ctxt.returnToCaller();
+        ctxt.returnToCaller(i32);
     }
     pub fn _lreturn(ctxt: InsnContext) void {
-        ctxt.returnToCaller();
+        ctxt.returnToCaller(i64);
     }
     pub fn _freturn(ctxt: InsnContext) void {
-        ctxt.returnToCaller();
+        ctxt.returnToCaller(f32);
     }
     pub fn _dreturn(ctxt: InsnContext) void {
-        ctxt.returnToCaller();
+        ctxt.returnToCaller(f64);
     }
     pub fn _areturn(ctxt: InsnContext) void {
-        ctxt.returnToCaller();
+        ctxt.returnToCaller(VmObjectRef.Nullable);
     }
 
     pub fn _dup(ctxt: InsnContext) void {

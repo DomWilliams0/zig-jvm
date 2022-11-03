@@ -194,10 +194,15 @@ pub const Frame = struct {
             }
         }
 
-        pub fn peekRaw(self: @This()) Frame.StackEntry {
+        pub fn peekRawPtr(self: @This()) *Frame.StackEntry {
             std.debug.assert(!self.isEmpty());
-            return (self.stack - 1)[0];
+            return &(self.stack - 1)[0];
         }
+
+        pub fn peekRaw(self: @This()) Frame.StackEntry {
+            return self.peekRawPtr().*;
+        }
+
 
         /// 0 = current top, 1 = next under top
         pub fn peekAt(self: @This(), comptime T: type, idx: u16) T {
