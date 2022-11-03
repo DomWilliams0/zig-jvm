@@ -59,7 +59,7 @@ pub fn main() !void {
 
     try jvm.bootstrap.initBootstrapClasses(
         &jvm_handle.global.classloader,
-        .{},
+        .{ .skip_system = true },
     );
 
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -82,8 +82,11 @@ const Test = struct {
 
     fn discover(alloc: Allocator, filter: ?[]const u8) !std.ArrayList(Test) {
         const path = try std.fs.realpathAlloc(alloc, "./src/test");
-        std.log.debug("looking for tests in {s}", .{path});
         defer alloc.free(path);
+        if (filter) |f|
+            std.log.debug("looking for tests in {s} with filter '{s}'", .{ path, f })
+        else
+            std.log.debug("looking for tests in {s}", .{path});
 
         var dir = try std.fs.openIterableDirAbsolute(path, .{});
         defer dir.close();
