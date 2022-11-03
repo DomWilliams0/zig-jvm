@@ -7,6 +7,8 @@ const Allocator = std.mem.Allocator;
 const FieldDescriptor = @import("descriptor.zig").FieldDescriptor;
 const MethodDescriptor = @import("descriptor.zig").MethodDescriptor;
 
+const VmClassRef = @import("object.zig").VmClassRef;
+
 // constant pool should be persistent but stay the same. when resolving things, change insn to lookup from a separate runtime area
 
 pub const CafebabeError = error{
@@ -258,9 +260,9 @@ pub const Field = struct {
 pub const Method = struct {
     flags: BitSet(Flags),
     name: []const u8, // points into constant pool
-    class_name: []const u8, // constant pool
     descriptor: MethodDescriptor,
     code: Code,
+    class_ref: VmClassRef.Nullable = VmClassRef.Nullable.nullRef(), // set after load
 
     const descriptor = MethodDescriptor;
 
@@ -308,6 +310,7 @@ pub const Method = struct {
     };
 
     fn new(persistent: Allocator, arena: Allocator, class_name: []const u8, cp: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
+        _ = class_name;
         var code = Code{
             .java = .{
                 .max_stack = 0,
@@ -364,17 +367,23 @@ pub const Method = struct {
             code = .{ .native = native.NativeCode.new() };
         }
 
-        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code, .class_name = class_name };
+        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code};
+    }
+
+    /// Assumes classloader has initialised this
+    pub fn class(self: @This()) VmClassRef {
+        return self.class_ref.toStrongUnchecked();
     }
 
     pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
         _ = fmt;
-        return std.fmt.format(writer, "{s}.{s}", .{ self.class_name, self.name });
+        return std.fmt.format(writer, "{s}.{s}", .{ self.class().get().name, self.name });
     }
 
     pub fn deinit(self: @This(), persistent: Allocator) void {
         self.code.deinit(persistent);
+        self.class().drop();
     }
 };
 

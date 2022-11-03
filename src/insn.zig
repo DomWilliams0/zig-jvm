@@ -282,7 +282,7 @@ pub const InsnContext = struct {
 
         if (cls.isInterface()) return error.IncompatibleClassChange;
 
-        // find method in class/superclasses/interfaces
+        // resolve referenced method
         const method = (object.VmClass.findMethodRecursive(cls_ref, info.name, info.ty) orelse return error.NoSuchMethod).method;
         if (method.flags.contains(.static)) return error.IncompatibleClassChange;
         if (method.flags.contains(.abstract)) return error.AbstractMethod;
@@ -292,7 +292,7 @@ pub const InsnContext = struct {
         const this_obj_ref = self.operandStack().peekAt(VmObjectRef.Nullable, method.descriptor.param_count).toStrong() orelse return error.NullPointer;
         const this_obj = this_obj_ref.get();
 
-        // select method (5.4.6)
+        // select method based on this_obj runtime class and resolved method (5.4.6)
         const selected_method = object.VmClass.selectMethod(this_obj.class, method);
         const selected_cls = selected_method.cls;
         std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.method.descriptor.str));

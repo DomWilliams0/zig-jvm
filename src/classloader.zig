@@ -382,6 +382,8 @@ pub const ClassLoader = struct {
         // resolve super
         var super_class = if (classfile.super_cls) |super| (try self.loadClass(super, loader)).clone().intoNullable() else VmClassRef.Nullable.nullRef();
 
+        // TODO validate superclass (5.3.5 step 3)
+
         var class = try object.VmClassRef.new();
         errdefer class.drop();
         class.get().* = .{
@@ -402,6 +404,11 @@ pub const ClassLoader = struct {
             .class_instance = undefined, // set next
         };
         try self.assignClassInstance(class);
+
+        // link up method class refs
+        for (class.get().u.obj.methods) |_, i| {
+            class.get().u.obj.methods[i].class_ref = class.clone().intoNullable();
+        }
 
         // preparation
         var layout: object.ObjectLayout = if (classfile.flags.contains(cafebabe.ClassFile.Flags.interface)) .{} else if (super_class.toStrong()) |super| super.get().u.obj.layout else .{};
@@ -542,7 +549,7 @@ pub const ClassLoader = struct {
     };
 
     pub fn findNativeMethod(self: *@This(), loader: WhichLoader, method: *const cafebabe.Method) ?*anyopaque {
-        return self.findNativeMethodInner(loader, method.class_name, method.name, method.descriptor);
+        return self.findNativeMethodInner(loader, method.class().get().name, method.name, method.descriptor);
     }
 
     fn findNativeMethodInner(self: *@This(), loader: WhichLoader, class_name: []const u8, method_name: []const u8, method_desc: descriptor.MethodDescriptor) ?*anyopaque {
