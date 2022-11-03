@@ -9,8 +9,8 @@ comptime {
     // validateFunctionSignatures(@import("java_io_UnixFileSystem.zig"));
     validateFunctionSignatures(@import("java_lang_Class.zig"));
     // validateFunctionSignatures(@import("java_lang_ClassLoader.zig"));
-    // validateFunctionSignatures(@import("java_lang_Double.zig"));
-    // validateFunctionSignatures(@import("java_lang_Float.zig"));
+    validateFunctionSignatures(@import("java_lang_Double.zig"));
+    validateFunctionSignatures(@import("java_lang_Float.zig"));
     // validateFunctionSignatures(@import("java_lang_invoke_LambdaProxyClassArchive.zig"));
     // validateFunctionSignatures(@import("java_lang_invoke_MethodHandle.zig"));
     // validateFunctionSignatures(@import("java_lang_invoke_MethodHandleNatives.zig"));
