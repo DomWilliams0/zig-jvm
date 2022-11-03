@@ -17,7 +17,7 @@ pub const WhichLoader = union(enum) {
     bootstrap,
     user: VmObjectRef,
 
-    fn eq(a: @This(), b: @This()) bool {
+    pub fn eq(a: @This(), b: @This()) bool {
         return switch (a) {
             .bootstrap => switch (b) {
                 .bootstrap => true,

@@ -153,7 +153,7 @@ const Test = struct {
         const entrypoint = cls.get().findMethodInThisOnly("vmTest", "()I", .{ .public = true, .static = true }) orelse return E.MissingEntrypoint;
 
         // run the test
-        const ret_value = try jvm.state.thread_state().interpreter.executeUntilReturn(cls, entrypoint);
+        const ret_value = try jvm.state.thread_state().interpreter.executeUntilReturn(entrypoint);
         const ret_code = if (ret_value) |val| val.convertTo(i32) else {
             const exc = jvm.state.thread_state().interpreter.exception.toStrongUnchecked();
             const exc_str = jvm.object.ToString.new(alloc, exc);

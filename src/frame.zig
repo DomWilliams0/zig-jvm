@@ -9,7 +9,7 @@ pub const logging = std.log.level == .debug; // and !@import("builtin").is_test;
 
 pub const Frame = struct {
     method: *const cafebabe.Method,
-    class: object.VmClassRef,
+    class: object.VmClassRef, // borrowed from method
 
     payload: union(enum) {
         java: struct {

@@ -24,27 +24,27 @@ pub const Interpreter = struct {
     }
 
     /// Returns null if an exception was thrown and set in this thread's interpreter.
-    pub fn executeUntilReturn(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method) state.Error!?frame.Frame.StackEntry {
-        return self.executeUntilReturnWithCallerFrame(class, method, null);
+    pub fn executeUntilReturn(self: *@This(), method: *const cafebabe.Method) state.Error!?frame.Frame.StackEntry {
+        return self.executeUntilReturnWithCallerFrame(method, null);
     }
 
     /// Returns null if an exception was thrown and set in this thread's interpreter.
-    pub fn executeUntilReturnWithArgs(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, comptime arg_count: usize, args: [arg_count]frame.Frame.StackEntry) state.Error!?frame.Frame.StackEntry {
+    pub fn executeUntilReturnWithArgs(self: *@This(), method: *const cafebabe.Method, comptime arg_count: usize, args: [arg_count]frame.Frame.StackEntry) state.Error!?frame.Frame.StackEntry {
 
         // setup a fake stack to pass args
         var stack_backing = [_]frame.Frame.StackEntry{frame.Frame.StackEntry.notPresent()} ** arg_count;
         var stack = frame.Frame.OperandStack.new(&stack_backing);
         for (args) |arg| stack.pushRaw(arg);
 
-        return executeUntilReturnWithCallerFrame(self, class, method, &stack);
+        return self.executeUntilReturnWithCallerFrame(method, &stack);
     }
 
     /// Returns null if an exception was thrown and set in this thread's interpreter.
-    pub fn executeUntilReturnWithCallerFrame(self: *@This(), class: object.VmClassRef, method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) state.Error!?frame.Frame.StackEntry {
+    pub fn executeUntilReturnWithCallerFrame(self: *@This(), method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) state.Error!?frame.Frame.StackEntry {
+        const class = method.class();
 
-        // TODO format on method to show class.method
-        std.log.debug("executing {s}.{s}", .{ class.get().name, method.name });
-        defer std.log.debug("finished executing {s}.{s}", .{ class.get().name, method.name });
+        std.log.debug("executing {?}", .{method});
+        defer std.log.debug("finished executing {?}", .{method});
 
         switch (method.code) {
             .native => |native| {
@@ -135,7 +135,7 @@ pub const Interpreter = struct {
                 errdefer alloc.destroy(f);
                 f.* = .{
                     .method = method,
-                    .class = class.clone(),
+                    .class = class,
                     .payload = .{ .java = .{
                         .operands = operands,
                         .local_vars = local_vars,
@@ -338,7 +338,6 @@ fn popFrame(f: *frame.Frame, t: ?*state.ThreadEnv) void {
 
     // clean up this frame
     // TODO new objects are still on the stack/lvars and will be leaked...sounds like a gc is needed
-    f.class.drop();
     thread.interpreter.frameAllocator().destroy(f);
 
     // pass execution back to caller

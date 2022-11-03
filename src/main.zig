@@ -53,6 +53,7 @@ pub fn main() !void {
 
     // invoke main
     _ = try jvm.state.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
+    // TODO handle exception like test runner
 
     std.log.info("done", .{});
 }

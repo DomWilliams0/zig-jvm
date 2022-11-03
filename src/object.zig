@@ -99,17 +99,33 @@ pub const VmClass = struct {
         }
     }
 
+    /// Borrowed from class name, or empty string
+    fn getPackageName(self: @This()) []const u8 {
+        return if (std.mem.lastIndexOfScalar(u8, self.name, '/')) |idx| self.name[0..idx] else "";
+    }
+
+    pub fn areInSameRuntimePackage(self: *const @This(), other: *const @This()) bool {
+        // const RuntimePackage = struct {
+        //     package: []const u8,
+        //     loader: classloader.WhichLoader,
+        // };
+
+        // defined by loader and package name
+        if (!self.loader.eq(other.loader)) return false;
+        return std.mem.eql(u8, self.getPackageName(), other.getPackageName());
+    }
+
     /// Looks in superinterfaces and Object (5.4.3.4. Interface Method Resolution).
     /// Does NOT check if class is an interface, the caller should do this if needed
-    pub fn findInterfaceMethodRecursive(self: VmClassRef, name: []const u8, desc: []const u8) ?SelectedMethod {
+    pub fn findInterfaceMethodRecursive(self: *const @This(), name: []const u8, desc: []const u8) ?*const Method {
 
         // check self
-        if (findMethodInThisOnly(self.get(), name, desc, .{})) |m| return .{ .method = m, .cls = self };
+        if (findMethodInThisOnly(self, name, desc, .{})) |m| return m;
 
         // check object
-        const java_lang_Object = self.get().super_cls.toStrongUnchecked();
+        const java_lang_Object = self.super_cls.toStrongUnchecked();
         std.debug.assert(std.mem.eql(u8, java_lang_Object.get().name, "java/lang/Object"));
-        if (findMethodInThisOnly(java_lang_Object.get(), name, desc, .{ .public = true, .static = false })) |m| return .{ .method = m, .cls = java_lang_Object };
+        if (java_lang_Object.get().findMethodInThisOnly(name, desc, .{ .public = true, .static = false })) |m| return m;
 
         // check superinterfaces
         // TODO return specific error if finds "multiple maximally-specific superinterface methods"
@@ -118,12 +134,12 @@ pub const VmClass = struct {
 
     /// Looks in superclasses and interfaces (5.4.3.3. Method Resolution).
     /// Does NOT check if class is not an interface, the caller should do this if needed
-    pub fn findMethodRecursive(self: VmClassRef, name: []const u8, desc: []const u8) ?SelectedMethod {
+    pub fn findMethodRecursive(self: *const @This(), name: []const u8, desc: []const u8) ?*const Method {
 
         // TODO if signature polymorphic, resolve class names mentioned in descriptor too
 
         // check self and supers recursively first
-        if (findMethodInSelfOrSupers(self, name, desc)) |m| return m;
+        if (self.findMethodInSelfOrSupers(name, desc)) |m| return m;
 
         // check superinterfaces
         // TODO return specific error if finds "multiple maximally-specific superinterface methods"
@@ -132,15 +148,15 @@ pub const VmClass = struct {
 
     /// Checks self and super classes only
     pub fn findMethodInSelfOrSupers(
-        self: VmClassRef,
+        self: *const @This(),
         name: []const u8,
         desc: []const u8,
-    ) ?SelectedMethod {
+    ) ?*const Method {
         // check self
-        if (self.get().findMethodInThisOnly(name, desc, .{})) |m| return .{ .method = m, .cls = self };
+        if (self.findMethodInThisOnly(name, desc, .{})) |m| return m;
 
         // check super recursively
-        return if (self.get().super_cls.toStrong()) |super| findMethodRecursive(super, name, desc) else null;
+        return if (self.super_cls.toStrong()) |super| super.get().findMethodRecursive(name, desc) else null;
     }
 
     pub fn findMethodInThisOnly(
@@ -161,47 +177,53 @@ pub const VmClass = struct {
         } else null;
     }
 
-    /// Returned class ref is borrowed
-    pub const SelectedMethod = struct { method: *const cafebabe.Method, cls: VmClassRef };
-
     /// For invokevirtual and invokeinterface (5.4.6).
-    pub fn selectMethod(self: VmClassRef, resolved_method: *const cafebabe.Method) SelectedMethod {
-        if (!resolved_method.flags.contains(.private)) {
-            const helper = struct {
-                /// 5.4.5
-                fn canMethodOverride(overriding_method: *const cafebabe.Method, override_candidate: *const cafebabe.Method) bool {
-                    const m_c = overriding_method;
-                    const m_a = override_candidate;
-                    return (std.mem.eql(u8, m_c.name, m_a.name) and
-                        std.mem.eql(u8, m_c.descriptor.str, m_a.descriptor.str) and
-                        (m_a.flags.contains(.public) or
-                        m_a.flags.contains(.protected))); // TODO complicated transitive runtime package comparisons oh god
-                    // compiler segfaults on `or @panic(...)`, issue Z
+    pub fn selectMethod(self: *const @This(), resolved_method: *const cafebabe.Method) *const cafebabe.Method {
+        const helper = struct {
+            /// 5.4.5
+            fn canMethodOverride(overriding_method: *const cafebabe.Method, override_candidate: *const cafebabe.Method) bool {
+                const m_c = overriding_method;
+                const m_a = override_candidate;
+                return (std.mem.eql(u8, m_c.name, m_a.name) and
+                    std.mem.eql(u8, m_c.descriptor.str, m_a.descriptor.str) and
+                    (m_a.flags.contains(.public) or
+                    m_a.flags.contains(.protected) or (!m_a.flags.contains(.private) and runtime_pkg: {
+                    const m_c_cls = m_c.class();
+                    const m_a_cls = m_a.class();
+
+                    // the declaration of mA appears in the same run-time package as the declaration of mC
+                    if (m_a_cls.get().areInSameRuntimePackage(m_c_cls.get())) break :runtime_pkg true;
+
+                    // if mA is declared in a class A and mC is declared in a class C, then there exists a method mB declared in a class B such that C is a subclass of B and B is a subclass of A and mC can override mB and mB can override mA.
+
+                    // TODO
+
+                    break :runtime_pkg false;
+                })));
+            }
+
+            fn selectRecursively(cls: *const VmClass, method: *const cafebabe.Method) ?*const cafebabe.Method {
+                // check own methods
+                for (cls.u.obj.methods) |m, i| {
+                    if (canMethodOverride(&m, method)) return &cls.u.obj.methods[i];
                 }
 
-                /// Returns borrowed class ref
-                fn checkSuperClasses(cls_ref: VmClassRef, method: *const cafebabe.Method) ?SelectedMethod {
-                    const cls = cls_ref.get();
-                    // check own methods
-                    for (cls.u.obj.methods) |m, i| {
-                        if (canMethodOverride(&m, method)) return .{ .method = &cls.u.obj.methods[i], .cls = cls_ref };
-                    }
+                // recurse on super class
+                if (cls.super_cls.toStrong()) |super| if (selectRecursively(super.get(), method)) |m| return m;
 
-                    // recurse on super class
-                    if (cls.super_cls.toStrong()) |super| if (checkSuperClasses(super, method)) |m| return m;
+                return null;
+            }
+        };
 
-                    return null;
-                }
-            };
+        // select if private
+        if (resolved_method.flags.contains(.private)) return resolved_method;
 
-            // check super classes recursively
-            if (helper.checkSuperClasses(self, resolved_method)) |m| return m;
+        // check this and super classes recursively
+        if (helper.selectRecursively(self, resolved_method)) |m| return m;
 
-            // TODO check super interfaces
+        // TODO check super interfaces
 
-        }
-
-        return .{ .method = resolved_method, .cls = self };
+        return resolved_method;
     }
 
     const FindSearchResult = struct {
@@ -334,7 +356,7 @@ pub const VmClass = struct {
 
         // run class constructor
         if (self_mut.findMethodInThisOnly("<clinit>", "()V", .{ .static = true })) |clinit| {
-            if ((try state.thread_state().interpreter.executeUntilReturn(self, clinit)) == null) {
+            if ((try state.thread_state().interpreter.executeUntilReturn(clinit)) == null) {
                 // exception occurred
                 std.log.warn("exception thrown running class initialiser of {s}: {any}", .{ self_mut.name, state.thread_state().interpreter.exception.toStrongUnchecked() });
                 return error.NoClassDef;
@@ -605,11 +627,11 @@ pub const VmObject = struct {
             }
         }
 
-        const toString_method = VmClass.findMethodRecursive(obj.class, "toString", "()Ljava/lang/String;") orelse return nullRef(VmObject);
-        const selected_method = VmClass.selectMethod(obj.class, toString_method.method);
+        const toString_method = obj.class.get().findMethodRecursive("toString", "()Ljava/lang/String;") orelse return nullRef(VmObject);
+        const selected_method = obj.class.get().selectMethod(toString_method);
 
         const args = [1]StackEntry{StackEntry.new(self)};
-        const ret = state.thread_state().interpreter.executeUntilReturnWithArgs(selected_method.cls, selected_method.method, 1, args) catch |err| {
+        const ret = state.thread_state().interpreter.executeUntilReturnWithArgs(selected_method, 1, args) catch |err| {
             std.log.warn("exception invoking toString() on {?}: {any}", .{ self, err });
             return nullRef(VmObject);
         } orelse {
