@@ -39,7 +39,7 @@ comptime {
     validateFunctionSignatures(@import("java_lang_StringUTF16.zig"));
     validateFunctionSignatures(@import("java_lang_System.zig"));
     // validateFunctionSignatures(@import("java_lang_Thread.zig"));
-    // validateFunctionSignatures(@import("java_lang_Throwable.zig"));
+    validateFunctionSignatures(@import("java_lang_Throwable.zig"));
     // validateFunctionSignatures(@import("java_net_Inet4Address.zig"));
     // validateFunctionSignatures(@import("java_net_Inet4AddressImpl.zig"));
     // validateFunctionSignatures(@import("java_net_Inet6Address.zig"));
