@@ -346,7 +346,7 @@ pub const InsnContext = struct {
 
     fn load(self: @This(), comptime T: type, idx: u16) void {
         // TODO need to bump ref count for objects?
-        const val = self.localVars().get(T, idx).*;
+        const val = if (T == i32) self.localVars().getRaw(idx).convertToInt() else self.localVars().get(T, idx);
         self.operandStack().push(val);
     }
 
@@ -1278,7 +1278,7 @@ pub const handlers = struct {
     }
 
     pub fn _iinc(ctxt: InsnContext) void {
-        var lvar = ctxt.localVars().get(i32, ctxt.readU8());
+        var lvar = ctxt.localVars().getPtr(i32, ctxt.readU8());
         const offset = @intCast(i32, ctxt.readSecondI8());
         std.log.debug("increment {} += {}", .{ lvar.*, offset });
         lvar.* += offset;

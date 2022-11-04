@@ -346,8 +346,12 @@ pub const Frame = struct {
             if (logging) self.initialised.set(idx);
         }
 
-        pub fn get(self: *@This(), comptime T: type, idx: u16) *T {
+        pub fn getPtr(self: *@This(), comptime T: type, idx: u16) *T {
             return self.getRaw(idx).convertToPtr(T);
+        }
+
+        pub fn get(self: *@This(), comptime T: type, idx: u16) T {
+            return self.getPtr(T,idx).*;
         }
 
         pub fn set(self: *@This(), value: anytype, idx: u16) void {
