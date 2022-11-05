@@ -21,7 +21,7 @@ pub const Options = struct {
     skip_system: bool = false,
 };
 
-fn load(comptime opts: Options, preload: Preload, loader: *classloader.ClassLoader) !void {
+fn load(opts: Options, preload: Preload, loader: *classloader.ClassLoader) !void {
     _ = opts;
     // TODO check for array
     // TODO handle user loader
@@ -40,7 +40,7 @@ fn loadPrimitives(loader: *classloader.ClassLoader) !void {
     }
 }
 
-pub fn initBootstrapClasses(loader: *classloader.ClassLoader, comptime opts: Options) !void {
+pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !void {
     // load special 2 first
     try load(opts, .{ .cls = "java/lang/Object" }, loader);
     try load(opts, .{ .cls = "java/lang/Class" }, loader);

@@ -54,14 +54,6 @@ pub fn main() !void {
     std.log.debug(" classpath: {?s}", .{jvm_args.classpath.slice});
     std.log.debug(" bootclasspath: {?s}", .{jvm_args.boot_classpath.slice});
 
-    var jvm_handle = try jvm.state.ThreadEnv.initMainThread(alloc, &jvm_args);
-    defer jvm_handle.deinit();
-
-    try jvm.bootstrap.initBootstrapClasses(
-        &jvm_handle.global.classloader,
-        .{ .skip_system = true }, // skip until string concat helper actually works
-    );
-
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const test_alloc = test_gpa.allocator();
     const test_filter = std.os.getenv("ZIG_JVM_TEST_FILTER");
@@ -70,6 +62,24 @@ pub fn main() !void {
 
     try Test.prepareForAll();
     for (tests.items) |t, i| {
+        std.log.info("running test {d}/{d} {s}", .{ i + 1, tests.items.len, t.testName() });
+
+        // TODO isolate errors to the test and just fail the test
+        const config = try t.config();
+
+        if (config.skip) {
+            std.log.info("test {d}/{d} {s} SKIPPED", .{ i + 1, tests.items.len, t.testName() });
+            continue;
+        }
+
+        var jvm_handle = try jvm.state.ThreadEnv.initMainThread(alloc, &jvm_args);
+        defer jvm_handle.deinit();
+
+        try jvm.bootstrap.initBootstrapClasses(
+            &jvm_handle.global.classloader,
+            .{ .skip_system = !config.initialise_system }, // skip until string concat helper actually works
+        );
+
         t.run(test_alloc) catch std.debug.panic("TEST {s} FAILED", .{t.testName()});
         std.log.info("test {d}/{d} {s} passed", .{ i + 1, tests.items.len, t.testName() });
     }
@@ -121,10 +131,44 @@ const Test = struct {
         std.fs.deleteTreeAbsolute(class_dir) catch {};
     }
 
+    const Config = struct {
+        initialise_system: bool = false,
+        skip: bool = false,
+    };
+
+    fn config(self: @This()) !Config {
+        const f = try std.fs.openFileAbsolute(self.src_path, .{});
+        defer f.close();
+
+        var header_buf: [1024]u8 = undefined;
+        const n = try f.readAll(&header_buf);
+        const header = header_buf[0..n];
+        const prefix = "//!";
+        if (!std.mem.startsWith(u8, header, prefix)) return .{}; // default
+        const end_idx = std.mem.indexOfScalar(u8, header, '\n') orelse n;
+
+        const config_string = header[prefix.len..end_idx];
+        var iter = std.mem.split(u8, config_string, " ");
+        var cfg = Config{};
+        while (iter.next()) |s| {
+            const trimmed = std.mem.trim(u8, s, " \t");
+            if (trimmed.len == 0) continue;
+
+            if (std.mem.eql(u8, trimmed, "system"))
+                cfg.initialise_system = true
+            else if (std.mem.eql(u8, trimmed, "skip"))
+                cfg.skip = true
+            else {
+                std.log.err("unknown config value '{s}'", .{trimmed});
+                return error.BadConfig;
+            }
+        }
+
+        return cfg;
+    }
+
     fn testName(self: @This()) []const u8 {
         const fileName = std.fs.path.basenamePosix(self.src_path);
-        const suffix = ".java";
-        _ = suffix;
         return fileName[0 .. fileName.len - ".java".len];
     }
 
