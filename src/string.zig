@@ -38,12 +38,12 @@ pub const StringPool = struct {
         return self.java_lang_String.toStrongUnchecked();
     }
 
-    pub fn getString(self: *@This(), utf8: []const u8) error{OutOfMemory, IllegalArgument}!object.VmObjectRef {
+    pub fn getString(self: *@This(), utf8: []const u8) error{ OutOfMemory, IllegalArgument }!object.VmObjectRef {
         const obj = try object.VmClass.instantiateObject(self.stringClass());
 
         // encode to utf16
-        const utf16_len =std.unicode.calcUtf16LeLen(utf8) catch return error.IllegalArgument;
-        const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), utf16_len*2);
+        const utf16_len = std.unicode.calcUtf16LeLen(utf8) catch return error.IllegalArgument;
+        const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), utf16_len * 2);
         var utf16_slice = value.get().getArrayHeader().getElems(u16);
         _ = std.unicode.utf8ToUtf16Le(utf16_slice, utf8) catch return error.IllegalArgument;
 

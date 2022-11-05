@@ -177,7 +177,7 @@ pub const Interpreter = struct {
                 );
 
             while (top) |f| {
-                try std.fmt.format(writer, "\n * {d}) {s} {s}", .{ i, f.method, f.method.descriptor.str});
+                try std.fmt.format(writer, "\n * {d}) {s} {s}", .{ i, f.method, f.method.descriptor.str });
                 try if (f.currentPc()) |pc| std.fmt.format(writer, " (pc={d})", .{pc}) else std.fmt.formatBuf(" (native)", .{}, writer);
                 top = f.parent_frame;
                 i += 1;

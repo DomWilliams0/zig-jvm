@@ -367,7 +367,7 @@ pub const Method = struct {
             code = .{ .native = native.NativeCode.new() };
         }
 
-        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code};
+        return Method{ .name = name, .descriptor = desc, .flags = flags, .code = code };
     }
 
     /// Assumes classloader has initialised this

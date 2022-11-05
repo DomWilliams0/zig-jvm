@@ -295,7 +295,7 @@ pub const InsnContext = struct {
         const selected_method = object.VmClass.selectMethod(this_obj.class.get(), method);
         std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.descriptor.str));
 
-        std.log.debug("resolved method to {?}", .{ selected_method});
+        std.log.debug("resolved method to {?}", .{selected_method});
 
         // invoke with caller frame
         if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_method, self.operandStack())) == null)
@@ -334,7 +334,7 @@ pub const InsnContext = struct {
         if (T == i32) {
             const ret_val = self.operandStack().peekRawPtr();
             const int_val = ret_val.convertToInt();
-            if (ret_val.ty != .int) std.log.debug("converted {d} {s} return value to i32", .{int_val, @tagName(ret_val.ty)});
+            if (ret_val.ty != .int) std.log.debug("converted {d} {s} return value to i32", .{ int_val, @tagName(ret_val.ty) });
             ret_val.* = frame.Frame.StackEntry.new(int_val);
         }
     }

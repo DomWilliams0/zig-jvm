@@ -203,7 +203,6 @@ pub const Frame = struct {
             return self.peekRawPtr().*;
         }
 
-
         /// 0 = current top, 1 = next under top
         pub fn peekAt(self: @This(), comptime T: type, idx: u16) T {
             std.debug.assert(!self.isEmpty());
@@ -351,7 +350,7 @@ pub const Frame = struct {
         }
 
         pub fn get(self: *@This(), comptime T: type, idx: u16) T {
-            return self.getPtr(T,idx).*;
+            return self.getPtr(T, idx).*;
         }
 
         pub fn set(self: *@This(), value: anytype, idx: u16) void {
