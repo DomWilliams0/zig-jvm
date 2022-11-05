@@ -4,6 +4,8 @@ const jni = jvm.jni;
 const sys = jni.sys;
 const JniEnvPtr = jvm.jni.JniEnvPtr;
 
+pub export fn Java_java_lang_ClassLoader_registerNatives() void {}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_ClassLoader_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_ClassLoader_defineClass1", .desc = "(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;" },

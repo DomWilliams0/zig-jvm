@@ -8,7 +8,7 @@ comptime {
     // validateFunctionSignatures(@import("java_io_RandomAccessFile.zig"));
     // validateFunctionSignatures(@import("java_io_UnixFileSystem.zig"));
     validateFunctionSignatures(@import("java_lang_Class.zig"));
-    // validateFunctionSignatures(@import("java_lang_ClassLoader.zig"));
+    validateFunctionSignatures(@import("java_lang_ClassLoader.zig"));
     validateFunctionSignatures(@import("java_lang_Double.zig"));
     validateFunctionSignatures(@import("java_lang_Float.zig"));
     // validateFunctionSignatures(@import("java_lang_invoke_LambdaProxyClassArchive.zig"));
@@ -71,7 +71,7 @@ comptime {
     // validateFunctionSignatures(@import("jdk_internal_reflect_DirectMethodHandleAccessor_00024NativeAccessor.zig"));
     // validateFunctionSignatures(@import("jdk_internal_reflect_NativeConstructorAccessorImpl.zig"));
     // validateFunctionSignatures(@import("jdk_internal_reflect_NativeMethodAccessorImpl.zig"));
-    // validateFunctionSignatures(@import("jdk_internal_reflect_Reflection.zig"));
+    validateFunctionSignatures(@import("jdk_internal_reflect_Reflection.zig"));
     validateFunctionSignatures(@import("jdk_internal_util_SystemProps.zig"));
     // validateFunctionSignatures(@import("jdk_internal_vm_vector_VectorSupport.zig"));
     // validateFunctionSignatures(@import("jdk_internal_vm_VMSupport.zig"));
