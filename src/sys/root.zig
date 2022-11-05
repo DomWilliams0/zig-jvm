@@ -18,16 +18,24 @@ pub fn ConversionType(comptime from: type) type {
         sys.jobject => VmObjectRef.Nullable,
         VmObjectRef => sys.jobject,
         VmObjectRef.Nullable => sys.jobject,
+        VmObjectRef.Nullable.AsPointer => sys.jobject,
 
-        sys.jobjectArray => VmObjectRef.Nullable,
+        sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray => VmObjectRef.Nullable,
         sys.jstring => VmObjectRef.Nullable,
 
         sys.jlong => i64,
         sys.jint => i32,
+        sys.jchar => u16,
+        sys.jshort => i16,
 
-        bool => sys.jboolean,
         i64 => sys.jlong,
         i32 => sys.jint,
+        bool => sys.jboolean,
+        u16 => sys.jchar,
+        i16 => sys.jshort,
+        i8 => sys.jbyte,
+        f64 => sys.jdouble,
+        f32 => sys.jfloat,
         else => @compileError("TODO convert type: " ++ @typeName(from)),
     };
 }
@@ -50,17 +58,18 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
         },
         VmClassRef => vmRefToRaw(sys.jclass, val.get().getClassInstance().clone()),
 
-        sys.jobjectArray => rawToVmRef(VmObjectRef, val),
+        sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray => rawToVmRef(VmObjectRef, val),
         sys.jstring => rawToVmRef(VmObjectRef, val),
 
         sys.jobject => rawToVmRef(VmObjectRef, val),
         VmObjectRef => vmRefToRaw(sys.jobject, val),
         VmObjectRef.Nullable => vmRefToRaw(sys.jobject, val),
+        VmObjectRef.Nullable.AsPointer => vmRefToRaw(sys.jobject, VmObjectRef.Nullable.fromPtr(val)),
 
-        sys.jlong, sys.jint => val,
+        sys.jlong, sys.jint, sys.jbyte, sys.jboolean, sys.jchar, sys.jshort, sys.jfloat, sys.jdouble => val,
 
         bool => if (val) sys.JNI_TRUE else sys.JNI_FALSE,
-        i64, i32 => val,
+        i32, i64, i16, u16 => val,
 
         else => @compileError("TODO convert from " ++ @typeName(@TypeOf(val))),
     };

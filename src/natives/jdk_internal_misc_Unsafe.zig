@@ -84,6 +84,11 @@ fn Sys(comptime from: type) type {
         bool => sys.jboolean,
         i64 => sys.jlong,
         i32 => sys.jint,
+        i8 => sys.jbyte,
+        u16 => sys.jchar,
+        i16 => sys.jshort,
+        f32 => sys.jfloat,
+        f64 => sys.jdouble,
         jvm.VmObjectRef.Nullable => sys.jobject,
         else => @compileError("no mapping for " ++ @typeName(from)),
     };
@@ -138,23 +143,61 @@ pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetReference(raw_env: jni.
     return compareAndSet(jvm.VmObjectRef.Nullable, jobj, offset, expected, x);
 }
 
+fn get(comptime T: type, comptime atomic: enum { volatile_, normal }, jobj: sys.jobject, offset: sys.jlong) Sys(T) {
+    const byte_offset = @intCast(usize, jni.convert(offset)); // assume offset comes from other Unsafe native methods, so won't be negative or invalid
+    const load_ty = if (T == jvm.VmObjectRef.Nullable) ObjPtr else T;
+
+    if (jni.convert(jobj).toStrong()) |obj| {
+        // instance field
+        const ptr = obj.get().getFieldFromOffset(load_ty, byte_offset);
+        const loaded = switch (atomic) {
+            .volatile_ => @atomicLoad(load_ty, ptr, .SeqCst),
+            .normal => ptr.*,
+        };
+        return sys_convert(loaded);
+    } else @panic("TODO static field");
+}
+
 pub export fn Java_jdk_internal_misc_Unsafe_getReferenceVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jobject {
     _ = unsafe_cls;
     _ = raw_env;
+    return get(jvm.object.VmObjectRef.Nullable, .volatile_, jobj, offset);
+}
 
-    const obj = jni.convert(jobj).toStrongUnchecked(); // no null
-    const byte_offset = @intCast(usize, jni.convert(offset)); // assume offset comes from other Unsafe native methods, so won't be negative or invalid
-
-    const ptr = obj.get().getFieldFromOffset(ObjPtr, byte_offset);
-    const loaded_ptr = @atomicLoad(ObjPtr, ptr, .SeqCst);
-    const loaded = jvm.VmObjectRef.Nullable.fromPtr(loaded_ptr);
-
-    // const obj_ref_int = @Type(.{ .Int = .{ .signedness = .unsigned, .bits = @bitSizeOf(jvm.VmObjectRef.Nullable) } });
-    // const loaded_int = @atomicLoad(obj_ref_int, @ptrCast(*obj_ref_int, ptr), .SeqCst);
-    // const loaded_obj = @bitCast(jvm.VmObjectRef.Nullable, loaded_int);
-
-    // TODO bump reference?
-    return jni.convert(loaded);
+pub export fn Java_jdk_internal_misc_Unsafe_getIntVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jint {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(i32, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getBooleanVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jboolean {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(bool, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getByteVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jbyte {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(i8, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getShortVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jshort {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(i16, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getCharVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jchar {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(u16, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getLongVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jlong {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(i64, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getDoubleVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jdouble {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return get(f64, .volatile_, jobj, offset);
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{
