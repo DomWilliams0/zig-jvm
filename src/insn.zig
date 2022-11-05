@@ -524,6 +524,18 @@ pub const InsnContext = struct {
         self.operandStack().push(result);
     }
 
+    fn neg(self: @This(), comptime T: type) void {
+        const value = self.operandStack().pop(T);
+        const res = if (@typeInfo(T) == .Int)
+            -%value
+        else if (std.math.isNan(value))
+            value // NaN has no sign
+        else
+            -value;
+
+        self.operandStack().push(res);
+    }
+
     const BinaryCmp = enum {
         eq,
         ne,
@@ -1383,6 +1395,18 @@ pub const handlers = struct {
     }
     pub fn _l2i(ctxt: InsnContext) void {
         ctxt.convertPrimitive(i64, i32);
+    }
+    pub fn _ineg(ctxt: InsnContext) void {
+        ctxt.neg(i32);
+    }
+    pub fn _lneg(ctxt: InsnContext) void {
+        ctxt.neg(i64);
+    }
+    pub fn _fneg(ctxt: InsnContext) void {
+        ctxt.neg(f32);
+    }
+    pub fn _dneg(ctxt: InsnContext) void {
+        ctxt.neg(f64);
     }
 
     pub fn _aconst_null(ctxt: InsnContext) void {
