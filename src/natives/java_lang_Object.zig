@@ -9,6 +9,12 @@ pub export fn Java_java_lang_Object_getClass(raw_env: jni.JniEnvPtr, this: sys.j
     return jni.convert(obj.get().class);
 }
 
+pub export fn Java_java_lang_Object_hashCode(raw_env: jni.JniEnvPtr, this: sys.jobject) sys.jint {
+    _ = raw_env;
+    const obj = jni.convert(this).toStrong() orelse return 0;
+    return obj.get().getHashCode();
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Object_getClass", .desc = "()Ljava/lang/Class;" },
     .{ .method = "Java_java_lang_Object_hashCode", .desc = "()I" },

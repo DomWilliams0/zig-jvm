@@ -20,6 +20,7 @@ pub const GlobalState = struct {
     allocator: vm_alloc.VmAllocator,
     args: *const JvmArgs,
     string_pool: string.StringPool,
+    hashcode_rng: std.rand.DefaultPrng,
 };
 
 /// Each thread owns one
@@ -50,6 +51,7 @@ pub const ThreadEnv = struct {
             .classloader = try classloader.ClassLoader.new(alloc),
             .allocator = vm_alloc.VmAllocator{ .inner = alloc },
             .args = args,
+            .hashcode_rng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.timestamp())),
             .string_pool = undefined, // set next
         };
         global.string_pool = string.StringPool.new(global);

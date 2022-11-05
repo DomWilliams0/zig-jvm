@@ -557,6 +557,8 @@ const Monitor = struct {
 /// Header for objects, variable sized based on class (array, fields, etc)
 pub const VmObject = struct {
     class: VmClassRef,
+    /// 0 for null, set on first call to Object.hashCode
+    hashcode: i32 = 0,
     /// Where variable data storage begins
     storage: void,
 
@@ -710,6 +712,19 @@ pub const VmObject = struct {
         const field_opt = self_mut.getField(VmObjectRef.Nullable, fid);
         const field = field_opt.toStrongUnchecked();
         return field.cast(VmClass);
+    }
+
+    /// Inits if first call
+    pub fn getHashCode(self: *@This()) i32 {
+        if (self.hashcode == 0) {
+            const rng = state.thread_state().global.hashcode_rng.random();
+            var val: i32 = 0;
+            while (val == 0) val = std.rand.Random.int(rng, i32);
+
+            self.hashcode = val;
+        }
+
+        return self.hashcode;
     }
 };
 
