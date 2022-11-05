@@ -449,6 +449,7 @@ pub const VmClass = struct {
         return self.class_instance.toStrongUnchecked();
     }
 
+    /// `self` instanceof `candidate`
     pub fn isInstanceOf(self: VmClassRef, candidate: VmClassRef) bool {
         if (self.cmpPtr(candidate)) return true;
 
@@ -484,8 +485,10 @@ pub const VmClass = struct {
             }
         };
 
-        const s = self.get();
-        const t = candidate.get();
+        const s_ref = self;
+        const t_ref = candidate;
+        const s = s_ref.get();
+        const t = t_ref.get();
 
         return if (s.isArray())
             if (t.isArray())
@@ -498,13 +501,13 @@ pub const VmClass = struct {
                 helper.strcmp(t.name, "java/lang/Object") //  T must be Object.
         else if (s.isInterface())
             if (t.isInterface())
-                helper.isSuperInterface(self, candidate) // T must be the same interface as S or a superinterface of S.
+                helper.isSuperInterface(s_ref, t_ref) // T must be the same interface as S or a superinterface of S.
             else
                 helper.strcmp(t.name, "java/lang/Object") // T must be Object.
         else if (t.isInterface())
-            helper.isSuperInterface(self, candidate) //S must implement interface T.
+            helper.isSuperInterface(s_ref, t_ref) //S must implement interface T.
         else
-            helper.isSuperClass(self, candidate); // then S must be the same class as T, or S must be a subclass of T
+            helper.isSuperClass(s_ref, t_ref); // then S must be the same class as T, or S must be a subclass of T
     }
 
     /// Must be array class

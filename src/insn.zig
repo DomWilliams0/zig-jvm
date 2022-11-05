@@ -1052,6 +1052,10 @@ pub const handlers = struct {
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
+        std.log.debug("getfield({}, {s})", .{
+            obj_ref,
+            field.field.name,
+        });
         std.debug.assert(obj.get().class.get().isObject()); // verified
 
         const value = obj.get().getRawField(field.field);
@@ -1413,7 +1417,7 @@ pub const handlers = struct {
 
         const cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
         const cls = try ctxt.resolveClass(cls_name, .resolve_only);
-        const result = object.VmClass.isInstanceOf(cls, obj.get().class);
+        const result = object.VmClass.isInstanceOf(obj.get().class, cls);
         std.log.debug("isinstanceof({?}, {s}) = {any}", .{ obj, cls.get().name, result });
         ctxt.operandStack().push(@as(i32, @boolToInt(result)));
     }
@@ -1422,7 +1426,7 @@ pub const handlers = struct {
 
         const cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
         const cls = try ctxt.resolveClass(cls_name, .resolve_only);
-        const result = object.VmClass.isInstanceOf(cls, obj.get().class);
+        const result = object.VmClass.isInstanceOf(obj.get().class, cls);
         std.log.debug("checkcast({?}, {s}) = {any}", .{ obj, cls.get().name, result });
         if (!result)
             return error.ClassCast;
