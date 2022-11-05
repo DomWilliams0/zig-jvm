@@ -1,7 +1,8 @@
 pub const Insn = struct {
     name: []const u8,
     id: u8,
-    sz: u8 = 0,
+    /// Null if variable sized
+    sz: ?u8 = 0,
     /// If true don't auto increment pc past this insn after the handler returns
     jmps: bool = false,
 };
@@ -67,7 +68,7 @@ pub const insns = [_]Insn{
         .name = "i2s",
         .id = 147,
     },
-    // .{ .name = "tableswitch", .id = 170, .sz = 17 },
+    .{ .name = "tableswitch", .id = 170, .sz = null },
     .{
         .name = "iadd",
         .id = 96,
@@ -417,7 +418,7 @@ pub const insns = [_]Insn{
         .name = "monitorexit",
         .id = 195,
     },
-    // .{ .name = "lookupswitch", .id = 171, .sz = 13 },
+    .{ .name = "lookupswitch", .id = 171, .sz = null },
     .{
         .name = "nop",
         .id = 0,

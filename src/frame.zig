@@ -164,6 +164,7 @@ pub const Frame = struct {
         }
 
         fn depth(self: @This()) usize {
+            std.debug.assert(@ptrToInt(self.stack) >= @ptrToInt(self.bottom)); // stack is more than empty o_O
             return (@ptrToInt(self.stack) - @ptrToInt(self.bottom)) / @sizeOf(StackEntry);
         }
 

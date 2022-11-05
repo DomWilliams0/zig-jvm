@@ -49,8 +49,8 @@ pub const Handler = struct {
                 }
 
                 // increment code window past this instruction
-                if (!insn.jmps)
-                    ctxt.frame.payload.java.code_window += @as(usize, insn.sz) + 1;
+                if (!insn.jmps and insn.sz != null)
+                    ctxt.frame.payload.java.code_window += @as(usize, insn.sz.?) + 1;
             }
 
             fn handleThrownException(comptime insn_name: []const u8, ctxt: InsnContext, err: InvokeError) void {
@@ -170,6 +170,18 @@ pub const InsnContext = struct {
     fn readSecondI8(self: Self) i8 {
         const b = self.body();
         return @bitCast(i8, b[2]);
+    }
+
+    fn parseI32(bytes: []const u8) i32 {
+        @setRuntimeSafety(false);
+        std.debug.assert(bytes.len == 4);
+        return @as(i32, bytes[0]) << 24 | @as(i32, bytes[1]) << 16 | @as(i32, bytes[2]) << 8 | @as(i32, bytes[3]);
+    }
+
+    /// Offset is from the start of the instruction
+    fn readI32(self: Self, offset: usize) i32 {
+        const b = self.body();
+        return parseI32(b[offset .. offset + 4]);
     }
 
     const ClassResolution = enum {
@@ -651,7 +663,7 @@ pub const InsnContext = struct {
     }
 
     /// Adds offset to pc
-    fn goto(self: @This(), offset: i16) void {
+    fn goto(self: @This(), offset: anytype) void {
         if (offset >= 0) {
             self.frame.payload.java.code_window += @intCast(usize, offset);
         } else {
@@ -730,6 +742,77 @@ pub const InsnContext = struct {
             self.thread.interpreter.setException(exc);
             self.mutable.control_flow = .bubble_exception;
         }
+    }
+
+    fn switch_(self: @This(), comptime variant: enum { lookup, table }) void {
+        const padding = blk: {
+            // method code should be aligned to 4 bytes already
+            std.debug.assert(std.mem.isAligned(@ptrToInt(self.frame.method.code.java.code.?.ptr), 4));
+
+            const current = @ptrToInt(self.body());
+            const pad = 3 - (current % 4);
+            break :blk @truncate(u8, pad);
+        };
+
+        const int = self.operandStack().pop(i32);
+        const default = self.readI32(1 + padding);
+
+        // i32 in classfile endianness, only converted when needed with value()
+        const TableEntry = extern struct {
+            bytes: [4]u8,
+
+            fn value(e: @This()) i32 {
+                return parseI32(&e.bytes);
+            }
+        };
+
+        const offset = switch (variant) {
+            .table => blk: {
+                const lo = self.readI32(1 + padding + 4);
+                const hi = self.readI32(1 + padding + 8);
+                std.log.debug("tableswitch(padding={d}, default={d}, lo={d}, hi={d}, index={d})", .{ padding, default, lo, hi, int });
+                std.debug.assert(lo <= hi);
+
+                const offsets_begin_offset = 1 + padding + 12;
+                const offsets_len = @sizeOf(TableEntry) * @intCast(usize, (hi - lo + 1));
+                const offsets = std.mem.bytesAsSlice(TableEntry, self.body()[offsets_begin_offset .. offsets_begin_offset + offsets_len]);
+
+                break :blk if (int < lo or int > hi) default else offsets[@intCast(usize, int - lo)].value();
+            },
+            .lookup => blk: {
+                const npairs = @intCast(usize, self.readI32(1 + padding + 4));
+                std.log.debug("lookupswitch(padding={d}, default={d}, npairs={d})", .{ padding, default, npairs });
+
+                const MatchPair = extern struct {
+                    match: TableEntry,
+                    offset: TableEntry,
+                };
+
+                const pairs_begin_offset = 1 + padding + 8;
+                const pairs_len = @sizeOf(MatchPair) * npairs;
+                const pairs = std.mem.bytesAsSlice(MatchPair, self.body()[pairs_begin_offset .. pairs_begin_offset + pairs_len]);
+
+                // binary search
+                const key = int;
+                var left: usize = 0;
+                var right: usize = pairs.len;
+
+                while (left < right) {
+                    const mid = left + (right - left) / 2;
+                    const pair = pairs[mid];
+                    switch (std.math.order(key, pair.match.value())) {
+                        .eq => break :blk pair.offset.value(),
+                        .gt => left = mid + 1,
+                        .lt => right = mid,
+                    }
+                }
+
+                break :blk default;
+            },
+        };
+
+        std.log.debug("jmping to {d}", .{offset + @as(i64, self.frame.currentPc().?)});
+        self.goto(offset);
     }
 };
 
@@ -1456,6 +1539,12 @@ pub const handlers = struct {
         std.log.debug("checkcast({?}, {s}) = {any}", .{ obj, cls.get().name, result });
         if (!result)
             return error.ClassCast;
+    }
+    pub fn _lookupswitch(ctxt: InsnContext) void {
+        ctxt.switch_(.lookup);
+    }
+    pub fn _tableswitch(ctxt: InsnContext) void {
+        ctxt.switch_(.table);
     }
 };
 
