@@ -90,9 +90,7 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
             const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
             if ((try thread.interpreter.executeUntilReturn(method)) == null) {
                 const exc = thread.interpreter.exception.toStrongUnchecked();
-                const exc_str = object.ToString.new(thread.global.allocator.inner, exc);
-                defer exc_str.deinit();
-                std.log.err("initialising System threw exception {?}: \"{s}\"", .{ exc, exc_str.str });
+                print_exception_with_cause("initialising System", exc);
                 return error.InvocationError;
             }
         }
@@ -111,4 +109,13 @@ fn set_static(cls: object.VmClassRef, name: []const u8, val: anytype) void {
     const field_value = object.VmClass.getStaticField(val_ty, field.id);
     field_value.* = val;
     std.log.debug("set static field {s}.{s} = {any}", .{ cls.get().name, name, val });
+}
+
+/// "$what threw exception ..."
+pub fn print_exception_with_cause(what: []const u8, exc: object.VmObjectRef) void {
+    const exc_str = object.ToString.new_with_exc_cause(state.thread_state().global.allocator.inner, exc);
+    defer exc_str.deinit();
+    std.log.err("{s} threw exception {?}: \"{s}\"", .{ what, exc, exc_str.exc.str });
+    for (exc_str.causes.items) |cause|
+        std.log.err(" caused by: \"{s}\"", .{cause.str});
 }

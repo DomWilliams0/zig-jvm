@@ -28,6 +28,9 @@ pub const ThreadEnv = struct {
     interpreter: interp.Interpreter,
     jni: *jni_sys.JniEnv,
 
+    /// Owned reference to the Throwable cause of the current error
+    error_cause: object.VmObjectRef.Nullable = object.nullRef(object.VmObject),
+
     fn init(global: *GlobalState) ThreadEnv {
         return ThreadEnv{ .global = global };
     }
@@ -109,6 +112,18 @@ pub const JvmHandle = struct {
 pub fn thread_state() *ThreadEnv {
     std.debug.assert(inited);
     return &thread_env;
+}
+
+
+/// Owned reference
+pub fn set_error_cause(throwable: object.VmObjectRef) void {
+    const t = thread_state();
+    if (t.error_cause.toStrong()) |old| {
+        std.log.warn("overwriting error cause without consuming it: {?}", .{old});
+        old.drop();
+    }
+
+    t.error_cause = throwable.intoNullable();
 }
 
 /// Terminal errors that can't be turned into exceptions
@@ -196,7 +211,42 @@ pub fn errorToException(err: Error) object.VmObjectRef {
                 };
                 const exc_obj = try object.VmClass.instantiateObject(exc_class);
 
-                // TODO invoke constructor
+                const StackEntry = @import("frame.zig").Frame.StackEntry;
+                // invoke constructor
+                // TODO use error context to build a string if string constructor exists
+                // TODO dont panic if constructors not found?
+                {
+                    // TODO lookup once on startup and cache
+                    const init_method = exc_class.get().findMethodRecursive("<init>", "()V") orelse @panic("no constructor method on java/lang/Throwable");
+
+                    const args = [1]StackEntry{StackEntry.new(exc_obj)};
+                    _ = (thread.interpreter.executeUntilReturnWithArgs(init_method, 1, args) catch |ex| blk: {
+                        std.log.warn("failed to run constructor on exception {?}: {any}", .{ exc_obj, ex });
+                        break :blk null;
+                    }) orelse blk: {
+                        std.log.warn("failed to run constructor on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception.toStrongUnchecked() });
+                        break :blk null;
+                    };
+                }
+
+                // set cause
+                if (thread.error_cause.toStrong()) |cause| {
+                    // steal owned reference
+                    thread.error_cause = object.VmObjectRef.Nullable.nullRef();
+
+                    // TODO lookup once on startup and cache
+                    const method = exc_class.get().findMethodRecursive("initCause", "(Ljava/lang/Throwable;)Ljava/lang/Throwable;") orelse @panic("no initCause method on java/lang/Throwable");
+
+                    const args = [2]StackEntry{ StackEntry.new(exc_obj), StackEntry.new(cause) };
+                    _ = (thread.interpreter.executeUntilReturnWithArgs(method, 2, args) catch |ex| blk: {
+                        std.log.warn("failed to set cause on exception {?}: {any}", .{ exc_obj, ex });
+                        break :blk null;
+                    }) orelse blk: {
+                        std.log.warn("failed to set cause on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception.toStrongUnchecked() });
+                        break :blk null;
+                    };
+                }
+
                 return exc_obj;
             } else return @errSetCast(ExecutionError, e);
         }

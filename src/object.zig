@@ -372,7 +372,9 @@ pub const VmClass = struct {
         if (self_mut.findMethodInThisOnly("<clinit>", "()V", .{ .static = true })) |clinit| {
             if ((try state.thread_state().interpreter.executeUntilReturn(clinit)) == null) {
                 // exception occurred
-                std.log.warn("exception thrown running class initialiser of {s}: {any}", .{ self_mut.name, state.thread_state().interpreter.exception.toStrongUnchecked() });
+                const exc = state.thread_state().interpreter.exception.toStrongUnchecked();
+                std.log.warn("exception thrown running class initialiser of {s}: {any}", .{ self_mut.name, exc });
+                state.set_error_cause(exc.clone());
                 return error.NoClassDef;
             }
         }
@@ -721,6 +723,48 @@ pub const ToString = struct {
     pub fn new(alloc: std.mem.Allocator, obj: VmObjectRef) ToString {
         const str = (try_new(alloc, obj) catch return ERR) orelse return ERR;
         return .{ .str = str, .alloc = alloc };
+    }
+
+    pub const ExceptionWithCause = struct {
+        exc: ToString,
+        causes: std.ArrayList(ToString),
+
+        pub fn deinit(self: @This()) void {
+            self.exc.deinit();
+            self.causes.deinit();
+        }
+    };
+
+    /// Returns constant error string on any error
+    pub fn new_with_exc_cause(alloc: std.mem.Allocator, obj: VmObjectRef) ExceptionWithCause {
+        const exc = new(alloc, obj);
+        var causes = std.ArrayList(ToString).init(alloc);
+
+        // TODO cache this
+        const global = state.thread_state().global;
+        const java_lang_Throwable = global.classloader.getLoadedBootstrapClass("java/lang/Throwable") orelse @panic("no throwable");
+        if (VmClass.isInstanceOf(obj.get().class, java_lang_Throwable)) {
+            const get_cause = obj.get().class.get().findMethodRecursive("getCause", "()Ljava/lang/Throwable;") orelse @panic("no getCause");
+
+            var current = obj;
+            while (true) {
+                const args = [1]StackEntry{StackEntry.new(current)};
+                const cause_exc = (state.thread_state().interpreter.executeUntilReturnWithArgs(get_cause, 1, args) catch null);
+                if (cause_exc) |ret| {
+                    if (ret.convertTo(VmObjectRef.Nullable).toStrong()) |c| {
+                        causes.append(new(alloc, c)) catch break;
+
+                        // recurse
+                        current = c;
+                        continue;
+                    }
+                }
+
+                break;
+            }
+        }
+
+        return .{ .exc = exc, .causes = causes };
     }
 
     /// Fills up and truncates
