@@ -4,6 +4,24 @@ const jni = jvm.jni;
 const sys = jni.sys;
 const JniEnvPtr = jvm.jni.JniEnvPtr;
 
+pub export fn Java_jdk_internal_misc_CDS_isDumpingClassList0() sys.jboolean {
+    return jni.convert(false);
+}
+
+pub export fn Java_jdk_internal_misc_CDS_isDumpingArchive0() sys.jboolean {
+    return jni.convert(false);
+}
+
+pub export fn Java_jdk_internal_misc_CDS_isSharingEnabled0() sys.jboolean {
+    return jni.convert(false);
+}
+
+pub export fn Java_jdk_internal_misc_CDS_getRandomSeedForDumping() sys.jlong {
+    return 4;
+}
+
+pub export fn Java_jdk_internal_misc_CDS_initializeFromArchive() void {}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_jdk_internal_misc_CDS_isDumpingClassList0", .desc = "()Z" },
     .{ .method = "Java_jdk_internal_misc_CDS_isDumpingArchive0", .desc = "()Z" },

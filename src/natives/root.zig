@@ -59,7 +59,7 @@ comptime {
     // validateFunctionSignatures(@import("jdk_internal_jimage_NativeImageBuffer.zig"));
     // validateFunctionSignatures(@import("jdk_internal_loader_BootLoader.zig"));
     // validateFunctionSignatures(@import("jdk_internal_loader_NativeLibraries.zig"));
-    // validateFunctionSignatures(@import("jdk_internal_misc_CDS.zig"));
+    validateFunctionSignatures(@import("jdk_internal_misc_CDS.zig"));
     // validateFunctionSignatures(@import("jdk_internal_misc_ScopedMemoryAccess.zig"));
     // validateFunctionSignatures(@import("jdk_internal_misc_Signal.zig"));
     validateFunctionSignatures(@import("jdk_internal_misc_Unsafe.zig"));
