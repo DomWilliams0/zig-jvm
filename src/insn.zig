@@ -440,6 +440,15 @@ pub const InsnContext = struct {
         const val2 = self.operandStack().popWiden(val2_ty);
         const val1 = self.operandStack().popWiden(T);
 
+        const S = struct {
+            fn maskLowBits(int: i32) std.math.Log2Int(T) {
+                const mask_ty = std.math.Log2Int(T);
+                const mask = std.math.maxInt(mask_ty); // low 5 or 6 bits of int/long value
+                const unsigned = std.meta.Int(.unsigned, std.meta.bitCount(T));
+                return @truncate(mask_ty, @intCast(unsigned, int & @intCast(@TypeOf(int), mask)));
+            }
+        };
+
         const result = if (@typeInfo(T) == .Int) switch (op) {
             .add => val1 +% val2,
             .sub => val1 -% val2,
@@ -448,12 +457,10 @@ pub const InsnContext = struct {
                 error.Overflow => val1,
                 error.DivisionByZero => return error.Arithmetic,
             },
-            .shr => val1 >> @truncate(u5, @intCast(u32, val2 & 0x3f)),
-            .shl => val1 << @truncate(u5, @intCast(u32, val2 & 0x3f)),
+            .shr => val1 >> S.maskLowBits(val2),
+            .shl => val1 << S.maskLowBits(val2),
             .lshr => blk: {
-                @setRuntimeSafety(false);
-                const unsigned = std.meta.Int(.unsigned, std.meta.bitCount(T));
-                const x = @truncate(u5, @intCast(unsigned, val2 & 0x1f));
+                const x = S.maskLowBits(val2);
                 break :blk if (val1 >= 0)
                     val1 >> x
                 else
