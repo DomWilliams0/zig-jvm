@@ -40,7 +40,7 @@ pub const VmClass = struct {
         array: struct {
             elem_cls: VmClassRef,
             dims: u8,
-            /// Padding bytes between u32 len and start of elements
+            /// Padding bytes between object start and elems, INCLUDING ArrayHeader
             padding: u8,
         },
     },
@@ -527,8 +527,7 @@ pub const VmClass = struct {
     /// Must be array class
     pub fn getArrayBaseOffset(self: @This()) usize {
         std.debug.assert(self.isArray());
-        std.log.info("ARRAY OF {s} = {d}", .{ self.name, self.u.array.padding });
-        return @offsetOf(VmObject, "storage") + @sizeOf(ArrayHeader) + self.u.array.padding;
+        return @offsetOf(VmObject, "storage") + self.u.array.padding;
     }
 
     /// Must be array class

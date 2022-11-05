@@ -16,7 +16,9 @@ pub export fn Java_jdk_internal_misc_Unsafe_arrayBaseOffset0(raw_env: jni.JniEnv
         return 0;
     }
 
-    return @intCast(sys.jint, cls_data.getArrayBaseOffset());
+    const offset = @intCast(sys.jint, cls_data.getArrayBaseOffset());
+    std.log.debug("arrayBaseOffset0({s}) = {d}", .{ cls_data.name, offset });
+    return offset;
 }
 
 pub export fn Java_jdk_internal_misc_Unsafe_arrayIndexScale0(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, cls: sys.jclass) sys.jint {
@@ -29,7 +31,9 @@ pub export fn Java_jdk_internal_misc_Unsafe_arrayIndexScale0(raw_env: jni.JniEnv
         return 0;
     }
 
-    return @intCast(sys.jint, cls_data.getArrayStride());
+    const ret = @intCast(sys.jint, cls_data.getArrayStride());
+    std.log.debug("arrayIndexScale0({s}) = {d}", .{ cls_data.name, ret });
+    return ret;
 }
 
 pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset0(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jfield: sys.jobject) sys.jlong {
