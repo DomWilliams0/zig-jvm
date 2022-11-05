@@ -28,7 +28,7 @@ comptime {
     // validateFunctionSignatures(@import("java_lang_reflect_Array.zig"));
     // validateFunctionSignatures(@import("java_lang_reflect_Executable.zig"));
     // validateFunctionSignatures(@import("java_lang_reflect_Field.zig"));
-    // validateFunctionSignatures(@import("java_lang_Runtime.zig"));
+    validateFunctionSignatures(@import("java_lang_Runtime.zig"));
     // validateFunctionSignatures(@import("java_lang_SecurityManager.zig"));
     // validateFunctionSignatures(@import("java_lang_Shutdown.zig"));
     // validateFunctionSignatures(@import("java_lang_StackStreamFactory.zig"));
@@ -63,7 +63,7 @@ comptime {
     // validateFunctionSignatures(@import("jdk_internal_misc_ScopedMemoryAccess.zig"));
     // validateFunctionSignatures(@import("jdk_internal_misc_Signal.zig"));
     validateFunctionSignatures(@import("jdk_internal_misc_Unsafe.zig"));
-    // validateFunctionSignatures(@import("jdk_internal_misc_VM.zig"));
+    validateFunctionSignatures(@import("jdk_internal_misc_VM.zig"));
     // validateFunctionSignatures(@import("jdk_internal_perf_Perf.zig"));
     // validateFunctionSignatures(@import("jdk_internal_platform_CgroupMetrics.zig"));
     // validateFunctionSignatures(@import("jdk_internal_reflect_ConstantPool.zig"));
