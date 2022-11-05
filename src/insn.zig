@@ -284,8 +284,8 @@ pub const InsnContext = struct {
 
         // resolve referenced method
         const method = (cls.findMethodRecursive(info.name, info.ty) orelse return error.NoSuchMethod);
+        std.log.debug("resolved method to {?}", .{method});
         if (method.flags.contains(.static)) return error.IncompatibleClassChange;
-        if (method.flags.contains(.abstract)) return error.AbstractMethod;
         // TODO check access control?
 
         // get this obj and null check
@@ -295,7 +295,9 @@ pub const InsnContext = struct {
         const selected_method = object.VmClass.selectMethod(this_obj.class.get(), method);
         std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.descriptor.str));
 
-        std.log.debug("resolved method to {?}", .{selected_method});
+        std.log.debug("selected method {?}", .{selected_method});
+
+        if (selected_method.flags.contains(.abstract)) return error.AbstractMethod;
 
         // invoke with caller frame
         if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_method, self.operandStack())) == null)
