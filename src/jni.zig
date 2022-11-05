@@ -125,12 +125,17 @@ pub const NativeMethodCode = struct {
         // pop args
         var to_pop: usize = self.arg_types.len - 1; // don't pop for jni table arg
         if (static_class != null) to_pop -= 1; // don't pop for static class arg
-        std.log.debug("popping {d} args from caller stack", .{to_pop});
+        if (to_pop > 0) std.log.debug("popping {d} args from caller stack", .{to_pop});
         while (to_pop > 0) : (to_pop -= 1) _ = caller.popRaw();
 
         // push return value
         if (self.ret_type != .void) {
-            caller.pushRaw(.{ .value = ret_slot, .ty = self.ret_type });
+            const ret = frame.Frame.StackEntry{ .value = ret_slot, .ty = self.ret_type };
+            // widen to integer like ireturn
+            caller.pushRaw(switch (self.ret_type) {
+                .boolean, .byte, .short, .int, .char => frame.Frame.StackEntry.new(ret.convertToInt()),
+                else => ret,
+            });
         }
     }
 
