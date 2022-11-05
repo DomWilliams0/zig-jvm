@@ -548,6 +548,16 @@ pub const InsnContext = struct {
         self.operandStack().push(res);
     }
 
+    fn rem(self: @This(), comptime T: type) Error!void {
+        const val2 = self.operandStack().pop(T);
+        const val1 = self.operandStack().pop(T);
+        if (val2 == 0) return error.Arithmetic;
+
+        const res = @rem(val1, val2);
+        std.log.debug("{d} % {d} = {d}", .{ val1, val2, res });
+        self.operandStack().push(res);
+    }
+
     const BinaryCmp = enum {
         eq,
         ne,
@@ -1193,6 +1203,9 @@ pub const handlers = struct {
     pub fn _ixor(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i32, .bit_xor);
     }
+    pub fn _irem(ctxt: InsnContext) Error!void {
+        return ctxt.rem(i32);
+    }
 
     pub fn _ladd(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i64, .add);
@@ -1223,6 +1236,9 @@ pub const handlers = struct {
     }
     pub fn _lxor(ctxt: InsnContext) Error!void {
         return ctxt.binaryOp(i64, .bit_xor);
+    }
+    pub fn _lrem(ctxt: InsnContext) Error!void {
+        return ctxt.rem(i64);
     }
 
     pub fn _fadd(ctxt: InsnContext) Error!void {
