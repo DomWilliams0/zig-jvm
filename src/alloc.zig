@@ -104,8 +104,10 @@ pub fn VmRef(comptime T: type) type {
 
         pub const NullablePtr = ?*InnerRef;
 
-        pub const Nullable = struct {
+        pub const Nullable = packed struct {
             ptr: NullablePtr,
+
+            pub const AsPointer = NullablePtr;
 
             pub fn nullRef() @This() {
                 return .{ .ptr = null };
@@ -125,6 +127,13 @@ pub fn VmRef(comptime T: type) type {
 
             pub fn cmpPtr(self: Nullable, other: Nullable) bool {
                 return self.ptr == other.ptr;
+            }
+
+            pub fn intoPtr(self: Nullable) NullablePtr {
+                return self.ptr;
+            }
+            pub fn fromPtr(ptr: NullablePtr) Nullable {
+                return .{ .ptr = ptr };
             }
 
             pub fn format(self: Nullable, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {

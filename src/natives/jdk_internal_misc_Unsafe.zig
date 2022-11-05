@@ -79,6 +79,84 @@ pub export fn Java_jdk_internal_misc_Unsafe_fullFence() void {
     @fence(.Acquire);
 }
 
+fn Sys(comptime from: type) type {
+    return switch (from) {
+        bool => sys.jboolean,
+        i64 => sys.jlong,
+        i32 => sys.jint,
+        jvm.VmObjectRef.Nullable => sys.jobject,
+        else => @compileError("no mapping for " ++ @typeName(from)),
+    };
+}
+
+const ObjPtr = jvm.VmObjectRef.Nullable.AsPointer;
+fn SysConvert(comptime from: type) type {
+    return switch (from) {
+        sys.jobject => ObjPtr,
+        else => jni.ConversionType(from),
+    };
+}
+
+fn sys_convert(val: anytype) SysConvert(@TypeOf(val)) {
+    return switch (@TypeOf(val)) {
+        sys.jobject => jni.convert(val).intoPtr(),
+        else => jni.convert(val),
+    };
+}
+
+fn compareAndSet(comptime T: type, jobj: sys.jobject, offset: sys.jlong, expected: Sys(T), x: Sys(T)) sys.jboolean {
+    const obj = jni.convert(jobj).toStrongUnchecked(); // no null
+    const byte_offset = @intCast(usize, jni.convert(offset)); // assume offset comes from other Unsafe native methods, so won't be negative or invalid
+
+    const cmp_ty = if (T == jvm.VmObjectRef.Nullable) ObjPtr else T;
+    const ptr = obj.get().getFieldFromOffset(cmp_ty, byte_offset);
+
+    // hotspot uses "conservative" ordering, i.e. 2 way fence
+    @fence(.SeqCst);
+    const ret = @cmpxchgStrong(cmp_ty, ptr, sys_convert(expected), sys_convert(x), .Monotonic, .Monotonic) == null;
+    @fence(.SeqCst);
+
+    return jni.convert(ret);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetInt(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jint, x: sys.jint) sys.jboolean {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return compareAndSet(i32, jobj, offset, expected, x);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetLong(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jlong, x: sys.jlong) sys.jboolean {
+    _ = unsafe_cls;
+    _ = raw_env;
+    return compareAndSet(i64, jobj, offset, expected, x);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetReference(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jobject, x: sys.jobject) sys.jboolean {
+    _ = unsafe_cls;
+    _ = raw_env;
+    // TODO is this adding an extra layer of indirection?
+    return compareAndSet(jvm.VmObjectRef.Nullable, jobj, offset, expected, x);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_getReferenceVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jobject {
+    _ = unsafe_cls;
+    _ = raw_env;
+
+    const obj = jni.convert(jobj).toStrongUnchecked(); // no null
+    const byte_offset = @intCast(usize, jni.convert(offset)); // assume offset comes from other Unsafe native methods, so won't be negative or invalid
+
+    const ptr = obj.get().getFieldFromOffset(ObjPtr, byte_offset);
+    const loaded_ptr = @atomicLoad(ObjPtr, ptr, .SeqCst);
+    const loaded = jvm.VmObjectRef.Nullable.fromPtr(loaded_ptr);
+
+    // const obj_ref_int = @Type(.{ .Int = .{ .signedness = .unsigned, .bits = @bitSizeOf(jvm.VmObjectRef.Nullable) } });
+    // const loaded_int = @atomicLoad(obj_ref_int, @ptrCast(*obj_ref_int, ptr), .SeqCst);
+    // const loaded_obj = @bitCast(jvm.VmObjectRef.Nullable, loaded_int);
+
+    // TODO bump reference?
+    return jni.convert(loaded);
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_jdk_internal_misc_Unsafe_registerNatives", .desc = "()V" },
     .{ .method = "Java_jdk_internal_misc_Unsafe_getInt", .desc = "(Ljava/lang/Object;J)I" },

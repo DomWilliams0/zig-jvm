@@ -604,6 +604,12 @@ pub const VmObject = struct {
         }
     }
 
+    /// Use from jdk/internal/misc/Unsafe
+    pub fn getFieldFromOffset(self: *@This(), comptime T: type, offset: usize) *T {
+        var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+        return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+    }
+
     /// Instance field value as stack entry
     pub fn getRawField(self: *@This(), field: *const cafebabe.Field) StackEntry {
         const offset = field.u.layout_offset;

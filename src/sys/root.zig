@@ -8,7 +8,7 @@ const object = @import("../object.zig");
 const VmObjectRef = object.VmObjectRef;
 const VmClassRef = object.VmClassRef;
 
-fn ConversionType(comptime from: type) type {
+pub fn ConversionType(comptime from: type) type {
     return switch (from) {
         JniEnvPtr => *const JniEnv,
 
@@ -17,9 +17,13 @@ fn ConversionType(comptime from: type) type {
 
         sys.jobject => VmObjectRef.Nullable,
         VmObjectRef => sys.jobject,
+        VmObjectRef.Nullable => sys.jobject,
 
         sys.jobjectArray => VmObjectRef.Nullable,
         sys.jstring => VmObjectRef.Nullable,
+
+        sys.jlong => i64,
+        sys.jint => i32,
 
         bool => sys.jboolean,
         i64 => sys.jlong,
@@ -51,6 +55,9 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
 
         sys.jobject => rawToVmRef(VmObjectRef, val),
         VmObjectRef => vmRefToRaw(sys.jobject, val),
+        VmObjectRef.Nullable => vmRefToRaw(sys.jobject, val),
+
+        sys.jlong, sys.jint => val,
 
         bool => if (val) sys.JNI_TRUE else sys.JNI_FALSE,
         i64, i32 => val,
