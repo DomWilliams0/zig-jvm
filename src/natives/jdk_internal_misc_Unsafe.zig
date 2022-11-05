@@ -32,6 +32,49 @@ pub export fn Java_jdk_internal_misc_Unsafe_arrayIndexScale0(raw_env: jni.JniEnv
     return @intCast(sys.jint, cls_data.getArrayStride());
 }
 
+pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset0(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jfield: sys.jobject) sys.jlong {
+    _ = unsafe_cls;
+    _ = raw_env;
+
+    const field = jni.convert(jfield).toStrongUnchecked(); // null checked by Java caller
+
+    const s = jvm.object.VmObject.toString(field);
+    _ = s;
+
+    unreachable;
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset1(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jclass: sys.jclass, jfield_name: sys.jstring) sys.jlong {
+    _ = unsafe_cls;
+
+    const field_name = jni.convert(jfield_name).toStrongUnchecked(); // null checked by Java caller
+    const class = jni.convert(jclass).toStrongUnchecked(); // null checked by Java caller
+
+    // get field name as string
+    const thread = jvm.state.thread_state();
+    const field_name_utf8 = field_name.get().getStringValueUtf8(thread.global.allocator.inner) catch |e| {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(e)));
+        return 0;
+    } orelse unreachable; // definitely a string
+    defer thread.global.allocator.inner.free(field_name_utf8);
+
+    const field = class.get().findFieldByName(field_name_utf8) orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.Internal)));
+        return 0;
+    };
+
+    const val: i64 = if (field.flags.contains(.static))
+        @intCast(i64, @ptrToInt(&field.u.value)) // ptr to static value
+    else
+        @intCast(i64, field.u.layout_offset); // offset into object
+
+    return jni.convert(val);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_fullFence() void {
+    @fence(.Acquire);
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_jdk_internal_misc_Unsafe_registerNatives", .desc = "()V" },
     .{ .method = "Java_jdk_internal_misc_Unsafe_getInt", .desc = "(Ljava/lang/Object;J)I" },

@@ -5,8 +5,13 @@ const sys = jni.sys;
 const JniEnvPtr = jvm.jni.JniEnvPtr;
 
 pub export fn Java_java_lang_Runtime_maxMemory() sys.jlong {
-    // TODO actual limit
+    // TODO actual limit (configurable)
     return jni.convert(@as(i64, 1024 * 1024 * 1024)); // 1gb
+}
+
+pub export fn Java_java_lang_Runtime_availableProcessors() sys.jint {
+    // TODO actual processor count (configurable)
+    return jni.convert(@as(i32, 1));
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

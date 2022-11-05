@@ -295,6 +295,17 @@ pub const VmClass = struct {
         } else null;
     }
 
+    /// Looks in self only
+    pub fn findFieldByName(
+        self: @This(),
+        name: []const u8,
+    ) ?*Field {
+        return for (self.u.obj.fields) |m, i| {
+            if (std.mem.eql(u8, name, m.name))
+                break &self.u.obj.fields[i];
+        } else null;
+    }
+
     pub fn isObject(self: @This()) bool {
         return self.status.ty == .object;
     }
@@ -663,7 +674,7 @@ pub const VmObject = struct {
         return ret.convertTo(VmObjectRef.Nullable);
     }
 
-    /// Copy of string encoded to utf8
+    /// Copy of string encoded to utf8.
     /// Returns null if not a string
     pub fn getStringValueUtf8(
         self: *@This(),
