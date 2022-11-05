@@ -7,35 +7,49 @@ const arg = @import("arg.zig");
 const Allocator = std.mem.Allocator;
 
 pub const log_level: std.log.Level = .debug;
-var log_file: ?std.fs.File = null;
+const LogFile = struct {
+    file: std.fs.File,
+    file_writer: std.io.BufferedWriter(8192, std.fs.File.Writer),
+};
+var log_file: ?*LogFile = null;
 var log_mutex: std.Thread.Mutex = .{};
+var stderr_writer: std.io.BufferedWriter(8192, std.fs.File.Writer) = .{ .unbuffered_writer = std.io.getStdErr().writer() };
 
-fn openLogFile() !void {
+fn openLogFile(alloc: Allocator) !void {
     if (log_file != null) @panic("log file already initialised");
 
+    var l = try alloc.create(LogFile);
+    errdefer alloc.destroy(l);
+
     const file = try std.fs.createFileAbsolute("/tmp/jvmlog", .{});
-    log_file = file;
+    l.file = file;
+    l.file_writer = std.io.BufferedWriter(8192, std.fs.File.Writer){ .unbuffered_writer = l.file.writer() };
+
+    log_file = l;
 }
 
-fn closeLogFile() void {
+fn closeLogFile(alloc: Allocator) void {
     log_mutex.lock();
     defer log_mutex.unlock();
 
     if (log_file) |f| {
-        f.close();
+        f.file_writer.flush() catch {};
+        f.file.close();
+        alloc.destroy(f);
         log_file = null;
     }
 }
 
 pub fn main() !void {
-    openLogFile() catch |e| {
-        std.log.warn("couldn't open log file: {any}", .{e});
-    };
-    defer closeLogFile();
-
-    std.log.info("running test runner", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
+
+    openLogFile(alloc) catch |e| {
+        std.log.warn("couldn't open log file: {any}", .{e});
+    };
+    defer closeLogFile(alloc);
+
+    std.log.info("running test runner", .{});
 
     // defer _ = gpa.detectLeaks(); // run after other defers
 
@@ -223,14 +237,14 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    std.log.defaultLog(message_level, scope, format, args);
+    const level_txt = comptime message_level.asText();
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const msg = level_txt ++ prefix2 ++ format ++ "\n";
 
+    log_mutex.lock();
+    defer log_mutex.unlock();
     if (log_file) |f| {
-        log_mutex.lock();
-        defer log_mutex.unlock();
-
-        const level_txt = comptime message_level.asText();
-        const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-        nosuspend f.writer().print(level_txt ++ prefix2 ++ format ++ "\n", args) catch {};
+        nosuspend f.file_writer.writer().print(msg, args) catch unreachable;
     }
+    nosuspend stderr_writer.writer().print(msg, args) catch {};
 }
