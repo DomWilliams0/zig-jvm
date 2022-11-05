@@ -1101,6 +1101,9 @@ pub const handlers = struct {
         const val = stack.peekRaw();
         stack.insertAt(2, val);
     }
+    pub fn _dup2(ctxt: InsnContext) void {
+        ctxt.operandStack().dup2();
+    }
 
     pub fn _pop(ctxt: InsnContext) void {
         _ = ctxt.operandStack().popRaw();

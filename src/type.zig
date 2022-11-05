@@ -93,6 +93,10 @@ pub const DataType = enum(u4) {
         } else null;
     }
 
+    pub fn isWide(self: @This()) bool {
+        return self == .long or self == .double;
+    }
+
     pub fn size(self: @This()) u8 {
         return switch (self) {
             .boolean, .byte => 1,

@@ -195,6 +195,27 @@ pub const Frame = struct {
             }
         }
 
+        pub fn dup2(self: *@This()) void {
+            if (self.peekRaw().ty.isWide()) {
+                // move up top element only
+                self.stack[0] = (self.stack - 1)[0];
+                self.stack += 1;
+            } else {
+
+                // move up top 2 elements
+                self.stack[0] = (self.stack - 2)[0];
+                self.stack[1] = (self.stack - 1)[0];
+                self.stack += 2;
+            }
+
+            if (logging) {
+                if (self.peekRaw().ty.isWide())
+                    std.log.debug("operand stack: dup2 top elem ({s}): {?}", .{ @tagName(self.peekRaw().ty), self.peekRaw() })
+                else
+                    std.log.debug("operand stack: dup2 top elems [({s}): {?}, ({s}): {?}]", .{ @tagName(self.peekRaw().ty), self.peekRaw(), @tagName((self.stack - 2)[0].ty), (self.stack - 2)[0] });
+            }
+        }
+
         pub fn peekRawPtr(self: @This()) *Frame.StackEntry {
             std.debug.assert(!self.isEmpty());
             return &(self.stack - 1)[0];
@@ -704,10 +725,6 @@ test "operands to callee local vars JZ" {
 }
 
 test "operand stack push and pop" {
-    // std.testing.log_level = .debug;
-    const method = desc.MethodDescriptor.new("(IDFJZS)V").?;
-    _ = method;
-
     // setup stack
     var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
     var stack = Frame.OperandStack.new(&o_backing);
@@ -726,4 +743,43 @@ test "operand stack push and pop" {
     try std.testing.expectEqual(@as(i32, 10), stack.pop(i32));
 
     try std.testing.expect(stack.isEmpty());
+}
+
+test "operand stack dup2 wide" {
+    // std.testing.log_level = .debug;
+
+    // setup stack
+    var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&o_backing);
+    stack.push(@as(i32, 10)); // bottom of stack
+    stack.push(@as(f64, 44.4)); // wide at top of stack
+
+    stack.dup2();
+    stack.log();
+
+    try std.testing.expectEqual(stack.peekAt(f64, 0), 44.4);
+    try std.testing.expectEqual(stack.peekAt(f64, 1), 44.4);
+    try std.testing.expectEqual(stack.peekAt(i32, 2), 10);
+    try std.testing.expectEqual(stack.depth(), 3);
+}
+
+test "operand stack dup2 not wide" {
+    // std.testing.log_level = .debug;
+
+    // setup stack
+    var o_backing = [_]Frame.StackEntry{Frame.StackEntry.notPresent()} ** 8;
+    var stack = Frame.OperandStack.new(&o_backing);
+    stack.push(@as(i32, 10)); // bottom of stack
+    stack.push(@as(bool, true));
+    stack.push(@as(i16, 100)); // top of stack
+
+    stack.dup2();
+    stack.log();
+
+    try std.testing.expectEqual(stack.depth(), 5);
+    try std.testing.expectEqual(stack.peekAt(i16, 0), 100);
+    try std.testing.expectEqual(stack.peekAt(bool, 1), true);
+    try std.testing.expectEqual(stack.peekAt(i16, 2), 100);
+    try std.testing.expectEqual(stack.peekAt(bool, 3), true);
+    try std.testing.expectEqual(stack.peekAt(i32, 4), 10);
 }
