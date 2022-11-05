@@ -302,6 +302,35 @@ pub const InsnContext = struct {
             return error.InvocationException;
     }
 
+    fn invokeInterfaceMethod(self: @This(), idx: u16) InvokeError!void {
+        // lookup method name/type/class
+        const info = self.constantPool().lookupInterfaceMethod(idx) orelse unreachable;
+
+        // resolve referenced class
+        const cls_ref = try self.resolveClass(info.cls, .resolve_only);
+        const cls = cls_ref.get();
+
+        // resolve referenced interface method
+        const method = (cls.findInterfaceMethodRecursive(info.name, info.ty) orelse return error.IncompatibleClassChange);
+
+        // get this obj and null check
+        const this_obj_ref = self.operandStack().peekAt(VmObjectRef.Nullable, method.descriptor.param_count).toStrong() orelse return error.NullPointer;
+        const this_obj = this_obj_ref.get();
+        // select method based on this_obj runtime class and resolved method (5.4.6)
+        const selected_method = object.VmClass.selectMethod(this_obj.class.get(), method);
+        std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.descriptor.str));
+
+        std.log.debug("resolved interface method to {?}", .{selected_method});
+
+        if (selected_method.flags.contains(.static)) return error.IncompatibleClassChange;
+        if (selected_method.flags.contains(.abstract)) return error.AbstractMethod;
+        if (!selected_method.flags.contains(.public) and !selected_method.flags.contains(.private)) return error.AbstractMethod;
+
+        // invoke with caller frame
+        if ((try self.thread.interpreter.executeUntilReturnWithCallerFrame(selected_method, self.operandStack())) == null)
+            return error.InvocationException;
+    }
+
     fn resolveField(self: @This(), idx: u16, comptime variant: enum { instance, static }) Error!struct { field: *cafebabe.Field, fid: object.FieldId, cls: VmClassRef } {
         // lookup info
         const info = self.constantPool().lookupField(idx) orelse unreachable;
@@ -988,6 +1017,9 @@ pub const handlers = struct {
     }
     pub fn _invokevirtual(ctxt: InsnContext) InvokeError!void {
         return ctxt.invokeVirtualMethod(ctxt.readU16());
+    }
+    pub fn _invokeinterface(ctxt: InsnContext) InvokeError!void {
+        return ctxt.invokeInterfaceMethod(ctxt.readU16());
     }
 
     pub fn _putfield(ctxt: InsnContext) Error!void {

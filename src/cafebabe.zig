@@ -548,6 +548,16 @@ pub const ConstantPool = struct {
         return .{ .name = name_and_type.name, .ty = name_and_type.ty, .cls = cls };
     }
 
+    pub fn lookupInterfaceMethod(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8 } {
+        const body = self.lookup(idx_cp, Tag.interfaceMethodRef) orelse return null;
+        const cls_idx = std.mem.readInt(u16, &body[0], std.builtin.Endian.Big);
+        const name_and_type_idx = std.mem.readInt(u16, &body[2], std.builtin.Endian.Big);
+
+        const cls = self.lookupClass(cls_idx) orelse return null;
+        const name_and_type = self.lookupNameAndType(name_and_type_idx) orelse return null;
+        return .{ .name = name_and_type.name, .ty = name_and_type.ty, .cls = cls };
+    }
+
     pub fn lookupMethodOrInterfaceMethod(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8, is_interface: bool } {
         const method = self.lookupMany(idx_cp, .{ Tag.methodRef, Tag.interfaceMethodRef }) orelse return null;
         const cls_idx = std.mem.readInt(u16, &method.body[0], std.builtin.Endian.Big);
