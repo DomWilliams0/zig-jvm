@@ -45,63 +45,101 @@ const PropertyIndices = struct {
 };
 
 pub const PlatformProperties = struct {
-    display_country: [*c]const u8,
-    display_language: [*c]const u8,
-    display_script: [*c]const u8,
-    display_variant: [*c]const u8,
-    file_encoding: [*c]const u8,
-    file_separator: [*c]const u8,
-    format_country: [*c]const u8,
-    format_language: [*c]const u8,
-    format_script: [*c]const u8,
-    format_variant: [*c]const u8,
-    ftp_nonProxyHosts: [*c]const u8,
-    ftp_proxyHost: [*c]const u8,
-    ftp_proxyPort: [*c]const u8,
-    http_nonProxyHosts: [*c]const u8,
-    http_proxyHost: [*c]const u8,
-    http_proxyPort: [*c]const u8,
-    https_proxyHost: [*c]const u8,
-    https_proxyPort: [*c]const u8,
-    java_io_tmpdir: [*c]const u8,
-    line_separator: [*c]const u8,
-    os_arch: [*c]const u8,
-    os_name: [*c]const u8,
-    os_version: [*c]const u8,
-    path_separator: [*c]const u8,
-    socksNonProxyHosts: [*c]const u8,
-    socksProxyHost: [*c]const u8,
-    socksProxyPort: [*c]const u8,
-    sun_arch_abi: [*c]const u8,
-    sun_arch_data_model: [*c]const u8,
-    sun_cpu_endian: [*c]const u8,
-    sun_cpu_isalist: [*c]const u8,
-    sun_io_unicode_encoding: [*c]const u8,
-    sun_jnu_encoding: [*c]const u8,
-    sun_os_patch_level: [*c]const u8,
-    sun_stderr_encoding: [*c]const u8,
-    sun_stdout_encoding: [*c]const u8,
-    user_dir: [*c]const u8,
-    user_home: [*c]const u8,
-    user_name: [*c]const u8,
+    display_country: ?[:0]const u8 = null,
+    display_language: ?[:0]const u8 = null,
+    display_script: ?[:0]const u8 = null,
+    display_variant: ?[:0]const u8 = null,
+    file_encoding: ?[:0]const u8 = null,
+    file_separator: ?[:0]const u8 = null,
+    format_country: ?[:0]const u8 = null,
+    format_language: ?[:0]const u8 = null,
+    format_script: ?[:0]const u8 = null,
+    format_variant: ?[:0]const u8 = null,
+    ftp_nonProxyHosts: ?[:0]const u8 = null,
+    ftp_proxyHost: ?[:0]const u8 = null,
+    ftp_proxyPort: ?[:0]const u8 = null,
+    http_nonProxyHosts: ?[:0]const u8 = null,
+    http_proxyHost: ?[:0]const u8 = null,
+    http_proxyPort: ?[:0]const u8 = null,
+    https_proxyHost: ?[:0]const u8 = null,
+    https_proxyPort: ?[:0]const u8 = null,
+    java_io_tmpdir: ?[:0]const u8 = null,
+    line_separator: ?[:0]const u8 = null,
+    os_arch: ?[:0]const u8 = null,
+    os_name: ?[:0]const u8 = null,
+    os_version: ?[:0]const u8 = null,
+    path_separator: ?[:0]const u8 = null,
+    socksNonProxyHosts: ?[:0]const u8 = null,
+    socksProxyHost: ?[:0]const u8 = null,
+    socksProxyPort: ?[:0]const u8 = null,
+    sun_arch_abi: ?[:0]const u8 = null,
+    sun_arch_data_model: ?[:0]const u8 = null,
+    sun_cpu_endian: ?[:0]const u8 = null,
+    sun_cpu_isalist: ?[:0]const u8 = null,
+    sun_io_unicode_encoding: ?[:0]const u8 = null,
+    sun_jnu_encoding: ?[:0]const u8 = null,
+    sun_os_patch_level: ?[:0]const u8 = null,
+    sun_stderr_encoding: ?[:0]const u8 = null,
+    sun_stdout_encoding: ?[:0]const u8 = null,
+    user_dir: ?[:0]const u8 = null,
+    user_home: ?[:0]const u8 = null,
+    user_name: ?[:0]const u8 = null,
 
-    pub fn fetch() PlatformProperties {
-        var props = std.mem.zeroes(PlatformProperties);
+    pub fn fetch(alloc: std.mem.Allocator) error{ OutOfMemory, Internal }!PlatformProperties {
+        var props = PlatformProperties{};
 
-        // TODO more props
-        if (std.os.getenv("HOME")) |s| props.user_home = s.ptr;
+        // TODO better non-env reliant way of getting user things
+        if (std.os.getenv("HOME")) |s| props.user_home = try alloc.dupeZ(u8, s);
+        if (std.os.getenv("USER")) |s| props.user_name = try alloc.dupeZ(u8, s);
+
+        {
+            var buf = try alloc.alloc(u8, std.fs.MAX_NAME_BYTES);
+            const path = std.fs.cwd().realpath(".", buf) catch return error.Internal;
+            buf[path.len] = 0; // manually null terminate
+            props.user_dir = buf[0..path.len :0];
+        }
+
+        const builtin = @import("builtin");
+        const big_endian = builtin.cpu.arch.endian() == .Big;
+        // TODO not portable
+        props.java_io_tmpdir = "/tmp";
+        props.sun_cpu_endian = if (big_endian) "big" else "little";
+
+        const uname = std.os.uname();
+        // std.mem.span doesn't get the length properly
+        props.os_name = try alloc.dupeZ(u8, uname.sysname[0..std.mem.indexOfSentinel(u8, 0, &uname.sysname)]);
+        props.os_version = try alloc.dupeZ(u8, uname.release[0..std.mem.indexOfSentinel(u8, 0, &uname.release)]);
+        props.os_arch = @tagName(builtin.cpu.arch);
+
+        // TODO get actual lang
+        props.display_language = "en";
+        props.sun_jnu_encoding = if (big_endian) "UnicodeBig" else "UnicodeLittle";
+
+        props.file_separator = comptime &.{std.fs.path.sep}; // TODO is this a local?
+        props.path_separator = ":";
+        props.line_separator = std.cstr.line_sep;
 
         return props;
     }
 
-    pub fn toArray(self: @This()) [PropertyIndices._LENGTH][*c]const u8 {
-        var arr: [PropertyIndices._LENGTH][*c]const u8 = .{null} ** PropertyIndices._LENGTH;
+    pub fn deinit(self: @This(), alloc: std.mem.Allocator) void {
+        if (self.user_home) |s| alloc.free(s);
+        if (self.user_name) |s| alloc.free(s);
+        if (self.user_dir) |s| alloc.free(s);
+        if (self.os_name) |s| alloc.free(s);
+        if (self.os_version) |s| alloc.free(s);
+    }
+
+    pub fn toArray(self: @This()) [PropertyIndices._LENGTH]?[:0]const u8 {
+        var arr: [PropertyIndices._LENGTH]?[:0]const u8 = .{null} ** PropertyIndices._LENGTH;
 
         inline for (@typeInfo(@This()).Struct.fields) |f| {
             const value = @field(self, f.name);
             if (value) |str| {
+                // @compileLog(str);
+                std.log.debug("PlatformProperties[{s}] = \"{any}\"", .{ f.name, std.fmt.fmtSliceEscapeLower(str) });
                 const idx = @field(PropertyIndices, std.fmt.comptimePrint("_{s}_NDX", .{f.name}));
-                arr[idx] = str;
+                arr[idx] = value;
             }
         }
 
@@ -109,7 +147,45 @@ pub const PlatformProperties = struct {
     }
 };
 
-test "asdf" {
-    _ = PropertyIndices;
-    _ = PlatformProperties;
-}
+const arg = @import("arg.zig");
+pub const SystemProperties = struct {
+    java_home: [:0]const u8,
+    java_vm_specification_name: [:0]const u8,
+    java_vm_specification_vendor: [:0]const u8,
+    java_vm_specification_version: [:0]const u8,
+    java_vm_version: [:0]const u8,
+    java_vm_name: [:0]const u8,
+
+    // java_class_path: [:0]const u8,
+    // java_library_path: [:0]const u8,
+
+    pub fn fetch(args: *const arg.JvmArgs) SystemProperties {
+        _ = args;
+        // TODO rewrite arg parsing then pass this in
+        return .{
+            .java_home = "/usr/lib/jvm/java-19-openjdk",
+            .java_vm_specification_name = "Java Virtual Machine Specification",
+            .java_vm_specification_vendor = "Oracle Corporation",
+            .java_vm_specification_version = "18",
+            .java_vm_name = "ZigJVM",
+            .java_vm_version = "0.1",
+        };
+    }
+
+    pub fn keyValues(self: @This()) [@typeInfo(@This()).Struct.fields.len][2][:0]const u8 {
+        const fields = @typeInfo(@This()).Struct.fields;
+        var out: [fields.len][2][:0]const u8 = undefined;
+
+        inline for (fields) |f, i| {
+            comptime var key: [f.name.len:0]u8 = undefined;
+            comptime {
+                std.mem.copy(u8, &key, f.name);
+                std.mem.replaceScalar(u8, &key, '_', '.');
+                out[i][0] = &key;
+                out[i][1] = @field(self, f.name);
+            }
+        }
+
+        return out;
+    }
+};

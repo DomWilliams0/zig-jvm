@@ -66,11 +66,17 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
     };
 }
 
-pub fn convertObject(comptime T: type, val: VmObjectRef.Nullable) T {
+pub fn convertObject(comptime T: type, val: anytype) T {
     switch (T) {
         sys.jclass, sys.jthrowable, sys.jstring, sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray, sys.jweak => {},
         else => @compileError("cannot convert " ++ @typeName(T) ++ " to jobject"),
     }
 
-    return vmRefToRaw(T, val);
+    const nullable = switch (@TypeOf(val)) {
+        VmObjectRef => val.intoNullable(),
+        VmObjectRef.Nullable => val,
+        else => @compileError("not an object " ++ @typeName(@TypeOf(val))),
+    };
+
+    return vmRefToRaw(T, nullable);
 }

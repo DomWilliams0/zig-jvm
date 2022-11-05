@@ -11,15 +11,10 @@ pub const JniEnv = blk: {
 
     inline for (@typeInfo(sys.struct_JNINativeInterface_).Struct.fields) |f, i| {
         var new_field = f;
-        comptime var non_optional = @typeInfo(f.field_type).Optional.child;
-
-        switch (@typeInfo(non_optional)) {
-            .Pointer => |p| {
-                if (p.child != anyopaque)
-                    new_field.field_type = non_optional;
-            },
-            else => {},
-        }
+        comptime var non_optional_ptr = @typeInfo(f.field_type).Optional.child;
+        const ptr_ty = @typeInfo(non_optional_ptr).Pointer.child;
+        if (ptr_ty != anyopaque)
+            new_field.field_type = non_optional_ptr; // fn pointer
         fields[i] = new_field;
     }
 
@@ -115,6 +110,45 @@ const impl = struct {
         if (!jni.convert(initial_elem).isNull()) @panic("TODO array initial elem");
 
         return jni.convertObject(sys.jobjectArray, array.intoNullable());
+    }
+    pub fn SetObjectArrayElement(raw_env: JniEnvPtr, jarray: sys.jobjectArray, index: sys.jsize, jvalue: sys.jobject) callconv(.C) void {
+        _ = raw_env;
+        const array_obj = jni.convert(jarray).toStrongUnchecked();
+        const array = array_obj.get().getArrayHeader();
+        const elems = array.getElems(object.VmObjectRef.Nullable);
+
+        if (index < 0 or index >= elems.len) {
+            state.thread_state().interpreter.setException(state.errorToException(error.ArrayIndexOutOfBounds));
+            return;
+        }
+
+        const value = jni.convert(jvalue);
+        if (value.toStrong()) |val| {
+            std.debug.assert(array_obj.get().class.get().isArray());
+            const array_elem_cls = array_obj.get().class.get().u.array.elem_cls;
+            const value_cls = val.get().class;
+            if (!object.VmClass.isInstanceOf(value_cls, array_elem_cls)) {
+                state.thread_state().interpreter.setException(state.errorToException(error.ArrayStore));
+                return;
+            }
+        }
+
+        elems[@intCast(usize, index)] = value;
+    }
+
+    pub fn NewStringUTF(raw_env: JniEnvPtr, bytes: [*c]const u8) callconv(.C) sys.jstring {
+        _ = raw_env;
+        // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
+        const thread = state.thread_state();
+        const str = thread.global.string_pool.getString(std.mem.span(bytes)) catch |e| {
+            if (e == error.OutOfMemory) {
+                // can only throw OutOfMemoryError
+                thread.interpreter.setException(state.errorToException(e));
+            }
+
+            return null;
+        };
+        return jni.convertObject(sys.jstring, str);
     }
 
     pub fn GetStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, is_copy: [*c]sys.jboolean) callconv(.C) [*c]const u8 {
