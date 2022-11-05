@@ -556,8 +556,25 @@ pub const VmObject = struct {
         self.class.drop();
     }
 
-    pub fn formatVmRef(self: *const @This(), writer: anytype) !void {
-        return std.fmt.format(writer, "{s}", .{self.class.get().name});
+    pub fn formatVmRef(self: *@This(), writer: anytype) !void {
+        try std.fmt.format(writer, "{s}", .{self.class.get().name});
+
+        // TODO use fmt to determine whether to print string value
+        var buf: [1025]u8 = undefined;
+        var alloc = std.heap.FixedBufferAllocator.init(&buf);
+
+        const str: []const u8 = blk: {
+            const res = self.getStringValueUtf8(alloc.allocator()) catch |e|
+                if (e == error.OutOfMemory)
+            {
+                std.mem.set(u8, buf[buf.len - 4 ..], '.');
+                break :blk &buf;
+            } else return;
+
+            break :blk res orelse return;
+        };
+
+        try std.fmt.format(writer, "(\"{s}\")", .{str});
     }
 
     /// Instance field
@@ -651,7 +668,8 @@ pub const VmObject = struct {
     ) error{ OutOfMemory, IllegalArgument }!?[:0]const u8 {
         const global = state.thread_state().global;
         const strings = global.string_pool;
-        if (!self.class.cmpPtr(strings.java_lang_String.toStrongUnchecked())) return null;
+        const java_lang_String = strings.java_lang_String.toStrong() orelse return null; // not yet loaded
+        if (!self.class.cmpPtr(java_lang_String)) return null;
         var byte_array = self.getField(VmObjectRef.Nullable, strings.field_value).*.toStrong() orelse return null;
         const array = byte_array.get().getArrayHeader();
         return std.unicode.utf16leToUtf8AllocZ(alloc, array.getElems(u16)) catch |e| {
