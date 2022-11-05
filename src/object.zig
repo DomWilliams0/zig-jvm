@@ -75,6 +75,9 @@ pub const VmClass = struct {
         }
 
         if (self.super_cls.toStrong()) |super| super.drop();
+
+        for (self.interfaces) |iface| iface.drop();
+        alloc.free(self.interfaces);
     }
 
     pub fn formatVmRef(self: *const @This(), writer: anytype) !void {

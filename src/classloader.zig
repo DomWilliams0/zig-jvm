@@ -374,6 +374,7 @@ pub const ClassLoader = struct {
             },
         };
         errdefer classfile.deinit(self.alloc);
+        defer classfile.interfaces.deinit(self.alloc);
 
         if (!std.mem.eql(u8, name, classfile.this_cls)) return error.ClassFormat;
 
@@ -384,13 +385,25 @@ pub const ClassLoader = struct {
 
         // TODO validate superclass (5.3.5 step 3)
 
+        // resolve interfaces
+        const interfaces = blk: {
+            var slice = try self.alloc.alloc(VmClassRef, classfile.interfaces.items.len);
+            errdefer self.alloc.free(slice);
+
+            for (classfile.interfaces.items) |iface_name, i|
+                slice[i] = (try self.loadClass(iface_name, loader)).clone();
+
+            break :blk slice;
+        };
+        errdefer self.alloc.free(interfaces);
+
         var class = try object.VmClassRef.new();
         errdefer class.drop();
         class.get().* = .{
             .flags = classfile.flags,
             .name = classfile.this_cls,
             .super_cls = super_class,
-            .interfaces = &.{}, // TODO
+            .interfaces = interfaces,
             .status = .{ .ty = .object },
             .u = .{
                 .obj = .{
@@ -416,8 +429,6 @@ pub const ClassLoader = struct {
         class.get().u.obj.layout = layout;
         std.log.debug("{s} has layout {any}", .{ name, layout });
 
-        // TODO interfaces are not yet implemented
-        classfile.interfaces.deinit(self.alloc);
         return class;
     }
 
