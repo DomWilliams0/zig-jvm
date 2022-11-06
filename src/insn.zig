@@ -1168,9 +1168,16 @@ pub const handlers = struct {
         });
         std.debug.assert(obj.get().class.get().isObject()); // verified
 
-        const value = obj.get().getRawField(field.field);
+        var value = obj.get().getRawField(field.field);
+
+        // widen to int
+        switch (value.ty) {
+            .boolean, .byte, .char, .short => value = frame.Frame.StackEntry.new(value.convertToInt()),
+            else => {},
+        }
+
         ctxt.operandStack().pushRaw(value);
-        std.log.debug("getfield({}, {s}) = {x}", .{ obj_ref, field.field.name, value });
+        std.log.debug("getfield({}, {s}) = {?}", .{ obj_ref, field.field.name, value });
     }
 
     pub fn _iadd(ctxt: InsnContext) Error!void {
