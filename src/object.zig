@@ -74,7 +74,7 @@ pub const VmClass = struct {
             self.u.array.elem_cls.drop();
         }
 
-        if (self.super_cls.toStrong()) |super| super.drop();
+        self.super_cls.drop();
 
         for (self.interfaces) |iface| iface.drop();
         alloc.free(self.interfaces);

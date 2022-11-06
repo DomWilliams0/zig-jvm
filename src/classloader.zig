@@ -128,7 +128,7 @@ pub const ClassLoader = struct {
         self.natives = .{};
 
         for (self.primitives) |prim| {
-            if (prim.toStrong()) |p| p.drop();
+            prim.drop();
         }
     }
 

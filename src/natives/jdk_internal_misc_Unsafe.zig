@@ -97,15 +97,18 @@ fn resolvePtr(comptime T: type, jobj: sys.jobject, offset: sys.jlong) *T {
     return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr)); // should be well aligned
 }
 
-fn compareAndSet(comptime T: type, jobj: sys.jobject, offset: sys.jlong, expected: Sys(T), x: Sys(T)) sys.jboolean {
+fn compareAndExchange(comptime T: type, jobj: sys.jobject, offset: sys.jlong, expected: Sys(T), x: Sys(T)) ?T {
     const ptr = resolvePtr(T, jobj, offset);
 
-    // hotspot uses "conservative" ordering, i.e. 2 way fence
+    // hotspot defaults to "conservative" ordering, i.e. 2 way fence
     @fence(.SeqCst);
-    const ret = @cmpxchgStrong(T, ptr, sys_convert(expected), sys_convert(x), .Monotonic, .Monotonic) == null;
+    const ret = if (T == jvm.VmObjectRef.Nullable)
+        jvm.VmObjectRef.Nullable.atomicCompareAndExchange(ptr, jni.convert(expected), jni.convert(x), .Monotonic)
+    else
+        @cmpxchgStrong(T, ptr, jni.convert(expected), jni.convert(x), .Monotonic, .Monotonic);
     @fence(.SeqCst);
 
-    return jni.convert(ret);
+    return ret;
 }
 
 fn get(comptime T: type, comptime atomic: enum { volatile_, normal }, jobj: sys.jobject, offset: sys.jlong) Sys(T) {
@@ -119,19 +122,28 @@ fn get(comptime T: type, comptime atomic: enum { volatile_, normal }, jobj: sys.
 }
 
 pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetInt(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jint, x: sys.jint) sys.jboolean {
-    return compareAndSet(i32, jobj, offset, expected, x);
+    return jni.convert(compareAndExchange(i32, jobj, offset, expected, x) == null);
 }
 
 pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetLong(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jlong, x: sys.jlong) sys.jboolean {
-    return compareAndSet(i64, jobj, offset, expected, x);
+    return jni.convert(compareAndExchange(i64, jobj, offset, expected, x) == null);
 }
 
-// pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetReference(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jobject, x: sys.jobject) sys.jboolean {
-//     _ = unsafe_cls;
-//     _ = raw_env;
-//     // TODO is this adding an extra layer of indirection?
-//     return compareAndSet(jvm.VmObjectRef.Nullable, jobj, offset, expected, x);
-// }
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetReference(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jobject, x: sys.jobject) sys.jboolean {
+    return jni.convert(compareAndExchange(jvm.VmObjectRef.Nullable, jobj, offset, expected, x) == null);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndExchangeInt(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jint, x: sys.jint) sys.jint {
+    return jni.convert(compareAndExchange(i32, jobj, offset, expected, x) orelse expected);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndExchangeLong(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jlong, x: sys.jlong) sys.jlong {
+    return jni.convert(compareAndExchange(i64, jobj, offset, expected, x) orelse expected);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndExchangeReference(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jobject, x: sys.jobject) sys.jobject {
+    return if (compareAndExchange(jvm.VmObjectRef.Nullable, jobj, offset, expected, x)) |p| jni.convert(p) else expected;
+}
 
 pub export fn Java_jdk_internal_misc_Unsafe_getReferenceVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jobject {
     return get(jvm.object.VmObjectRef.Nullable, .volatile_, jobj, offset);

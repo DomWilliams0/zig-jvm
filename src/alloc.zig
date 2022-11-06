@@ -124,6 +124,16 @@ pub fn VmRef(comptime T: type) type {
                 return Strong{ .ptr = self.ptr.? };
             }
 
+            pub fn drop(self: @This()) void {
+                if (self.toStrong()) |p| p.drop();
+            }
+
+            pub fn clone(self: @This()) void {
+                if (self.toStrong()) |p| {
+                    _ = p.clone();
+                }
+            }
+
             pub fn cmpPtr(self: Nullable, other: Nullable) bool {
                 return self.ptr == other.ptr;
             }
@@ -154,12 +164,8 @@ pub fn VmRef(comptime T: type) type {
                 const dst_ptr: *?*InnerRef = &dst.ptr;
                 @atomicStore(?*InnerRef, dst_ptr, src_ptr, order);
 
-                if (Nullable.fromPtr(old).toStrong()) |p| {
-                    _ = p.drop();
-                }
-                if (src.toStrong()) |p| {
-                    _ = p.clone();
-                }
+                Nullable.fromPtr(old).drop();
+                src.clone();
             }
 
             /// Returns owned reference
@@ -168,10 +174,25 @@ pub fn VmRef(comptime T: type) type {
                 const local = @atomicLoad(?*InnerRef, src_ptr, order);
                 const copy = Nullable{ .ptr = local };
 
-                if (copy.toStrong()) |p| {
-                    _ = p.clone();
-                }
+                copy.clone();
                 return copy;
+            }
+
+            pub fn atomicCompareAndExchange(dst: *Nullable, expected: Nullable, new_value: Nullable, comptime order: AtomicOrder) ?Nullable {
+                const old: ?*InnerRef = dst.ptr;
+                const dst_ptr: *?*InnerRef = &dst.ptr;
+
+                const ret = @cmpxchgStrong(?*InnerRef, dst_ptr, expected.ptr, new_value.ptr, order, order);
+                if (ret == null) {
+                    // expected was copied into dst
+                    Nullable.fromPtr(old).drop();
+                    expected.clone();
+
+                    return null;
+                }
+
+                // did not copy
+                return Nullable.fromPtr(old);
             }
         };
 
