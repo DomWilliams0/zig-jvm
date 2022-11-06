@@ -275,7 +275,7 @@ pub const ClassLoader = struct {
         var class = try object.VmClassRef.new();
         errdefer class.drop();
 
-        const padding = elem_class.calculateArrayPreElementPadding();
+        const padding = elem_class.getArrayPreElementPadding();
         class.get().* = .{
             .flags = flags,
             .name = try self.alloc.dupe(u8, name),

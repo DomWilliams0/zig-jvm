@@ -408,9 +408,31 @@ pub const VmClass = struct {
         return obj_ref;
     }
 
-    /// Returns padding between object.storage and start of elements (skipping past header)
-    pub fn calculateArrayPreElementPadding(self: @This()) u8 {
-        return std.mem.alignForwardGeneric(u8, @sizeOf(ArrayHeader), if (self.isPrimitive()) self.u.primitive.alignment() else @alignOf(usize));
+    pub fn getArrayPreElementPadding(self: @This()) u8 {
+        return arrayPreElementPadding(if (self.isPrimitive()) self.u.primitive.alignment() else @alignOf(*u8));
+    }
+
+    /// Returns padding between end of ArrayHeader and elements
+    pub fn arrayPreElementPadding(elem_alignment: u8) u8 {
+        const base = @as(i32, @sizeOf(VmObject) + @sizeOf(ArrayHeader));
+        return @intCast(u8, (-base) & (elem_alignment - 1));
+    }
+
+    test "array padding" {
+        // std.testing.log_level = .debug;
+        const S = struct {
+            fn check(alignment: u8) !void {
+                const base_addr = @sizeOf(VmObject) + @sizeOf(ArrayHeader);
+                const padding = arrayPreElementPadding(alignment);
+                const aligned = base_addr + padding;
+                std.log.debug("object base {d} + padding {d} to get {d}, should be aligned to {d}", .{ base_addr, padding, aligned, alignment });
+                try std.testing.expect(std.mem.isAligned(aligned, alignment));
+            }
+        };
+        try S.check(1);
+        try S.check(2);
+        try S.check(4);
+        try S.check(8);
     }
 
     /// Self is array class, and is cloned to pass to object
@@ -529,7 +551,8 @@ pub const VmClass = struct {
     /// Must be array class
     pub fn getArrayBaseOffset(self: @This()) usize {
         std.debug.assert(self.isArray());
-        return @offsetOf(VmObject, "storage") + self.u.array.padding;
+        std.log.debug("array base offset {d} + {d} + {d}", .{ @offsetOf(VmObject, "storage"), @sizeOf(ArrayHeader), self.u.array.padding });
+        return @offsetOf(VmObject, "storage") + @sizeOf(ArrayHeader) + self.u.array.padding;
     }
 
     /// Must be array class
@@ -817,12 +840,11 @@ const ArrayHeader = struct {
     /// Padding between start of this header and the elements
     padding: u8,
 
-    /// Here is `this.padding` bytes of padding then the elements
-    next: void = {},
+    elem_start: void = {},
 
     // Must be within a VmObject
     pub fn getElemsRaw(self: *@This()) []u8 {
-        var start: [*]u8 = @ptrCast([*]u8, @alignCast(1, self)) + self.padding;
+        var start: [*]u8 = @ptrCast([*]u8, @alignCast(1, &self.elem_start)) + self.padding;
         const slice_len = self.array_len * self.elem_sz;
         return start[0..slice_len];
     }
@@ -1087,6 +1109,7 @@ test "allocate object" {
 }
 
 test "allocate array" {
+    // std.testing.log_level = .debug;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // allow leaks in test
     const alloc = gpa.allocator();
 
@@ -1102,7 +1125,7 @@ test "allocate array" {
             const cls = try VmClassRef.new();
             cls.get().name = "Dummy";
             cls.get().status = .{ .ty = .array };
-            cls.get().u = .{ .array = .{ .elem_cls = elem_cls.clone(), .dims = 1, .padding = cls.get().calculateArrayPreElementPadding() } };
+            cls.get().u = .{ .array = .{ .elem_cls = elem_cls.clone(), .dims = 1, .padding = cls.get().getArrayPreElementPadding() } };
             // defer cls.drop();
 
             const obj = try VmClass.instantiateArray(cls, 12);
