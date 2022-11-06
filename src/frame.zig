@@ -115,13 +115,20 @@ pub const Frame = struct {
             return @ptrCast(*T, &self.value);
         }
 
-        /// Allow bool if T==i8
         fn convertToPtrFfi(self: *@This(), comptime T: type) *T {
-            if (self.ty != types.DataType.fromType(T)) {
-                if (T == i8 and self.ty == .boolean) {} // allow
-                else typeMismatch(T, self.ty);
-            }
+            const valid = switch (T) {
+                bool, i8, i16, i32, u16 => self.ty == .int,
+                else => self.ty == types.DataType.fromType(T),
+            };
+            if (!valid) typeMismatch(T, self.ty);
             return @ptrCast(*T, &self.value);
+        }
+
+        test "ffi ptr" {
+            var e = StackEntry.new(true);
+            e = StackEntry.new(e.convertToInt());
+            const ptr = e.convertToPtrFfi(i8);
+            try std.testing.expectEqual(ptr.*, 1);
         }
 
         pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {

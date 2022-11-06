@@ -149,12 +149,13 @@ pub const NativeMethodCode = struct {
 test "libffi" {
     // std.testing.log_level = .debug;
     const S = struct {
-        fn the_func(jni: *anyopaque, this: *anyopaque, int: i32, float: f32) callconv(.C) i32 {
+        fn the_func(jni: *anyopaque, this: *anyopaque, int: i32, float: f32, long: i64) callconv(.C) i32 {
             _ = jni;
             _ = this;
 
             std.testing.expect(int == 0x12345678) catch unreachable;
             std.testing.expect(float == 3.14) catch unreachable;
+            std.testing.expect(long == 0x12121212_24242424) catch unreachable;
 
             return 123;
         }
@@ -164,7 +165,7 @@ test "libffi" {
     const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
     defer handle.deinit();
 
-    const desc = descriptor.MethodDescriptor.new("(IFJZSB)I").?;
+    const desc = descriptor.MethodDescriptor.new("(IFJ)I").?;
     var native = NativeMethodCode.new(std.testing.allocator, desc, &S.the_func) catch unreachable;
     defer native.deinit(std.testing.allocator);
 
@@ -175,9 +176,6 @@ test "libffi" {
     stack.push(@as(i32, 0x12345678));
     stack.push(@as(f32, 3.14));
     stack.push(@as(i64, 0x12121212_24242424));
-    stack.push(@as(bool, true));
-    stack.push(@as(i16, -1024));
-    stack.push(@as(i8, 105));
 
     native.invoke(&stack, null);
     try std.testing.expectEqual(@as(i32, 123), stack.pop(i32));
