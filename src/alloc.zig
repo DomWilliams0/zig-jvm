@@ -1,6 +1,7 @@
 const std = @import("std");
 const state = @import("state.zig");
 const Allocator = std.mem.Allocator;
+const AtomicOrder = std.builtin.AtomicOrder;
 
 /// Verbose reference counting logging
 pub var logging = false;
@@ -8,7 +9,7 @@ pub var logging = false;
 /// Never null! Pass around `Nullable`.
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
-    return struct {
+    return packed struct {
         const Counter = std.atomic.Atomic(u32);
         const max_counter = std.math.maxInt(u32) - 1;
 
@@ -107,8 +108,6 @@ pub fn VmRef(comptime T: type) type {
         pub const Nullable = packed struct {
             ptr: NullablePtr,
 
-            pub const AsPointer = NullablePtr;
-
             pub fn nullRef() @This() {
                 return .{ .ptr = null };
             }
@@ -146,6 +145,33 @@ pub fn VmRef(comptime T: type) type {
 
                     return std.fmt.format(writer, "@{x}", .{@ptrToInt(strong.ptr)});
                 } else return std.fmt.formatBuf("(null)", options, writer);
+            }
+
+            pub fn atomicStore(dst: *Nullable, src: Nullable, comptime order: AtomicOrder) void {
+                const old: ?*InnerRef = dst.ptr;
+
+                const src_ptr: ?*InnerRef = src.ptr;
+                const dst_ptr: *?*InnerRef = &dst.ptr;
+                @atomicStore(?*InnerRef, dst_ptr, src_ptr, order);
+
+                if (Nullable.fromPtr(old).toStrong()) |p| {
+                    _ = p.drop();
+                }
+                if (src.toStrong()) |p| {
+                    _ = p.clone();
+                }
+            }
+
+            /// Returns owned reference
+            pub fn atomicLoad(src: *Nullable, comptime order: AtomicOrder) Nullable {
+                const src_ptr: *?*InnerRef = &src.ptr;
+                const local = @atomicLoad(?*InnerRef, src_ptr, order);
+                const copy = Nullable{ .ptr = local };
+
+                if (copy.toStrong()) |p| {
+                    _ = p.clone();
+                }
+                return copy;
             }
         };
 
@@ -197,6 +223,7 @@ pub fn VmRef(comptime T: type) type {
         }
 
         comptime {
+            // ensure the same size as a pointer
             if (@sizeOf(VmRef(T)) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
             if (@sizeOf(VmRef(T).Nullable) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
             if (@sizeOf(VmRef(T).Weak) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
@@ -264,4 +291,43 @@ test "vmref" {
 
     var weak = IntRef.Weak.new_dangling();
     try std.testing.expect(weak.is_dangling());
+}
+
+test "vmref nullable ptr" {
+    // std.testing.log_level = .debug;
+
+    // init global allocator
+    const handle = try state.ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    defer handle.deinit();
+
+    const VmDummy = struct {
+        x: u64,
+
+        // interface for VmRef
+        fn vmRefDrop(_: *@This()) void {}
+        fn vmRefSize(_: *const @This()) usize {
+            return 0;
+        }
+    };
+
+    const the_obj = try VmRef(VmDummy).new_uninit(0, @alignOf(VmDummy));
+    // copied into so dont drop
+    the_obj.get().x = 0;
+
+    const copy_src = try VmRef(VmDummy).new_uninit(0, @alignOf(VmDummy));
+    defer copy_src.drop();
+    copy_src.get().x = 0x01234567_89abcedf;
+
+    const null_ref = VmRef(VmDummy).Nullable.nullRef();
+
+    try std.testing.expectEqual(the_obj.get().x, 0);
+
+    // atomically switch the_obj to point at another
+    var dst = the_obj.intoNullable();
+    dst.atomicStore(copy_src.intoNullable(), .SeqCst);
+    try std.testing.expectEqual(dst.toStrongUnchecked().get().x, 0x01234567_89abcedf);
+
+    // atomically switch the_obj to null
+    dst.atomicStore(null_ref, .SeqCst);
+    try std.testing.expect(dst.isNull());
 }

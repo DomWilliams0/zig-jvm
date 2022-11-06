@@ -398,11 +398,10 @@ pub const VmClass = struct {
         var obj_ref = try VmObjectRef.new_uninit(layout.instance_offset, null);
         obj_ref.get().* = VmObject{
             .class = self.clone(),
-            .storage = {},
         };
 
         // set default field values, luckily all zero bits is +0.0 for floats+doubles, and null ptrs (TODO really for objects?)
-        var field_bytes = @ptrCast([*]u8, @alignCast(1, &obj_ref.get().storage));
+        var field_bytes = @ptrCast([*]u8, @alignCast(1, obj_ref.get().storage()));
         std.mem.set(u8, field_bytes[0..layout.instance_offset], 0);
 
         return obj_ref;
@@ -465,7 +464,6 @@ pub const VmClass = struct {
         // init object fields
         array_ref.get().* = .{
             .class = self.clone(),
-            .storage = {},
         };
 
         // init array
@@ -548,22 +546,82 @@ pub const VmClass = struct {
             helper.isSuperClass(s_ref, t_ref); // then S must be the same class as T, or S must be a subclass of T
     }
 
-    /// Must be array class
-    pub fn getArrayBaseOffset(self: @This()) usize {
-        std.debug.assert(self.isArray());
-        std.log.debug("array base offset {d} + {d} + {d}", .{ @offsetOf(VmObject, "storage"), @sizeOf(ArrayHeader), self.u.array.padding });
-        return @offsetOf(VmObject, "storage") + @sizeOf(ArrayHeader) + self.u.array.padding;
-    }
+    pub const UnsafeArray = struct {
+        /// Offset from start of array object to elements
+        offset: u31,
+        stride: u31,
+    };
+
+    pub const UnsafeArrayOpt = enum {
+        just_offset,
+        just_stride,
+        all,
+
+        fn shouldGetOffset(self: @This()) bool {
+            return self == .all or self == .just_offset;
+        }
+        fn shouldGetStride(self: @This()) bool {
+            return self == .all or self == .just_stride;
+        }
+    };
 
     /// Must be array class
-    pub fn getArrayStride(self: @This()) usize {
+    pub fn unsafeGetArray(self: *@This(), comptime opt: UnsafeArrayOpt) UnsafeArray {
         std.debug.assert(self.isArray());
-        const elem_cls = self.u.array.elem_cls;
-        return if (elem_cls.get().isPrimitive())
-            elem_cls.get().u.primitive.size()
-        else
-            @sizeOf(usize);
+        var unsafe: UnsafeArray = undefined;
+
+        if (opt.shouldGetStride()) {
+            const elem_cls = self.u.array.elem_cls;
+            unsafe.stride = if (elem_cls.get().isPrimitive())
+                elem_cls.get().u.primitive.size()
+            else
+                @sizeOf(*u8);
+        }
+
+        if (opt.shouldGetOffset()) {
+            unsafe.offset = @sizeOf(VmObject) + @sizeOf(ArrayHeader) + self.u.array.padding;
+        }
+
+        return unsafe;
     }
+
+    pub const Unsafe = struct {
+        base: usize,
+        offset: u31,
+    };
+
+    pub const UnsafeOpt = enum {
+        just_base,
+        just_offset,
+        all,
+
+        fn shouldGetOffset(self: @This()) bool {
+            return self == .all or self == .just_offset;
+        }
+        fn shouldGetBase(self: @This()) bool {
+            return self == .all or self == .just_base;
+        }
+    };
+
+    /// Null if no field or is static
+    pub fn unsafeGetInstanceFieldByName(self: *@This(), name: []const u8, comptime opt: UnsafeOpt) ?Unsafe {
+        var unsafe: Unsafe = undefined;
+
+        const field = self.findFieldByName(name) orelse return null;
+        if (field.flags.contains(.static)) return null;
+
+        if (opt.shouldGetOffset()) {
+            unsafe.offset = field.u.layout_offset;
+        }
+
+        if (opt.shouldGetBase()) {
+            unsafe.base = @ptrToInt(&field.u.value);
+        }
+
+        return unsafe;
+    }
+
+    // TODO equivalent unsafe method for statics
 };
 
 const Monitor = struct {
@@ -582,9 +640,6 @@ pub const VmObject = struct {
     class: VmClassRef,
     /// 0 for null, set on first call to Object.hashCode
     hashcode: i32 = 0,
-    /// Where variable data storage begins
-    storage: void,
-
     // ---------- VmRef interface
     pub fn vmRefSize(self: *const VmObject) usize {
         const cls = self.class.get();
@@ -620,6 +675,16 @@ pub const VmObject = struct {
         try std.fmt.format(writer, "(\"{s}\")", .{str});
     }
 
+    pub fn storage(self: *VmObject) [*]u8 {
+        const byte_offset = @sizeOf(VmObject);
+        return @ptrCast([*]u8, self) + byte_offset;
+    }
+
+    pub fn storageConst(self: *const VmObject) [*]const u8 {
+        const byte_offset = @sizeOf(VmObject);
+        return @ptrCast([*]const u8, self) + byte_offset;
+    }
+
     /// Instance field
     pub fn getField(self: *@This(), comptime T: type, field: FieldId) *T {
         switch (field) {
@@ -629,12 +694,6 @@ pub const VmObject = struct {
             },
             .static_field => |f| std.debug.panic("not an instance field ID ({s})", .{f.name}),
         }
-    }
-
-    /// Use from jdk/internal/misc/Unsafe
-    pub fn getFieldFromOffset(self: *@This(), comptime T: type, offset: usize) *T {
-        var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
-        return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
     }
 
     /// Instance field value as stack entry
@@ -668,12 +727,12 @@ pub const VmObject = struct {
 
     pub fn getArrayHeader(self: *@This()) *ArrayHeader {
         std.debug.assert(self.class.get().isArray());
-        return @ptrCast(*ArrayHeader, @alignCast(@alignOf(ArrayHeader), &self.storage));
+        return @ptrCast(*ArrayHeader, @alignCast(@alignOf(ArrayHeader), self.storage()));
     }
 
     fn getArrayHeaderConst(self: *const @This()) *const ArrayHeader {
         std.debug.assert(self.class.get().isArray());
-        return @ptrCast(*const ArrayHeader, @alignCast(@alignOf(ArrayHeader), &self.storage));
+        return @ptrCast(*const ArrayHeader, @alignCast(@alignOf(ArrayHeader), self.storageConst()));
     }
 
     /// Runs `toString()` and returns the string ref. Slow, for debugging.
@@ -840,11 +899,9 @@ const ArrayHeader = struct {
     /// Padding between start of this header and the elements
     padding: u8,
 
-    elem_start: void = {},
-
     // Must be within a VmObject
     pub fn getElemsRaw(self: *@This()) []u8 {
-        var start: [*]u8 = @ptrCast([*]u8, @alignCast(1, &self.elem_start)) + self.padding;
+        var start: [*]u8 = @ptrCast([*]u8, @alignCast(1, self)) + @sizeOf(ArrayHeader) + self.padding;
         const slice_len = self.array_len * self.elem_sz;
         return start[0..slice_len];
     }

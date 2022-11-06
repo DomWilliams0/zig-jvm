@@ -15,7 +15,7 @@ pub const PrimitiveDataType = enum(u3) {
         return @intToEnum(DataType, @enumToInt(self));
     }
 
-    pub fn size(self: @This()) usize {
+    pub fn size(self: @This()) u8 {
         return switch (self) {
             .boolean => 1,
             .byte => 1,

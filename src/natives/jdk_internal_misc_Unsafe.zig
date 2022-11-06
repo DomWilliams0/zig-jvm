@@ -6,8 +6,7 @@ const JniEnvPtr = jvm.jni.JniEnvPtr;
 
 pub export fn Java_jdk_internal_misc_Unsafe_registerNatives() void {}
 
-pub export fn Java_jdk_internal_misc_Unsafe_arrayBaseOffset0(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, cls: sys.jclass) sys.jint {
-    _ = unsafe_cls;
+pub export fn Java_jdk_internal_misc_Unsafe_arrayBaseOffset0(raw_env: jni.JniEnvPtr, _: sys.jclass, cls: sys.jclass) sys.jint {
     const cls_obj = (jni.convert(cls).toStrong()) orelse return 0;
     const cls_data = cls_obj.get();
 
@@ -16,13 +15,12 @@ pub export fn Java_jdk_internal_misc_Unsafe_arrayBaseOffset0(raw_env: jni.JniEnv
         return 0;
     }
 
-    const offset = @intCast(sys.jint, cls_data.getArrayBaseOffset());
-    std.log.debug("arrayBaseOffset0({s}) = {d}", .{ cls_data.name, offset });
-    return offset;
+    const unsafe = cls_data.unsafeGetArray(.just_offset);
+    std.log.debug("arrayBaseOffset0({s}) = {d}", .{ cls_data.name, unsafe.offset });
+    return jni.convert(@as(i32, unsafe.offset));
 }
 
-pub export fn Java_jdk_internal_misc_Unsafe_arrayIndexScale0(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, cls: sys.jclass) sys.jint {
-    _ = unsafe_cls;
+pub export fn Java_jdk_internal_misc_Unsafe_arrayIndexScale0(raw_env: jni.JniEnvPtr, _: sys.jclass, cls: sys.jclass) sys.jint {
     const cls_obj = (jni.convert(cls).toStrong()) orelse return 0;
     const cls_data = cls_obj.get();
 
@@ -31,26 +29,12 @@ pub export fn Java_jdk_internal_misc_Unsafe_arrayIndexScale0(raw_env: jni.JniEnv
         return 0;
     }
 
-    const ret = @intCast(sys.jint, cls_data.getArrayStride());
-    std.log.debug("arrayIndexScale0({s}) = {d}", .{ cls_data.name, ret });
-    return ret;
+    const unsafe = cls_data.unsafeGetArray(.just_stride);
+    std.log.debug("arrayIndexScale0({s}) = {d}", .{ cls_data.name, unsafe.stride });
+    return jni.convert(@as(i32, unsafe.stride));
 }
 
-pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset0(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jfield: sys.jobject) sys.jlong {
-    _ = unsafe_cls;
-    _ = raw_env;
-
-    const field = jni.convert(jfield).toStrongUnchecked(); // null checked by Java caller
-
-    const s = jvm.object.VmObject.toString(field);
-    _ = s;
-
-    unreachable;
-}
-
-pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset1(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jclass: sys.jclass, jfield_name: sys.jstring) sys.jlong {
-    _ = unsafe_cls;
-
+pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset1(raw_env: jni.JniEnvPtr, _: sys.jclass, jclass: sys.jclass, jfield_name: sys.jstring) sys.jlong {
     const field_name = jni.convert(jfield_name).toStrongUnchecked(); // null checked by Java caller
     const class = jni.convert(jclass).toStrongUnchecked(); // null checked by Java caller
 
@@ -62,17 +46,13 @@ pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset1(raw_env: jni.JniE
     } orelse unreachable; // definitely a string
     defer thread.global.allocator.inner.free(field_name_utf8);
 
-    const field = class.get().findFieldByName(field_name_utf8) orelse {
+    const unsafe = class.get().unsafeGetInstanceFieldByName(field_name_utf8, .just_offset) orelse {
         _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.Internal)));
         return 0;
     };
+    std.log.debug("objectFieldOffset1({s}, {s}) = {d}", .{ class.get().name, field_name_utf8, unsafe.offset });
 
-    const val: i64 = if (field.flags.contains(.static))
-        @intCast(i64, @ptrToInt(&field.u.value)) // ptr to static value
-    else
-        @intCast(i64, field.u.layout_offset); // offset into object
-
-    return jni.convert(val);
+    return jni.convert(@as(i64, unsafe.offset));
 }
 
 pub export fn Java_jdk_internal_misc_Unsafe_fullFence() void {
@@ -94,7 +74,7 @@ fn Sys(comptime from: type) type {
     };
 }
 
-const ObjPtr = jvm.VmObjectRef.Nullable.AsPointer;
+const ObjPtr = jvm.VmObjectRef.NullablePtr;
 fn SysConvert(comptime from: type) type {
     return switch (from) {
         sys.jobject => ObjPtr,
@@ -109,96 +89,89 @@ fn sys_convert(val: anytype) SysConvert(@TypeOf(val)) {
     };
 }
 
-fn compareAndSet(comptime T: type, jobj: sys.jobject, offset: sys.jlong, expected: Sys(T), x: Sys(T)) sys.jboolean {
-    const obj = jni.convert(jobj).toStrongUnchecked(); // no null
-    const byte_offset = @intCast(usize, jni.convert(offset)); // assume offset comes from other Unsafe native methods, so won't be negative or invalid
+fn resolvePtr(comptime T: type, jobj: sys.jobject, offset: sys.jlong) *T {
+    const base = if (jobj) |ptr| @ptrToInt(ptr) else 0; // could be null
+    const byte_offset = @intCast(usize, jni.convert(offset)); // never negative
+    const byte_ptr = @intToPtr([*]u8, base + byte_offset);
+    std.log.debug("resolving unsafe ptr to {s}: base={?}, offset={d}, result={x}", .{ @typeName(T), jni.convert(jobj), byte_offset, @ptrToInt(byte_ptr) });
+    return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr)); // should be well aligned
+}
 
-    const cmp_ty = if (T == jvm.VmObjectRef.Nullable) ObjPtr else T;
-    const ptr = obj.get().getFieldFromOffset(cmp_ty, byte_offset);
+fn compareAndSet(comptime T: type, jobj: sys.jobject, offset: sys.jlong, expected: Sys(T), x: Sys(T)) sys.jboolean {
+    const ptr = resolvePtr(T, jobj, offset);
 
     // hotspot uses "conservative" ordering, i.e. 2 way fence
     @fence(.SeqCst);
-    const ret = @cmpxchgStrong(cmp_ty, ptr, sys_convert(expected), sys_convert(x), .Monotonic, .Monotonic) == null;
+    const ret = @cmpxchgStrong(T, ptr, sys_convert(expected), sys_convert(x), .Monotonic, .Monotonic) == null;
     @fence(.SeqCst);
 
     return jni.convert(ret);
 }
 
-pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetInt(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jint, x: sys.jint) sys.jboolean {
-    _ = unsafe_cls;
-    _ = raw_env;
+fn get(comptime T: type, comptime atomic: enum { volatile_, normal }, jobj: sys.jobject, offset: sys.jlong) Sys(T) {
+    const ptr = resolvePtr(T, jobj, offset);
+
+    const loaded = switch (atomic) {
+        .volatile_ => if (T == jvm.VmObjectRef.Nullable) jvm.VmObjectRef.Nullable.atomicLoad(ptr, .SeqCst) else @atomicLoad(T, ptr, .SeqCst),
+        .normal => ptr.*,
+    };
+    return sys_convert(loaded);
+}
+
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetInt(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jint, x: sys.jint) sys.jboolean {
     return compareAndSet(i32, jobj, offset, expected, x);
 }
 
-pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetLong(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jlong, x: sys.jlong) sys.jboolean {
-    _ = unsafe_cls;
-    _ = raw_env;
+pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetLong(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jlong, x: sys.jlong) sys.jboolean {
     return compareAndSet(i64, jobj, offset, expected, x);
 }
 
-pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetReference(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jobject, x: sys.jobject) sys.jboolean {
-    _ = unsafe_cls;
-    _ = raw_env;
-    // TODO is this adding an extra layer of indirection?
-    return compareAndSet(jvm.VmObjectRef.Nullable, jobj, offset, expected, x);
-}
+// pub export fn Java_jdk_internal_misc_Unsafe_compareAndSetReference(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong, expected: sys.jobject, x: sys.jobject) sys.jboolean {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     // TODO is this adding an extra layer of indirection?
+//     return compareAndSet(jvm.VmObjectRef.Nullable, jobj, offset, expected, x);
+// }
 
-fn get(comptime T: type, comptime atomic: enum { volatile_, normal }, jobj: sys.jobject, offset: sys.jlong) Sys(T) {
-    const byte_offset = @intCast(usize, jni.convert(offset)); // assume offset comes from other Unsafe native methods, so won't be negative or invalid
-    const load_ty = if (T == jvm.VmObjectRef.Nullable) ObjPtr else T;
-
-    if (jni.convert(jobj).toStrong()) |obj| {
-        // instance field
-        const ptr = obj.get().getFieldFromOffset(load_ty, byte_offset);
-        const loaded = switch (atomic) {
-            .volatile_ => @atomicLoad(load_ty, ptr, .SeqCst),
-            .normal => ptr.*,
-        };
-        return sys_convert(loaded);
-    } else @panic("TODO static field");
-}
-
-pub export fn Java_jdk_internal_misc_Unsafe_getReferenceVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jobject {
-    _ = unsafe_cls;
-    _ = raw_env;
+pub export fn Java_jdk_internal_misc_Unsafe_getReferenceVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jobject {
     return get(jvm.object.VmObjectRef.Nullable, .volatile_, jobj, offset);
 }
 
-pub export fn Java_jdk_internal_misc_Unsafe_getIntVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jint {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(i32, .volatile_, jobj, offset);
-}
-pub export fn Java_jdk_internal_misc_Unsafe_getBooleanVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jboolean {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(bool, .volatile_, jobj, offset);
-}
-pub export fn Java_jdk_internal_misc_Unsafe_getByteVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jbyte {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(i8, .volatile_, jobj, offset);
-}
-pub export fn Java_jdk_internal_misc_Unsafe_getShortVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jshort {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(i16, .volatile_, jobj, offset);
-}
-pub export fn Java_jdk_internal_misc_Unsafe_getCharVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jchar {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(u16, .volatile_, jobj, offset);
-}
-pub export fn Java_jdk_internal_misc_Unsafe_getLongVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jlong {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(i64, .volatile_, jobj, offset);
-}
-pub export fn Java_jdk_internal_misc_Unsafe_getDoubleVolatile(raw_env: jni.JniEnvPtr, unsafe_cls: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jdouble {
-    _ = unsafe_cls;
-    _ = raw_env;
-    return get(f64, .volatile_, jobj, offset);
-}
+// pub export fn Java_jdk_internal_misc_Unsafe_getIntVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jint {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(i32, .volatile_, jobj, offset);
+// }
+// pub export fn Java_jdk_internal_misc_Unsafe_getBooleanVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jboolean {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(bool, .volatile_, jobj, offset);
+// }
+// pub export fn Java_jdk_internal_misc_Unsafe_getByteVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jbyte {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(i8, .volatile_, jobj, offset);
+// }
+// pub export fn Java_jdk_internal_misc_Unsafe_getShortVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jshort {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(i16, .volatile_, jobj, offset);
+// }
+// pub export fn Java_jdk_internal_misc_Unsafe_getCharVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jchar {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(u16, .volatile_, jobj, offset);
+// }
+// pub export fn Java_jdk_internal_misc_Unsafe_getLongVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jlong {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(i64, .volatile_, jobj, offset);
+// }
+// pub export fn Java_jdk_internal_misc_Unsafe_getDoubleVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jdouble {
+//     _ = unsafe_cls;
+//     _ = raw_env;
+//     return get(f64, .volatile_, jobj, offset);
+// }
 
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_jdk_internal_misc_Unsafe_registerNatives", .desc = "()V" },

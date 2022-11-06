@@ -18,7 +18,7 @@ pub fn ConversionType(comptime from: type) type {
         sys.jobject => VmObjectRef.Nullable,
         VmObjectRef => sys.jobject,
         VmObjectRef.Nullable => sys.jobject,
-        VmObjectRef.Nullable.AsPointer => sys.jobject,
+        VmObjectRef.NullablePtr => sys.jobject,
 
         sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray => VmObjectRef.Nullable,
         sys.jstring => VmObjectRef.Nullable,
@@ -64,7 +64,7 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
         sys.jobject => rawToVmRef(VmObjectRef, val),
         VmObjectRef => vmRefToRaw(sys.jobject, val),
         VmObjectRef.Nullable => vmRefToRaw(sys.jobject, val),
-        VmObjectRef.Nullable.AsPointer => vmRefToRaw(sys.jobject, VmObjectRef.Nullable.fromPtr(val)),
+        VmObjectRef.NullablePtr => vmRefToRaw(sys.jobject, VmObjectRef.Nullable.fromPtr(val)),
 
         sys.jlong, sys.jint, sys.jbyte, sys.jboolean, sys.jchar, sys.jshort, sys.jfloat, sys.jdouble => val,
 
