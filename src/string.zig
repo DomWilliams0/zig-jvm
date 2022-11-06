@@ -41,6 +41,8 @@ pub const StringPool = struct {
     pub fn getString(self: *@This(), utf8: []const u8) error{ OutOfMemory, IllegalArgument }!object.VmObjectRef {
         const obj = try object.VmClass.instantiateObject(self.stringClass());
 
+        // TODO run Object constructor
+
         // encode to utf16
         const utf16_len = std.unicode.calcUtf16LeLen(utf8) catch return error.IllegalArgument;
         const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), utf16_len * 2);

@@ -3,6 +3,7 @@ const classloader = @import("classloader.zig");
 const vm_type = @import("type.zig");
 const object = @import("object.zig");
 const state = @import("state.zig");
+const call = @import("call.zig");
 
 const Preload = struct {
     cls: []const u8,
@@ -76,11 +77,11 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
     // setup jdk/internal/misc/UnsafeConstants
     {
         const jdk_internal_misc_UnsafeConstants = loader.getLoadedBootstrapClass("jdk/internal/misc/UnsafeConstants").?;
-        set_static(jdk_internal_misc_UnsafeConstants, "ADDRESS_SIZE0", @as(i32, @sizeOf(*u8)));
-        set_static(jdk_internal_misc_UnsafeConstants, "PAGE_SIZE", @as(i32, std.mem.page_size));
-        set_static(jdk_internal_misc_UnsafeConstants, "BIG_ENDIAN", @import("builtin").cpu.arch.endian() == .Big);
-        set_static(jdk_internal_misc_UnsafeConstants, "UNALIGNED_ACCESS", false); // TODO
-        set_static(jdk_internal_misc_UnsafeConstants, "DATA_CACHE_LINE_FLUSH_SIZE", @as(i32, 0)); // TODO
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "ADDRESS_SIZE0", @as(i32, @sizeOf(*u8)));
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "PAGE_SIZE", @as(i32, std.mem.page_size));
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "BIG_ENDIAN", @import("builtin").cpu.arch.endian() == .Big);
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "UNALIGNED_ACCESS", false); // TODO
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "DATA_CACHE_LINE_FLUSH_SIZE", @as(i32, 0)); // TODO
     }
 
     // setup System class
@@ -90,32 +91,9 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
             const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
             if ((try thread.interpreter.executeUntilReturn(method)) == null) {
                 const exc = thread.interpreter.exception().toStrongUnchecked();
-                print_exception_with_cause("initialising System", exc);
+                call.logExceptionWithCause(thread, "initialising System", exc);
                 return error.InvocationError;
             }
         }
     }
-}
-
-fn set_static(cls: object.VmClassRef, name: []const u8, val: anytype) void {
-    const val_ty = @TypeOf(val);
-    const desc = switch (val_ty) {
-        i32 => "I",
-        bool => "Z",
-        else => @compileError("bad value type"),
-    };
-
-    const field = cls.get().findFieldRecursively(name, desc, .{ .static = true }) orelse std.debug.panic("missing {s} field on {s}", .{ name, cls.get().name });
-    const field_value = object.VmClass.getStaticField(val_ty, field.id);
-    field_value.* = val;
-    std.log.debug("set static field {s}.{s} = {any}", .{ cls.get().name, name, val });
-}
-
-/// "$what threw exception ..."
-pub fn print_exception_with_cause(what: []const u8, exc: object.VmObjectRef) void {
-    const exc_str = object.ToString.new_with_exc_cause(state.thread_state().global.allocator.inner, exc);
-    defer exc_str.deinit();
-    std.log.err("{s} threw exception {?}: \"{s}\"", .{ what, exc, exc_str.exc.str });
-    for (exc_str.causes.items) |cause|
-        std.log.err(" caused by: \"{s}\"", .{cause.str});
 }

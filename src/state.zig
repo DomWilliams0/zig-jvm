@@ -5,6 +5,7 @@ const object = @import("object.zig");
 const interp = @import("interpreter.zig");
 const jni_sys = @import("sys/root.zig");
 const string = @import("string.zig");
+const call = @import("call.zig");
 const JvmArgs = @import("arg.zig").JvmArgs;
 const Allocator = std.mem.Allocator;
 
@@ -183,6 +184,8 @@ comptime {
     }
 }
 
+pub const MethodDescription = struct { cls: []const u8, method: []const u8, desc: []const u8 };
+
 // TODO ensure that theres no infinite recursion if e.g. NoClassDefError cannot be loaded
 pub fn makeError(e: Error, ctxt: anytype) Error {
     const ArgsType = @TypeOf(ctxt);
@@ -197,9 +200,21 @@ pub fn makeError(e: Error, ctxt: anytype) Error {
             _ = options;
             _ = fmt;
 
+            const ArgsInfo = @typeInfo(ArgsType);
+            if (ArgsInfo == .Pointer) {
+                const child = @typeInfo(ArgsInfo.Pointer.child);
+                if (child == .Array) {
+                    if (child.Array.child == u8) {
+                        // comptime string! bloody hell
+                        return try std.fmt.format(writer, "{s}", .{data});
+                    }
+                }
+            }
+
             switch (ArgsType) {
                 *const @import("cafebabe.zig").Method, object.VmClassRef, object.VmClassRef.Nullable => try std.fmt.format(writer, "{?}", .{data}),
                 []const u8 => try std.fmt.format(writer, "{s}", .{data}),
+                MethodDescription => try std.fmt.format(writer, "{s}.{s}", .{ data.cls, data.method }),
                 else => @compileError("unexpected type " ++ @typeName(ArgsType)),
             }
         }
@@ -229,8 +244,6 @@ pub fn makeError(e: Error, ctxt: anytype) Error {
 /// Aborts if instantiating an error fails. TODO within here, alloc and return OutOfMemoryError and StackOverflowError
 pub fn errorToException(err: Error) object.VmObjectRef {
     const S = struct {
-        const StackEntry = @import("frame.zig").Frame.StackEntry;
-
         const Recurse = enum {
             yes,
             no,
@@ -278,37 +291,18 @@ pub fn errorToException(err: Error) object.VmObjectRef {
         }
 
         fn execDetailConstructor(thread: *ThreadEnv, exc_class: object.VmClassRef, exc_obj: object.VmObjectRef, ctxt: []const u8) Error!bool {
-            // lookup constructor
-            const constructor = exc_class.get().findMethodRecursive("<init>", "(Ljava/lang/String;)V") orelse return false; // no constructor, oh well
-
-            // init string
             const ctxt_str = try thread.global.string_pool.getString(ctxt);
 
-            // invoke constructor
-            const args = [2]StackEntry{ StackEntry.new(exc_obj), StackEntry.new(ctxt_str) };
-            _ = (thread.interpreter.executeUntilReturnWithArgs(constructor, 2, args) catch |ex| {
-                std.log.warn("failed to run detail constructor on exception {?}: {any}", .{ exc_obj, ex });
-                return ex;
-            }) orelse {
-                std.log.warn("failed to run detail constructor on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception().toStrongUnchecked() });
-                return false;
+            _ = call.runMethod(thread, exc_class, "<init>", "(Ljava/lang/String;)V", .{ exc_obj, ctxt_str }) catch |e| switch (e) {
+                error.NoClassDef => return false, // no constructor, oh well
+                else => return e,
             };
 
-            // nice
             return true;
         }
 
         fn execDefaultConstructor(thread: *ThreadEnv, exc_class: object.VmClassRef, exc_obj: object.VmObjectRef) Error!void {
-            const constructor = exc_class.get().findMethodRecursive("<init>", "()V") orelse std.debug.panic("no default constructor on throwable {s}", .{exc_class.get().name});
-
-            const args = [1]StackEntry{StackEntry.new(exc_obj)};
-            _ = (thread.interpreter.executeUntilReturnWithArgs(constructor, 1, args) catch |ex| {
-                std.log.warn("failed to run constructor on exception {?}: {any}", .{ exc_obj, ex });
-                return error.Internal;
-            }) orelse {
-                std.log.warn("failed to run constructor on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception().toStrongUnchecked() });
-                return error.Internal;
-            };
+            _ = try call.runMethod(thread, exc_class, "<init>", "()V", .{exc_obj});
         }
     };
 

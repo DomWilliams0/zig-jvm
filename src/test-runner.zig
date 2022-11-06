@@ -204,7 +204,7 @@ const Test = struct {
             if (jvm.state.thread_state().interpreter.exception().toStrong()) |exc| {
                 const buf = try std.fmt.allocPrint(alloc, "test {s}", .{self.testName()});
                 defer alloc.free(buf);
-                jvm.bootstrap.print_exception_with_cause(buf, exc);
+                jvm.call.logExceptionWithCause(jvm.state.thread_state(), buf, exc);
             } else std.log.err("test {s} failed: {any}", .{
                 self.testName(),
                 err,
@@ -221,7 +221,7 @@ const Test = struct {
             const exc = jvm.state.thread_state().interpreter.exception().toStrongUnchecked();
             const buf = try std.fmt.allocPrint(alloc, "test {s}", .{self.testName()});
             defer alloc.free(buf);
-            jvm.bootstrap.print_exception_with_cause(buf, exc);
+            jvm.call.logExceptionWithCause(jvm.state.thread_state(), buf, exc);
             return E.Failed;
         };
 
