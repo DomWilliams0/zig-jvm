@@ -4,6 +4,14 @@ const jni = jvm.jni;
 const sys = jni.sys;
 const JniEnvPtr = jvm.jni.JniEnvPtr;
 
+pub export fn Java_java_lang_Thread_registerNatives() void {}
+
+pub export fn Java_java_lang_Thread_currentThread() sys.jobject {
+    const t = jvm.state.thread_state();
+    const obj = t.thread_obj.clone();
+    return jni.convert(obj);
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Thread_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_Thread_currentThread", .desc = "()Ljava/lang/Thread;" },

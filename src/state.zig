@@ -22,6 +22,42 @@ pub const GlobalState = struct {
     args: *const JvmArgs,
     string_pool: string.StringPool,
     hashcode_rng: std.rand.DefaultPrng,
+
+    /// Null until Object and Class are loaded
+    main_thread: object.VmObjectRef.Nullable,
+    /// Null until Object and Class are loaded
+    main_thread_group: object.VmObjectRef.Nullable,
+
+    pub fn postBootstrapInit(self: *@This()) Error!void {
+        // init strings
+        self.string_pool.postBootstrapInit();
+
+        // init threads
+        const t = thread_state();
+        const java_lang_ThreadGroup = self.classloader.getLoadedBootstrapClass("java/lang/ThreadGroup") orelse @panic("no java/lang/ThreadGroup");
+        const java_lang_Thread = self.classloader.getLoadedBootstrapClass("java/lang/Thread") orelse @panic("no java/lang/Thread");
+        const java_lang_Object = self.classloader.getLoadedBootstrapClass("java/lang/Object") orelse unreachable;
+
+        const thread_group = try object.VmClass.instantiateObject(java_lang_ThreadGroup);
+        _ = try call.runMethod(t, java_lang_ThreadGroup, "<init>", "()V", .{thread_group});
+
+        const thread_name = try self.string_pool.getString("MainThread");
+        _ = thread_name;
+
+        const thread = try object.VmClass.instantiateObject(java_lang_Thread);
+        // can't run Thread constructor yet because it calls currentThread()
+        _ = try call.runMethod(t, java_lang_Object, "<init>", "()V", .{thread});
+        call.setFieldInfallible(thread, "daemon", false);
+        const prio = call.getStaticFieldInfallible(java_lang_Thread, "NORM_PRIORITY", i32);
+        call.setFieldInfallible(thread, "priority", prio);
+        call.setFieldInfallible(thread, "threadStatus", @as(i32, 1));
+
+        self.main_thread = thread.intoNullable();
+        self.main_thread_group = thread_group.intoNullable();
+
+        // init main thread's Thread object now
+        thread_state().thread_obj = thread.clone();
+    }
 };
 
 /// Each thread owns one
@@ -29,13 +65,15 @@ pub const ThreadEnv = struct {
     global: *GlobalState,
     interpreter: interp.Interpreter,
     jni: *jni_sys.JniEnv,
+    /// java.lang.Thread instance
+    thread_obj: object.VmObjectRef,
 
     /// String allocated in global allocator passed to next exception constructor
     error_context: ?[]const u8 = null,
 
-    fn init(global: *GlobalState) ThreadEnv {
-        return ThreadEnv{ .global = global };
-    }
+    // fn init(global: *GlobalState) ThreadEnv {
+    //     return ThreadEnv{ .global = global, };
+    // }
 
     fn deinit(self: *@This()) void {
         self.interpreter.deinit();
@@ -54,18 +92,21 @@ pub const ThreadEnv = struct {
             .args = args,
             .hashcode_rng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.timestamp())),
             .string_pool = undefined, // set next
+            .main_thread = object.VmObjectRef.Nullable.nullRef(),
+            .main_thread_group = object.VmObjectRef.Nullable.nullRef(),
         };
         global.string_pool = string.StringPool.new(global);
 
-        _ = try initThread(global);
+        // thread instance will be set later in bootstrap
+        _ = try initThread(global, undefined);
         return .{
             .global = global,
             .main_thread = std.Thread.getCurrentId(),
         };
     }
 
-    /// Inits threadlocal
-    pub fn initThread(global: *GlobalState) !*ThreadEnv {
+    /// Inits threadlocal. Thread is owned instance
+    pub fn initThread(global: *GlobalState, thread: object.VmObjectRef) !*ThreadEnv {
         if (inited) @panic("init once only");
         const jni_env = try global.allocator.inner.create(jni_sys.JniEnv);
         errdefer global.allocator.inner.destroy(jni_env);
@@ -75,6 +116,7 @@ pub const ThreadEnv = struct {
             .global = global,
             .interpreter = try interp.Interpreter.new(global.allocator.inner),
             .jni = jni_env,
+            .thread_obj = thread,
         };
         inited = true;
 

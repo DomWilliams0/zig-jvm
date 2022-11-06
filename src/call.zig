@@ -54,7 +54,7 @@ pub fn runMethod(thread: *state.ThreadEnv, cls: object.VmClassRef, name: []const
     };
 }
 
-pub fn setField(obj: object.VmObjectRef, name: []const u8, val: anytype) error{NoSuchField}!void {
+pub fn setField(obj: object.VmObjectRef, name: []const u8, val: anytype) Error!void {
     const val_ty = @TypeOf(val);
     const desc = switch (val_ty) {
         i32 => "I",
@@ -82,6 +82,26 @@ pub fn setStaticField(cls: object.VmClassRef, name: []const u8, val: anytype) Er
     const field_value = object.VmClass.getStaticField(val_ty, field.id);
     field_value.* = val;
     std.log.debug("set static field {s}.{s} = {any}", .{ cls.get().name, name, val });
+}
+
+pub fn getStaticField(cls: object.VmClassRef, name: []const u8, comptime T: type) Error!T {
+    // TODO func for this
+    const desc = switch (T) {
+        i32 => "I",
+        bool => "Z",
+        else => @compileError("bad value type"),
+    };
+
+    const field = cls.get().findFieldRecursively(name, desc, .{ .static = true }) orelse return state.makeError(error.NoSuchField, state.MethodDescription{ .cls = cls.get().name, .method = name, .desc = desc });
+    return object.VmClass.getStaticField(T, field.id).*;
+}
+
+pub fn getStaticFieldInfallible(cls: object.VmClassRef, name: []const u8, comptime T: type) T {
+    return getStaticField(cls, name, T) catch std.debug.panic("class {s} does not have expected field {s}", .{ cls.get().name, name });
+}
+
+pub fn setFieldInfallible(obj: object.VmObjectRef, name: []const u8, val: anytype) void {
+    setField(obj, name, val) catch std.debug.panic("object {?} does not have expected field {s}", .{ obj, name });
 }
 
 pub fn setStaticFieldInfallible(cls: object.VmClassRef, name: []const u8, val: anytype) void {

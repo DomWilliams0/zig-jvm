@@ -64,12 +64,14 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
 
     try loadPrimitives(loader);
 
-    // load String, special case for string pool
+    // load String and Thread
     try load(opts, .{ .cls = "[B" }, loader);
     try load(opts, .{ .cls = "java/lang/String", .initialise = true }, loader);
+    try load(opts, .{ .cls = "java/lang/Thread", .initialise = true }, loader);
+    try load(opts, .{ .cls = "java/lang/ThreadGroup", .initialise = true }, loader);
 
     const thread = state.thread_state();
-    thread.global.string_pool.postBootstrapInit();
+    try thread.global.postBootstrapInit();
 
     inline for (preload_classes) |preload|
         try load(opts, preload, loader);

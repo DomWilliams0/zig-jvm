@@ -38,7 +38,7 @@ comptime {
     validateFunctionSignatures(@import("java_lang_String.zig"));
     validateFunctionSignatures(@import("java_lang_StringUTF16.zig"));
     validateFunctionSignatures(@import("java_lang_System.zig"));
-    // validateFunctionSignatures(@import("java_lang_Thread.zig"));
+    validateFunctionSignatures(@import("java_lang_Thread.zig"));
     validateFunctionSignatures(@import("java_lang_Throwable.zig"));
     // validateFunctionSignatures(@import("java_net_Inet4Address.zig"));
     // validateFunctionSignatures(@import("java_net_Inet4AddressImpl.zig"));
@@ -49,7 +49,7 @@ comptime {
     // validateFunctionSignatures(@import("java_net_NetworkInterface.zig"));
     // validateFunctionSignatures(@import("java_nio_MappedMemoryUtils.zig"));
     // validateFunctionSignatures(@import("java_security_AccessController.zig"));
-    // validateFunctionSignatures(@import("java_util_concurrent_atomic_AtomicLong.zig"));
+    validateFunctionSignatures(@import("java_util_concurrent_atomic_AtomicLong.zig"));
     // validateFunctionSignatures(@import("java_util_TimeZone.zig"));
     // validateFunctionSignatures(@import("java_util_zip_Adler32.zig"));
     // validateFunctionSignatures(@import("java_util_zip_CRC32.zig"));
