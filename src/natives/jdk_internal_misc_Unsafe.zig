@@ -149,39 +149,25 @@ pub export fn Java_jdk_internal_misc_Unsafe_getReferenceVolatile(_: jni.JniEnvPt
     return get(jvm.object.VmObjectRef.Nullable, .volatile_, jobj, offset);
 }
 
-// pub export fn Java_jdk_internal_misc_Unsafe_getIntVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jint {
-//     _ = unsafe_cls;
-//     _ = raw_env;
-//     return get(i32, .volatile_, jobj, offset);
-// }
-// pub export fn Java_jdk_internal_misc_Unsafe_getBooleanVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jboolean {
-//     _ = unsafe_cls;
-//     _ = raw_env;
-//     return get(bool, .volatile_, jobj, offset);
-// }
+pub export fn Java_jdk_internal_misc_Unsafe_getIntVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jint {
+    return get(i32, .volatile_, jobj, offset);
+}
+pub export fn Java_jdk_internal_misc_Unsafe_getBooleanVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jboolean {
+    return get(bool, .volatile_, jobj, offset);
+}
 // pub export fn Java_jdk_internal_misc_Unsafe_getByteVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jbyte {
-//     _ = unsafe_cls;
-//     _ = raw_env;
 //     return get(i8, .volatile_, jobj, offset);
 // }
 // pub export fn Java_jdk_internal_misc_Unsafe_getShortVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jshort {
-//     _ = unsafe_cls;
-//     _ = raw_env;
 //     return get(i16, .volatile_, jobj, offset);
 // }
 // pub export fn Java_jdk_internal_misc_Unsafe_getCharVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jchar {
-//     _ = unsafe_cls;
-//     _ = raw_env;
 //     return get(u16, .volatile_, jobj, offset);
 // }
 // pub export fn Java_jdk_internal_misc_Unsafe_getLongVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jlong {
-//     _ = unsafe_cls;
-//     _ = raw_env;
 //     return get(i64, .volatile_, jobj, offset);
 // }
 // pub export fn Java_jdk_internal_misc_Unsafe_getDoubleVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jdouble {
-//     _ = unsafe_cls;
-//     _ = raw_env;
 //     return get(f64, .volatile_, jobj, offset);
 // }
 
