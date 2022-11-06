@@ -38,6 +38,8 @@ fn closeLogFile(alloc: Allocator) void {
         alloc.destroy(f);
         log_file = null;
     }
+
+    stderr_writer.flush() catch {};
 }
 
 pub fn main() !void {
@@ -244,7 +246,9 @@ pub fn log(
     log_mutex.lock();
     defer log_mutex.unlock();
     if (log_file) |f| {
-        nosuspend f.file_writer.writer().print(msg, args) catch unreachable;
+        nosuspend f.file_writer.writer().print(msg, args) catch {};
+        f.file_writer.flush() catch {};
     }
     nosuspend stderr_writer.writer().print(msg, args) catch {};
+    stderr_writer.flush() catch {};
 }
