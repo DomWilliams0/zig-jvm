@@ -90,7 +90,7 @@ fn sys_convert(val: anytype) SysConvert(@TypeOf(val)) {
 }
 
 fn resolvePtr(comptime T: type, jobj: sys.jobject, offset: sys.jlong) *T {
-    const base = if (jobj) |ptr| @ptrToInt(ptr) else 0; // could be null
+    const base = if (jni.convert(jobj).toStrong()) |obj| @ptrToInt(obj.get()) else 0; // could be null
     const byte_offset = @intCast(usize, jni.convert(offset)); // never negative
     const byte_ptr = @intToPtr([*]u8, base + byte_offset);
     std.log.debug("resolving unsafe ptr to {s}: base={?}, offset={d}, result={x}", .{ @typeName(T), jni.convert(jobj), byte_offset, @ptrToInt(byte_ptr) });
