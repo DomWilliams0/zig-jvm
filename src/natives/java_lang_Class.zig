@@ -69,6 +69,43 @@ pub export fn Java_java_lang_Class_isPrimitive(raw_env: JniEnvPtr, jcls: sys.jcl
     return jni.convert(cls.get().isPrimitive());
 }
 
+pub export fn Java_java_lang_Class_forName0(raw_env: JniEnvPtr, _: sys.jclass, name: sys.jstring, initialize: sys.jboolean, jloader: sys.jobject, caller: sys.jclass) sys.jclass {
+    _ = caller;
+
+    const env = jni.convert(raw_env);
+    const t = jvm.state.thread_state();
+    var is_copy: sys.jboolean = undefined;
+    var cls_name_c = env.GetStringUTFChars(raw_env, name, &is_copy) orelse {
+        _ = env.Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return null;
+    };
+    defer env.ReleaseStringUTFChars(raw_env, name, cls_name_c);
+
+    // copy locally to replace . with /
+    const cls_name_mangled = t.global.classloader.alloc.dupe(u8, std.mem.span(cls_name_c)) catch |e| {
+        _ = env.Throw(raw_env, jni.convert(jvm.state.errorToException(e)));
+        return null;
+    };
+    defer t.global.classloader.alloc.free(cls_name_mangled);
+    std.mem.replaceScalar(u8, cls_name_mangled, '.', '/');
+
+    const loader: jvm.classloader.WhichLoader = if (jni.convert(jloader).toStrong()) |l| .{ .user = l } else .bootstrap;
+
+    const cls = t.global.classloader.loadClass(cls_name_mangled, loader) catch |e| {
+        _ = env.Throw(raw_env, jni.convert(jvm.state.errorToException(e)));
+        return null;
+    };
+
+    if (initialize == sys.JNI_TRUE) {
+        jvm.object.VmClass.ensureInitialised(cls) catch |e| {
+            _ = env.Throw(raw_env, jni.convert(jvm.state.errorToException(e)));
+            return null;
+        };
+    }
+
+    return jni.convert(cls.clone());
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Class_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_Class_forName0", .desc = "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;" },

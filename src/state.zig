@@ -255,7 +255,7 @@ pub fn makeError(e: Error, ctxt: anytype) Error {
 
             switch (ArgsType) {
                 *const @import("cafebabe.zig").Method, object.VmClassRef, object.VmClassRef.Nullable => try std.fmt.format(writer, "{?}", .{data}),
-                []const u8 => try std.fmt.format(writer, "{s}", .{data}),
+                []const u8, [:0]const u8 => try std.fmt.format(writer, "{s}", .{data}),
                 MethodDescription => try std.fmt.format(writer, "{s}.{s}", .{ data.cls, data.method }),
                 else => @compileError("unexpected type " ++ @typeName(ArgsType)),
             }
