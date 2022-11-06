@@ -1139,22 +1139,23 @@ pub const handlers = struct {
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
-        switch (val.ty) {
-            .int => obj.get().getField(i32, field.fid).* = val.convertToUnchecked(i32),
-            .reference => obj.get().getField(VmObjectRef.Nullable, field.fid).* = val.convertToUnchecked(VmObjectRef.Nullable),
-            .float => obj.get().getField(f32, field.fid).* = val.convertToUnchecked(f32),
-            .double => obj.get().getField(f64, field.fid).* = val.convertToUnchecked(f64),
-            .long => obj.get().getField(i64, field.fid).* = val.convertToUnchecked(i64),
+        std.log.debug("putfield({}, {s}) = {?}", .{ obj_ref, field.field.name, val });
 
-            .boolean,
-            .byte,
-            .char,
-            .short,
-            => unreachable, // filtered out
-            .void, .returnAddress => unreachable,
+        const field_ty = field.field.descriptor.getType();
+        switch (field_ty) {
+            .primitive => |p| switch (p) {
+                .int => obj.get().getField(i32, field.fid).* = val.convertToInt(),
+                .byte => obj.get().getField(i8, field.fid).* = @truncate(i8, val.convertToInt()),
+                .boolean => obj.get().getField(bool, field.fid).* = val.convertToInt() != 0,
+                .char => obj.get().getField(u16, field.fid).* = @intCast(u16, val.convertToInt()),
+                .short => obj.get().getField(i16, field.fid).* = @truncate(i16, val.convertToInt()),
+
+                .float => obj.get().getField(f32, field.fid).* = val.convertToUnchecked(f32),
+                .double => obj.get().getField(f64, field.fid).* = val.convertToUnchecked(f64),
+                .long => obj.get().getField(i64, field.fid).* = val.convertToUnchecked(i64),
+            },
+            .reference, .array => obj.get().getField(VmObjectRef.Nullable, field.fid).* = val.convertToUnchecked(VmObjectRef.Nullable),
         }
-
-        std.log.debug("putfield({}, {s}) = {x}", .{ obj_ref, field.field.name, val });
     }
 
     pub fn _getfield(ctxt: InsnContext) Error!void {
