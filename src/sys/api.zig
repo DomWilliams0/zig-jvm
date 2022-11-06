@@ -62,7 +62,7 @@ const impl = struct {
         _ = raw_env;
         // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
         const thread = state.thread_state();
-        return if (thread.interpreter.exception.isNull()) sys.JNI_FALSE else sys.JNI_TRUE;
+        return if (!thread.interpreter.hasException()) sys.JNI_FALSE else sys.JNI_TRUE;
     }
 
     pub fn Throw(raw_env: JniEnvPtr, exc: sys.jthrowable) callconv(.C) sys.jint {

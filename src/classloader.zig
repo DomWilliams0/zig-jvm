@@ -249,7 +249,7 @@ pub const ClassLoader = struct {
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
 
-        const file_bytes = try findBootstrapClassFile(arena.allocator(), self.alloc, name) orelse return error.NoClassDef;
+        const file_bytes = try findBootstrapClassFile(arena.allocator(), self.alloc, name) orelse return state.makeError(error.NoClassDef, name);
         return self.defineClass(arena.allocator(), name, file_bytes, .bootstrap);
     }
 

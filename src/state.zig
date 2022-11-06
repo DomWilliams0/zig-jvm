@@ -29,8 +29,8 @@ pub const ThreadEnv = struct {
     interpreter: interp.Interpreter,
     jni: *jni_sys.JniEnv,
 
-    /// Owned reference to the Throwable cause of the current error
-    error_cause: object.VmObjectRef.Nullable = object.nullRef(object.VmObject),
+    /// String allocated in global allocator passed to next exception constructor
+    error_context: ?[]const u8 = null,
 
     fn init(global: *GlobalState) ThreadEnv {
         return ThreadEnv{ .global = global };
@@ -116,22 +116,12 @@ pub fn thread_state() *ThreadEnv {
     return &thread_env;
 }
 
-
-/// Owned reference
-pub fn set_error_cause(throwable: object.VmObjectRef) void {
-    const t = thread_state();
-    if (t.error_cause.toStrong()) |old| {
-        std.log.warn("overwriting error cause without consuming it: {?}", .{old});
-        old.drop();
-    }
-
-    t.error_cause = throwable.intoNullable();
-}
-
 /// Terminal errors that can't be turned into exceptions
 pub const ExecutionError = error{
     OutOfMemory,
     LibFfi,
+    /// Instantiating and setting causes on Java exceptions/errors
+    ErrorBuilding,
 };
 
 /// Errors that should be turned into exceptions. All must have a corresponding Java class
@@ -193,70 +183,138 @@ comptime {
     }
 }
 
+// TODO ensure that theres no infinite recursion if e.g. NoClassDefError cannot be loaded
+pub fn makeError(e: Error, ctxt: anytype) Error {
+    const ArgsType = @TypeOf(ctxt);
+
+    const helper = struct {
+        fn format(
+            data: ArgsType,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = options;
+            _ = fmt;
+
+            switch (ArgsType) {
+                *const @import("cafebabe.zig").Method, object.VmClassRef, object.VmClassRef.Nullable => try std.fmt.format(writer, "{?}", .{data}),
+                []const u8 => try std.fmt.format(writer, "{s}", .{data}),
+                else => @compileError("unexpected type " ++ @typeName(ArgsType)),
+            }
+        }
+    };
+
+    const t = thread_state();
+    const alloc = t.global.allocator.inner;
+
+    const s = std.fmt.allocPrint(alloc, "{?}", .{std.fmt.Formatter(helper.format){ .data = ctxt }}) catch |err| {
+        switch (err) {
+            error.OutOfMemory => {
+                std.log.err("out of memory allocating context for {any}", .{err});
+                return err;
+            },
+        }
+    };
+
+    if (t.error_context) |old| {
+        std.log.warn("overwriting error context without consuming it: {s}", .{old});
+        alloc.free(old);
+    }
+
+    t.error_context = s;
+    return e;
+}
+
 /// Aborts if instantiating an error fails. TODO within here, alloc and return OutOfMemoryError and StackOverflowError
 pub fn errorToException(err: Error) object.VmObjectRef {
     const S = struct {
-        fn tryConvert(e: Error) ExecutionError!object.VmObjectRef {
+        const StackEntry = @import("frame.zig").Frame.StackEntry;
+
+        const Recurse = enum {
+            yes,
+            no,
+
+            fn fail(comptime self: @This(), e: Error) ExecutionError!object.VmObjectRef {
+                return if (self == .yes) tryConvert(.no, e) else error.ErrorBuilding;
+            }
+        };
+
+        fn tryConvert(comptime recurse: Recurse, e: Error) ExecutionError!object.VmObjectRef {
             if (errorToExceptionClass(e)) |cls| {
                 const thread = thread_state();
                 const loader = if (thread.interpreter.top_frame) |f| f.class.get().loader else .bootstrap;
                 const exc_class = thread.global.classloader.loadClass(cls, loader) catch |load_error| {
                     std.log.warn("failed to load exception class {s} while instantiating: {any}", .{ cls, load_error });
-
-                    // propagate fatal errors instantiating new exception
-                    // TODO ensure recursion isn't infinite
-                    // TODO special case for stack overflow error
-                    const new_exception = errorToException(load_error);
-
-                    // TODO set new exception as cause
-                    return new_exception;
+                    return recurse.fail(load_error);
                 };
                 const exc_obj = try object.VmClass.instantiateObject(exc_class);
 
-                const StackEntry = @import("frame.zig").Frame.StackEntry;
                 // invoke constructor
-                // TODO use error context to build a string if string constructor exists
-                // TODO dont panic if constructors not found?
-                {
-                    // TODO lookup once on startup and cache
-                    const init_method = exc_class.get().findMethodRecursive("<init>", "()V") orelse @panic("no constructor method on java/lang/Throwable");
+                var run_default_constructor = true;
+                if (thread.error_context) |ctxt| {
+                    // we have an extra detail string to pass to throwable constructor
 
-                    const args = [1]StackEntry{StackEntry.new(exc_obj)};
-                    _ = (thread.interpreter.executeUntilReturnWithArgs(init_method, 1, args) catch |ex| blk: {
-                        std.log.warn("failed to run constructor on exception {?}: {any}", .{ exc_obj, ex });
-                        break :blk null;
-                    }) orelse blk: {
-                        std.log.warn("failed to run constructor on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception.toStrongUnchecked() });
-                        break :blk null;
-                    };
+                    defer {
+                        // consume context regardless of success
+                        thread.error_context = null;
+                        thread.global.allocator.inner.free(ctxt);
+                    }
+
+                    // if no detail constructor exists, run default and ignore the context
+                    const success = execDetailConstructor(thread, exc_class, exc_obj, ctxt) catch |constructor_error| return recurse.fail(constructor_error);
+                    run_default_constructor = !success;
                 }
 
-                // set cause
-                if (thread.error_cause.toStrong()) |cause| {
-                    // steal owned reference
-                    thread.error_cause = object.VmObjectRef.Nullable.nullRef();
-
-                    // TODO lookup once on startup and cache
-                    const method = exc_class.get().findMethodRecursive("initCause", "(Ljava/lang/Throwable;)Ljava/lang/Throwable;") orelse @panic("no initCause method on java/lang/Throwable");
-
-                    const args = [2]StackEntry{ StackEntry.new(exc_obj), StackEntry.new(cause) };
-                    _ = (thread.interpreter.executeUntilReturnWithArgs(method, 2, args) catch |ex| blk: {
-                        std.log.warn("failed to set cause on exception {?}: {any}", .{ exc_obj, ex });
-                        break :blk null;
-                    }) orelse blk: {
-                        std.log.warn("failed to set cause on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception.toStrongUnchecked() });
-                        break :blk null;
-                    };
+                if (run_default_constructor) {
+                    execDefaultConstructor(thread, exc_class, exc_obj) catch |constructor_error| return recurse.fail(constructor_error);
                 }
+
+                // recursively set causes
+                try thread.interpreter.popExceptionCauses(exc_obj);
 
                 return exc_obj;
             } else return @errSetCast(ExecutionError, e);
         }
+
+        fn execDetailConstructor(thread: *ThreadEnv, exc_class: object.VmClassRef, exc_obj: object.VmObjectRef, ctxt: []const u8) Error!bool {
+            // lookup constructor
+            const constructor = exc_class.get().findMethodRecursive("<init>", "(Ljava/lang/String;)V") orelse return false; // no constructor, oh well
+
+            // init string
+            const ctxt_str = try thread.global.string_pool.getString(ctxt);
+
+            // invoke constructor
+            const args = [2]StackEntry{ StackEntry.new(exc_obj), StackEntry.new(ctxt_str) };
+            _ = (thread.interpreter.executeUntilReturnWithArgs(constructor, 2, args) catch |ex| {
+                std.log.warn("failed to run detail constructor on exception {?}: {any}", .{ exc_obj, ex });
+                return ex;
+            }) orelse {
+                std.log.warn("failed to run detail constructor on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception().toStrongUnchecked() });
+                return false;
+            };
+
+            // nice
+            return true;
+        }
+
+        fn execDefaultConstructor(thread: *ThreadEnv, exc_class: object.VmClassRef, exc_obj: object.VmObjectRef) Error!void {
+            const constructor = exc_class.get().findMethodRecursive("<init>", "()V") orelse std.debug.panic("no default constructor on throwable {s}", .{exc_class.get().name});
+
+            const args = [1]StackEntry{StackEntry.new(exc_obj)};
+            _ = (thread.interpreter.executeUntilReturnWithArgs(constructor, 1, args) catch |ex| {
+                std.log.warn("failed to run constructor on exception {?}: {any}", .{ exc_obj, ex });
+                return error.Internal;
+            }) orelse {
+                std.log.warn("failed to run constructor on exception {?}: {?}", .{ exc_obj, thread.interpreter.exception().toStrongUnchecked() });
+                return error.Internal;
+            };
+        }
     };
 
-    return S.tryConvert(err) catch |fatal| std.debug.panic("vm error: {any}", .{fatal});
+    return S.tryConvert(.yes, err) catch |fatal| std.debug.panic("vm error: {any}", .{fatal});
 }
 
 pub fn checkException() bool {
-    return !thread_state().interpreter.exception.isNull();
+    return thread_state().interpreter.hasException();
 }

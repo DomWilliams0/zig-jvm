@@ -89,7 +89,7 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
             const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
             const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
             if ((try thread.interpreter.executeUntilReturn(method)) == null) {
-                const exc = thread.interpreter.exception.toStrongUnchecked();
+                const exc = thread.interpreter.exception().toStrongUnchecked();
                 print_exception_with_cause("initialising System", exc);
                 return error.InvocationError;
             }

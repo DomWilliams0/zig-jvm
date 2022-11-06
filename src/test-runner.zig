@@ -201,7 +201,7 @@ const Test = struct {
         // load test class
         const cls = try jvm.state.thread_state().global.classloader.loadClass(self.testName(), .bootstrap);
         jvm.object.VmClass.ensureInitialised(cls) catch |err| {
-            if (jvm.state.thread_state().interpreter.exception.toStrong()) |exc| {
+            if (jvm.state.thread_state().interpreter.exception().toStrong()) |exc| {
                 const buf = try std.fmt.allocPrint(alloc, "test {s}", .{self.testName()});
                 defer alloc.free(buf);
                 jvm.bootstrap.print_exception_with_cause(buf, exc);
@@ -218,7 +218,7 @@ const Test = struct {
         // run the test
         const ret_value = try jvm.state.thread_state().interpreter.executeUntilReturn(entrypoint);
         const ret_code = if (ret_value) |val| val.convertTo(i32) else {
-            const exc = jvm.state.thread_state().interpreter.exception.toStrongUnchecked();
+            const exc = jvm.state.thread_state().interpreter.exception().toStrongUnchecked();
             const buf = try std.fmt.allocPrint(alloc, "test {s}", .{self.testName()});
             defer alloc.free(buf);
             jvm.bootstrap.print_exception_with_cause(buf, exc);

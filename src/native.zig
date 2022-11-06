@@ -110,7 +110,7 @@ pub const NativeCode = struct {
 
             switch (self.inner) {
                 .unbound => {}, // bind now
-                .failed_to_bind => |e| return e,
+                .failed_to_bind => |e| return state.makeError(e, method),
                 .bound => |code| return code, // already done
             }
         }
@@ -123,7 +123,7 @@ pub const NativeCode = struct {
         const S = struct {
             fn resolve(cls: object.VmClassRef, m: *const cafebabe.Method) state.Error!jni.NativeMethodCode {
                 var classloader = @import("state.zig").thread_state().global.classloader;
-                const ptr = classloader.findNativeMethod(cls.get().loader, m) orelse return error.UnsatisfiedLink;
+                const ptr = classloader.findNativeMethod(cls.get().loader, m) orelse return state.makeError(error.UnsatisfiedLink, m);
                 return try jni.NativeMethodCode.new(classloader.alloc, m.descriptor, ptr);
             }
         };

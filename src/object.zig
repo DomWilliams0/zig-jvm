@@ -330,7 +330,7 @@ pub const VmClass = struct {
 
             const current_state = self_mut.init_state;
             switch (current_state) {
-                .failed => return error.NoClassDef,
+                .failed => return state.makeError(error.NoClassDef, self),
                 .initialised => return,
                 .initialising => |t| {
                     const this_thread = std.Thread.getCurrentId();
@@ -372,10 +372,9 @@ pub const VmClass = struct {
         if (self_mut.findMethodInThisOnly("<clinit>", "()V", .{ .static = true })) |clinit| {
             if ((try state.thread_state().interpreter.executeUntilReturn(clinit)) == null) {
                 // exception occurred
-                const exc = state.thread_state().interpreter.exception.toStrongUnchecked();
+                const exc = state.thread_state().interpreter.exception().toStrongUnchecked();
                 std.log.warn("exception thrown running class initialiser of {s}: {any}", .{ self_mut.name, exc });
-                state.set_error_cause(exc.clone());
-                return error.NoClassDef;
+                return state.makeError(error.NoClassDef, clinit);
             }
         }
 
@@ -760,7 +759,7 @@ pub const VmObject = struct {
             std.log.warn("exception invoking toString() on {?}: {any}", .{ self, err });
             return nullRef(VmObject);
         } orelse {
-            const exc = state.thread_state().interpreter.exception.toStrongUnchecked();
+            const exc = state.thread_state().interpreter.exception().toStrongUnchecked();
             std.log.warn("exception invoking toString() on {?}: {?}", .{ self, exc });
             return nullRef(VmObject);
         };

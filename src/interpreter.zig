@@ -9,14 +9,27 @@ const object = @import("object.zig");
 pub const Interpreter = struct {
     frames_alloc: frame.ContiguousBufferStack,
     top_frame: ?*frame.Frame = null,
-    /// Owned instance of current exception, don't overwrite directly
-    exception: object.VmObjectRef.Nullable,
+    // Owned instance of current exception, don't overwrite directly
+    // exception: object.VmObjectRef.Nullable,
+
+    /// Stack of owned current exceptions. If not empty the top is the current, the second is the cause of that, etc
+    exceptions: ExceptionStack(object.VmObjectRef, 16) = .{},
+    /// If false, exception stack is just the cause stack, an exception is not currently active
+    exception_active: bool = true,
 
     pub fn new(alloc: std.mem.Allocator) !Interpreter {
         return .{
             .frames_alloc = try frame.ContiguousBufferStack.new(alloc),
-            .exception = object.VmObjectRef.Nullable.nullRef(),
         };
+    }
+
+    pub fn exception(self: @This()) object.VmObjectRef.Nullable {
+        if (self.exception_active) if (self.exceptions.peek()) |e| return e.intoNullable();
+        return object.VmObjectRef.Nullable.nullRef();
+    }
+
+    pub fn hasException(self: @This()) bool {
+        return self.exception_active and !self.exceptions.empty();
     }
 
     pub fn deinit(self: *@This()) void {
@@ -187,36 +200,129 @@ pub const Interpreter = struct {
         }
     };
     fn callstack(self: @This()) PrintableCallStack {
-        return PrintableCallStack{ .top = self.top_frame, .exc = self.exception };
+        return PrintableCallStack{ .top = self.top_frame, .exc = self.exception() };
     }
 
     /// Exception reference is cloned
-    pub fn setException(self: *@This(), exception: object.VmObjectRef) void {
-        if (self.exception.toStrong()) |old| {
-            std.log.debug("overwriting old exception {?}", .{old});
-            old.drop();
-        }
-
-        self.exception = exception.clone().intoNullable();
+    pub fn setException(self: *@This(), exc: object.VmObjectRef) void {
+        self.exceptions.push(exc.clone());
+        self.exception_active = true;
     }
 
+    // TODO needs a variant that clears the exception stack too
     pub fn clearException(self: *@This()) void {
-        if (self.exception.toStrong()) |old| {
-            std.log.debug("clearing old exception {?}", .{old});
-            old.drop();
-        }
-
-        self.exception = object.VmObjectRef.Nullable.nullRef();
+        self.exception_active = false;
     }
 
-    pub fn clearExceptionNoDrop(self: *@This()) void {
-        if (self.exception.toStrong()) |old| {
-            std.log.debug("clearing old exception {?}", .{old});
-        }
+    pub fn popExceptionCauses(self: *@This(), exc_obj: object.VmObjectRef) error{ErrorBuilding}!void {
+        var cause = self.exceptions.pop() orelse return;
 
-        self.exception = object.VmObjectRef.Nullable.nullRef();
+        const method = exc_obj.get().class.get().findMethodRecursive("initCause", "(Ljava/lang/Throwable;)Ljava/lang/Throwable;") orelse std.debug.panic("no Throwable.initCause method on {?}", .{exc_obj});
+
+        const StackEntry = frame.Frame.StackEntry;
+        var exc = exc_obj;
+        var args: [2]StackEntry = undefined;
+        while (true) {
+            std.log.debug("setting cause of {?} on throwable {?}", .{ cause, exc });
+            args[0] = StackEntry.new(exc);
+            args[1] = StackEntry.new(cause);
+            _ = (self.executeUntilReturnWithArgs(method, 2, args) catch |ex| {
+                std.log.warn("failed to set cause on exception {?}: {any}", .{ exc_obj, ex });
+                return error.ErrorBuilding;
+            }) orelse {
+                // just pushed a new exception
+                std.log.warn("failed to set cause on exception {?}: {?}", .{ exc_obj, self.exceptions.peek().? });
+                return error.ErrorBuilding;
+            };
+
+            exc = cause;
+            cause = self.exceptions.pop() orelse break;
+        }
     }
 };
+
+pub fn ExceptionStack(comptime T: type, comptime N: usize) type {
+    return struct {
+        backing: [N]T = undefined,
+        /// Next free index = N-cursor. Full when cursor=N
+        cursor: u8 = 0,
+
+        fn full(self: @This()) bool {
+            return self.cursor == N;
+        }
+
+        fn empty(self: @This()) bool {
+            return self.cursor == 0;
+        }
+
+        pub fn peek(self: @This()) ?T {
+            return if (self.empty()) null else self.backing[N - self.cursor];
+        }
+
+        /// May discard of oldest if full
+        pub fn push(self: *@This(), val: T) void {
+            if (self.full()) {
+                // pop earliest and shift up
+                // TODO ring buffer to not need to move everything up
+                var to_drop = self.backing[0];
+                drop(&to_drop);
+                std.mem.copyBackwards(T, self.backing[1..N], self.backing[0 .. N - 1]);
+
+                self.backing[0] = val;
+            } else {
+                self.backing[N - 1 - self.cursor] = val;
+                self.cursor += 1;
+            }
+        }
+
+        pub fn pop(self: *@This()) ?T {
+            if (self.empty()) return null;
+
+            const val = self.backing[N - self.cursor];
+            self.cursor -= 1;
+            return val;
+        }
+
+        fn drop(t: *T) void {
+            if (@typeInfo(T) == .Struct and @hasDecl(T, "drop"))
+                t.drop();
+        }
+    };
+}
+
+test "exception stack" {
+    const expect = std.testing.expect;
+    const expectEqual = std.testing.expectEqual;
+
+    var stack = ExceptionStack(u32, 4){};
+
+    try expect(stack.empty());
+    try expect(!stack.full());
+
+    stack.push(1);
+    stack.push(2);
+
+    try expectEqual(stack.peek().?, 2);
+    try expectEqual(stack.pop().?, 2);
+    try expect(stack.pop().? == 1);
+    try expect(stack.pop() == null);
+    try expectEqual(stack.peek(), null);
+
+    stack.push(3);
+    stack.push(4);
+    stack.push(5);
+    stack.push(6);
+    try expect(stack.full());
+    stack.push(7); // discard old
+    stack.push(8); // discard old
+    try expect(stack.full());
+
+    try expect(stack.pop().? == 8);
+    try expect(stack.pop().? == 7);
+    try expect(stack.pop().? == 6);
+    try expect(stack.pop().? == 5);
+    try expect(stack.pop() == null);
+}
 
 // TODO second interpreter type that generates threaded machine code for the method e.g. `call ins1 call ins2 call ins3`
 //   in generated code, local var lookup should reference the caller's stack when i<param count, to avoid copying
@@ -233,7 +339,7 @@ fn interpreterLoop() void {
         std.log.debug("{?}", .{thread.interpreter.callstack()});
 
         // check for exceptions
-        if (thread.interpreter.exception.toStrong()) |exc| handled: {
+        if (thread.interpreter.exception().toStrong()) |exc| handled: {
             if (ctxt.frame.payload == .java) {
                 var java = &ctxt.frame.payload.java;
                 std.log.debug("looking for exception handler for {?} at pc {} in {?}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method });
@@ -242,7 +348,10 @@ fn interpreterLoop() void {
                     ctxt.frame.setPc(pc);
                     java.operands.clear();
                     java.operands.push(exc); // "move" out of thread interpreter
-                    thread.interpreter.clearExceptionNoDrop();
+
+                    // pop this exception so it doesn't get assigned as its own cause
+                    _ = thread.interpreter.exceptions.pop();
+                    thread.interpreter.popExceptionCauses(exc) catch |e| std.debug.panic("vm error: populating exception causes on {?}: {any}", .{ exc, e });
                     break :handled;
                 }
             }
@@ -266,7 +375,7 @@ fn interpreterLoop() void {
         ctxt_mut.control_flow = .continue_;
         while (ctxt_mut.control_flow == .continue_) {
             // we should break out of this if an exception could have been thrown
-            std.debug.assert(thread.interpreter.exception.isNull());
+            std.debug.assert(!thread.interpreter.hasException());
 
             // refetch on every insn, method might have changed
             const f = if (thread.interpreter.top_frame) |f| f else break;
@@ -310,10 +419,10 @@ fn interpreterLoop() void {
             },
             .bubble_exception => {
                 // threadlocal exception has been set
-                std.debug.assert(!thread.interpreter.exception.isNull());
+                const exc = thread.interpreter.exception().toStrongUnchecked();
 
                 const this_frame = thread.interpreter.top_frame.?;
-                std.log.debug("bubbling exception {} to caller from {s}.{s}", .{ thread.interpreter.exception, this_frame.class.get().name, this_frame.method.name });
+                std.log.debug("bubbling exception {} to caller from {s}.{s}", .{ exc, this_frame.class.get().name, this_frame.method.name });
                 root_reached = @ptrToInt(this_frame) == top_frame_ptr;
                 popFrame(this_frame, thread);
 
@@ -321,7 +430,7 @@ fn interpreterLoop() void {
             },
             .check_exception => {
                 // handle exception in current frame on next iteration
-                std.debug.assert(!thread.interpreter.exception.isNull());
+                std.debug.assert(thread.interpreter.hasException());
             },
 
             .continue_ => unreachable,
