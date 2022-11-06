@@ -221,42 +221,42 @@ fn match_arg(s: []const u8, short: bool) ?*const Arg {
     return null;
 }
 
-test "simple" {
-    const args = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp", "a:b:c", "-h", "positional" }) orelse unreachable;
-    try std.testing.expectEqualStrings(args.get(ArgType.classpath).?.?, "a:b:c");
-    try std.testing.expectEqual(args.get(ArgType.help).?, null);
-    try std.testing.expectEqualStrings(args.get(ArgType.main_class).?.?, "positional");
-}
+// test "simple" {
+//     const args = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp", "a:b:c", "-h", "positional" }) orelse unreachable;
+//     try std.testing.expectEqualStrings(args.get(ArgType.classpath).?.?, "a:b:c");
+//     try std.testing.expectEqual(args.get(ArgType.help).?, null);
+//     try std.testing.expectEqualStrings(args.get(ArgType.main_class).?.?, "positional");
+// }
 
-test "long/short key values" {
-    const a = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp", "a:b:c" }) orelse unreachable;
-    const b = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp:a:b:c" }) orelse unreachable; // odd but meh
-    const c = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath=a:b:c" }) orelse unreachable;
-    const d = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath", "a:b:c" }) orelse unreachable;
+// test "long/short key values" {
+//     const a = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp", "a:b:c" }) orelse unreachable;
+//     const b = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp:a:b:c" }) orelse unreachable; // odd but meh
+//     const c = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath=a:b:c" }) orelse unreachable;
+//     const d = JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath", "a:b:c" }) orelse unreachable;
 
-    try std.testing.expectEqualStrings(a.get(ArgType.classpath).?.?, "a:b:c");
-    try std.testing.expectEqualStrings(b.get(ArgType.classpath).?.?, "a:b:c");
-    try std.testing.expectEqualStrings(c.get(ArgType.classpath).?.?, "a:b:c");
-    try std.testing.expectEqualStrings(d.get(ArgType.classpath).?.?, "a:b:c");
-}
+//     try std.testing.expectEqualStrings(a.get(ArgType.classpath).?.?, "a:b:c");
+//     try std.testing.expectEqualStrings(b.get(ArgType.classpath).?.?, "a:b:c");
+//     try std.testing.expectEqualStrings(c.get(ArgType.classpath).?.?, "a:b:c");
+//     try std.testing.expectEqualStrings(d.get(ArgType.classpath).?.?, "a:b:c");
+// }
 
-test "bad" {
-    // std.testing.log_level = .debug;
-    try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath=" }));
-    try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp:" }));
-    try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath" }));
-    try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath", "--classpath" }));
-    try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{"jvm"}));
-}
+// test "bad" {
+//     // std.testing.log_level = .debug;
+//     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath=" }));
+//     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "-cp:" }));
+//     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath" }));
+//     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{ "jvm", "--classpath", "--classpath" }));
+//     try std.testing.expectEqual(null, JvmArgs.do_parse(&[_][:0]const u8{"jvm"}));
+// }
 
-test "load and parse" {
-    // std.testing.log_level = .debug;
-    var args = try JvmArgs.parse(std.testing.allocator, &[_][:0]const u8{ "jvm", "-cp", "/nice:cool/epic/sweet.jar:lalala", "positional" }, .{}) orelse unreachable;
-    defer args.deinit();
+// test "load and parse" {
+//     // std.testing.log_level = .debug;
+//     var args = try JvmArgs.parse(std.testing.allocator, &[_][:0]const u8{ "jvm", "-cp", "/nice:cool/epic/sweet.jar:lalala", "positional" }, .{}) orelse unreachable;
+//     defer args.deinit();
 
-    var cp = args.classpath.iterator();
-    try std.testing.expectEqualStrings("/nice", cp.next().?);
-    try std.testing.expectEqualStrings("cool/epic/sweet.jar", cp.next().?);
-    try std.testing.expectEqualStrings("lalala", cp.next().?);
-    try std.testing.expectEqual(null, cp.next());
-}
+//     var cp = args.classpath.iterator();
+//     try std.testing.expectEqualStrings("/nice", cp.next().?);
+//     try std.testing.expectEqualStrings("cool/epic/sweet.jar", cp.next().?);
+//     try std.testing.expectEqualStrings("lalala", cp.next().?);
+//     try std.testing.expectEqual(null, cp.next());
+// }

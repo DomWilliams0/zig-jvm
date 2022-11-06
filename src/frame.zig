@@ -690,9 +690,9 @@ test "operands to callee local vars II" {
 
     stack.transferToCallee(&vars, method, true); // implicit this
 
-    try std.testing.expectEqual(vars.get(object.VmObjectRef.Nullable, 0).*, object.VmObjectRef.Nullable.nullRef());
-    try std.testing.expectEqual(vars.get(i32, 1).*, 10);
-    try std.testing.expectEqual(vars.get(i32, 2).*, 25);
+    try std.testing.expectEqual(vars.get(object.VmObjectRef.Nullable, 0), object.VmObjectRef.Nullable.nullRef());
+    try std.testing.expectEqual(vars.get(i32, 1), 10);
+    try std.testing.expectEqual(vars.get(i32, 2), 25);
 }
 
 test "operands to callee local vars JZ" {
@@ -713,8 +713,8 @@ test "operands to callee local vars JZ" {
 
     stack.transferToCallee(&vars, method, false); // implicit this
 
-    try std.testing.expectEqual(vars.get(i64, 0).*, 5_000_000);
-    try std.testing.expectEqual(vars.get(bool, 2).*, true);
+    try std.testing.expectEqual(vars.get(i64, 0), 5_000_000);
+    try std.testing.expectEqual(vars.get(bool, 2), true);
 
     if (logging) {
         try std.testing.expect(vars.initialised.isSet(0));

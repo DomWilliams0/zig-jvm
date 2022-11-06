@@ -147,7 +147,7 @@ pub const NativeMethodCode = struct {
 };
 
 test "libffi" {
-    std.testing.log_level = .debug;
+    // std.testing.log_level = .debug;
     const S = struct {
         fn the_func(jni: *anyopaque, this: *anyopaque, int: i32, float: f32) callconv(.C) i32 {
             _ = jni;
@@ -159,6 +159,10 @@ test "libffi" {
             return 123;
         }
     };
+
+    // needed to provide thread jni env
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    defer handle.deinit();
 
     const desc = descriptor.MethodDescriptor.new("(IFJZSB)I").?;
     var native = NativeMethodCode.new(std.testing.allocator, desc, &S.the_func) catch unreachable;
@@ -175,6 +179,6 @@ test "libffi" {
     stack.push(@as(i16, -1024));
     stack.push(@as(i8, 105));
 
-    native.invoke(&stack) catch unreachable;
+    native.invoke(&stack, null);
     try std.testing.expectEqual(@as(i32, 123), stack.pop(i32));
 }

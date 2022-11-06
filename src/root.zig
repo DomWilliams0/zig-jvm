@@ -16,3 +16,8 @@ pub const types = @import("type.zig");
 
 pub const VmObjectRef = object.VmObjectRef;
 pub const VmClassRef = object.VmClassRef;
+
+comptime {
+    if (@import("builtin").is_test)
+        @import("std").testing.refAllDecls(@This());
+}

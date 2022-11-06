@@ -219,22 +219,6 @@ pub const VmAllocator = struct {
     inner: Allocator,
 };
 
-test "alloc class" {
-    // TODO move this test
-    const object = @import("object.zig");
-
-    // TODO undefined class instance crashes on drop, sort this out
-    if (true) return error.SkipZigTest;
-
-    // init global allocator
-    const handle = try state.ThreadEnv.initMainThread(std.testing.allocator, undefined);
-    defer handle.deinit();
-
-    const alloced = try object.VmClassRef.new();
-    // everything is unintialised!!! just set this so it can be dropped
-    defer alloced.drop();
-}
-
 test "vmref" {
     const VmInt = struct {
         actual_count: u16,

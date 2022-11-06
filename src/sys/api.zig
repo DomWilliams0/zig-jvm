@@ -176,11 +176,3 @@ const impl = struct {
         thread.global.allocator.inner.free(std.mem.span(utf));
     }
 };
-
-test "env" {
-    var env = makeEnv();
-    var a: [*c]JniEnv = &env;
-    var b: [*c][*c]const JniEnv = &a;
-    var c: [*c][*c]const jni.struct_JNINativeInterface_ = @ptrCast([*c][*c]const jni.struct_JNINativeInterface_, b);
-    _ = env.ExceptionCheck(c);
-}

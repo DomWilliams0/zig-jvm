@@ -80,10 +80,12 @@ pub fn build(b: *std.build.Builder) void {
         native_finder_step.dependOn(&native_finder_cmd.step);
     }
 
-    const exe_tests = b.addTest("src/object.zig");
+    const exe_tests = b.addTest("src/root.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
     exe_tests.linkLibC();
+    exe_tests.rdynamic = true;
+    exe_tests.linkSystemLibrary("ffi");
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);

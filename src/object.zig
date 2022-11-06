@@ -896,14 +896,15 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
     }
 }
 
-fn lookupFieldId(fields: []const Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
+/// Must not have a super class
+fn lookupFieldId(fields: []Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
     const flags = makeFlagsAndAntiFlags(Field.Flags, input_flags);
     for (fields) |f, i| {
         if ((f.flags.bits & flags.flags.bits) == flags.flags.bits and
             (f.flags.bits & ~(flags.antiflags.bits)) == f.flags.bits and
             std.mem.eql(u8, desc, f.descriptor.str) and std.mem.eql(u8, name, f.name))
         {
-            return if (f.flags.contains(.static)) .{ .static_index = @intCast(u16, i) } else .{ .instance_offset = f.u.layout_offset };
+            return if (f.flags.contains(.static)) .{ .static_field = &fields[i] } else .{ .instance_offset = f.u.layout_offset };
         }
     }
 
@@ -919,7 +920,7 @@ fn test_helper() type {
             public: bool = true,
         };
         fn mkTestField(ctx: TestCtx) cafebabe.Field {
-            var flags = std.EnumSet(Field.Flags).init(.{});
+            var flags = cafebabe.BitSet(Field.Flags).init(.{});
             if (ctx.static) flags.insert(.static);
             flags.insert(if (ctx.public) .public else .private);
             return .{
@@ -946,11 +947,13 @@ fn test_helper() type {
         };
 
         fn checkFieldValue(comptime T: type, obj: VmObjectRef, name: []const u8, desc: []const u8, val: T) !void {
-            return std.testing.expectEqual(val, obj.get().getField(T, obj.get().findInstanceField(name, desc) orelse unreachable).*);
+            const fid = obj.get().class.get().findFieldRecursively(name, desc, .{ .static = false }).?.id;
+            return std.testing.expectEqual(val, obj.get().getField(T, fid).*);
         }
 
         fn setFieldValue(value: anytype, obj: VmObjectRef, name: []const u8, desc: []const u8) void {
-            const f = obj.get().getField(@TypeOf(value), obj.get().findInstanceField(name, desc) orelse unreachable);
+            const fid = obj.get().class.get().findFieldRecursively(name, desc, .{ .static = false }).?.id;
+            const f = obj.get().getField(@TypeOf(value), fid);
             f.* = value;
         }
     };
@@ -979,7 +982,8 @@ test "layout" {
 test "allocate class" {
     // std.testing.log_level = .debug;
     const helper = test_helper();
-    var alloc = std.testing.allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // allow leaks in test
+    const alloc = gpa.allocator();
 
     // init base class with no super
     var base_fields = [_]cafebabe.Field{
@@ -996,44 +1000,42 @@ test "allocate class" {
     try std.testing.expect(int3.instance_offset > 0 and int3.instance_offset % @alignOf(i32) == 0);
 
     // init global allocator
-    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(alloc, undefined);
     defer handle.deinit();
 
     // allocate class with static storage
-    const cls = try vm_alloc.allocClass();
+    const cls = try VmClassRef.new();
     cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined, .constant_pool = undefined } }; // only instance fields, need to concat super and this fields together
     cls.get().super_cls = VmClassRef.Nullable.nullRef();
-    defer cls.drop();
+    // defer cls.drop();
 
     const static_int_val = VmClass.getStaticField(i32, cls.get().findStaticField("myIntStatic", "I") orelse unreachable);
     static_int_val.* = 0x12345678;
 }
 
 test "allocate object" {
-    // TODO undefined class instance crashes on drop, sort this out
-    if (true) return error.SkipZigTest;
-
     // std.testing.log_level = .debug;
     const helper = test_helper();
-    var alloc = std.testing.allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // allow leaks in test
+    const alloc = gpa.allocator();
 
     var layout = ObjectLayout{};
     try defineObjectLayout(alloc, &helper.fields, &layout);
 
     // init global allocator
-    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(alloc, undefined);
     defer handle.deinit();
 
     // allocate class with static storage
-    const cls = try vm_alloc.allocClass();
+    const cls = try VmClassRef.new();
     cls.get().name = "Dummy";
     cls.get().super_cls = VmClassRef.Nullable.nullRef();
     cls.get().u = .{ .obj = .{ .fields = &helper.fields, .layout = layout, .methods = undefined, .constant_pool = undefined } }; // only instance fields
-    defer cls.drop();
+    // defer cls.drop();
 
     // allocate object
-    const obj = VmClass.instantiateObject(cls);
-    defer obj.drop();
+    const obj = try VmClass.instantiateObject(cls);
+    // defer obj.drop();
 
     // check default field values
     try helper.checkFieldValue(i64, obj, "myLong", "J", 0);
@@ -1085,11 +1087,11 @@ test "allocate object" {
 }
 
 test "allocate array" {
-    // TODO undefined class instance crashes on drop, sort this out
-    if (true) return error.SkipZigTest;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // allow leaks in test
+    const alloc = gpa.allocator();
 
-    // init global allocator
-    const handle = try @import("state.zig").ThreadEnv.initMainThread(std.testing.allocator, undefined);
+    // init global state
+    const handle = try @import("state.zig").ThreadEnv.initMainThread(alloc, undefined);
     defer handle.deinit();
 
     const S = struct {
@@ -1097,13 +1099,13 @@ test "allocate array" {
             const elem_cls = try jvm.global.classloader.loadPrimitive(array_cls[1..]);
             defer elem_cls.drop();
 
-            const cls = try vm_alloc.allocClass();
+            const cls = try VmClassRef.new();
             cls.get().name = "Dummy";
             cls.get().status = .{ .ty = .array };
             cls.get().u = .{ .array = .{ .elem_cls = elem_cls.clone(), .dims = 1, .padding = cls.get().calculateArrayPreElementPadding() } };
-            defer cls.drop();
+            // defer cls.drop();
 
-            const obj = VmClass.instantiateArray(cls, 12);
+            const obj = try VmClass.instantiateArray(cls, 12);
             defer obj.drop();
 
             var array = obj.get().getArrayHeader();
@@ -1145,7 +1147,7 @@ fn makeFlagsAndAntiFlags(comptime E: type, comptime flags: anytype) struct {
 }
 
 test "flags and antiflags" {
-    const Flags = enum { private, public, static, final };
+    const Flags = enum(u16) { private = 1, public = 2, static = 4, final = 8 };
     const input = .{ .public = true, .static = false };
 
     const ret = makeFlagsAndAntiFlags(Flags, input);

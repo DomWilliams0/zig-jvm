@@ -383,7 +383,8 @@ pub const Method = struct {
 
     pub fn deinit(self: @This(), persistent: Allocator) void {
         self.code.deinit(persistent);
-        self.class().drop();
+        if (!@import("builtin").is_test)
+            self.class().drop();
     }
 };
 
