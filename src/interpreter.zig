@@ -259,6 +259,12 @@ pub fn ExceptionStack(comptime T: type, comptime N: usize) type {
             return if (self.empty()) null else self.backing[N - self.cursor];
         }
 
+        /// Order is reversed push order
+        pub fn slice(self: *const @This()) []const T {
+            // wtf surely this can be better
+            return if (self.full()) &self.backing else if (self.empty()) &.{} else self.backing[N - self.cursor - 1 ..];
+        }
+
         /// May discard of oldest if full
         pub fn push(self: *@This(), val: T) void {
             if (self.full()) {
@@ -304,6 +310,7 @@ test "exception stack" {
 
     try expectEqual(stack.peek().?, 2);
     try expectEqual(stack.pop().?, 2);
+    try std.testing.expectEqualSlices(u32, &.{ 2, 1 }, stack.slice());
     try expect(stack.pop().? == 1);
     try expect(stack.pop() == null);
     try expectEqual(stack.peek(), null);
@@ -312,6 +319,7 @@ test "exception stack" {
     stack.push(4);
     stack.push(5);
     stack.push(6);
+    try std.testing.expectEqualSlices(u32, &.{ 6, 5, 4, 3 }, stack.slice());
     try expect(stack.full());
     stack.push(7); // discard old
     stack.push(8); // discard old
@@ -322,6 +330,7 @@ test "exception stack" {
     try expect(stack.pop().? == 6);
     try expect(stack.pop().? == 5);
     try expect(stack.pop() == null);
+    try std.testing.expectEqualSlices(u32, &.{}, stack.slice());
 }
 
 // TODO second interpreter type that generates threaded machine code for the method e.g. `call ins1 call ins2 call ins3`

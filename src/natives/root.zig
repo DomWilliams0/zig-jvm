@@ -16,7 +16,7 @@ comptime {
     // validateFunctionSignatures(@import("java_lang_invoke_MethodHandleNatives.zig"));
     // validateFunctionSignatures(@import("java_lang_invoke_VarHandle.zig"));
     // validateFunctionSignatures(@import("java_lang_Module.zig"));
-    // validateFunctionSignatures(@import("java_lang_NullPointerException.zig"));
+    validateFunctionSignatures(@import("java_lang_NullPointerException.zig"));
     validateFunctionSignatures(@import("java_lang_Object.zig"));
     // validateFunctionSignatures(@import("java_lang_ProcessEnvironment.zig"));
     // validateFunctionSignatures(@import("java_lang_ProcessHandleImpl.zig"));
@@ -148,7 +148,7 @@ fn validateFunctionSignatures(comptime module: type) void {
         const expected_return_type = m.desc[std.mem.lastIndexOfScalar(u8, m.desc, ')').? + 1];
         const actual_return_type = switch (method_info.Fn.return_type.?) {
             void => 'V',
-            sys.jobject, sys.jclass => 'L',
+            sys.jobject, sys.jclass, sys.jstring => 'L',
             sys.jobjectArray => '[',
             sys.jboolean => 'Z',
             sys.jint => 'I',
