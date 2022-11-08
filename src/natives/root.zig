@@ -48,7 +48,7 @@ comptime {
     // validateFunctionSignatures(@import("java_net_InetAddressImplFactory.zig"));
     // validateFunctionSignatures(@import("java_net_NetworkInterface.zig"));
     // validateFunctionSignatures(@import("java_nio_MappedMemoryUtils.zig"));
-    // validateFunctionSignatures(@import("java_security_AccessController.zig"));
+    validateFunctionSignatures(@import("java_security_AccessController.zig"));
     validateFunctionSignatures(@import("java_util_concurrent_atomic_AtomicLong.zig"));
     // validateFunctionSignatures(@import("java_util_TimeZone.zig"));
     // validateFunctionSignatures(@import("java_util_zip_Adler32.zig"));

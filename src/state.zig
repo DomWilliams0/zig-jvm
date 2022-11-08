@@ -47,10 +47,11 @@ pub const GlobalState = struct {
         const thread = try object.VmClass.instantiateObject(java_lang_Thread);
         // can't run Thread constructor yet because it calls currentThread()
         _ = try call.runMethod(t, java_lang_Object, "<init>", "()V", .{thread});
-        call.setFieldInfallible(thread, "daemon", false);
+        call.setFieldInfallible(thread, "daemon", "Z", false);
         const prio = call.getStaticFieldInfallible(java_lang_Thread, "NORM_PRIORITY", i32);
-        call.setFieldInfallible(thread, "priority", prio);
-        call.setFieldInfallible(thread, "threadStatus", @as(i32, 1));
+        call.setFieldInfallible(thread, "priority", "I", prio);
+        call.setFieldInfallible(thread, "threadStatus", "I", @as(i32, 1));
+        call.setFieldInfallible(thread, "group", "Ljava/lang/ThreadGroup;", thread_group.clone());
 
         self.main_thread = thread.intoNullable();
         self.main_thread_group = thread_group.intoNullable();
