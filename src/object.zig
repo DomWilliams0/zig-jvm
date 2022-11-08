@@ -19,6 +19,7 @@ pub const ClassStatus = packed struct {
 pub const VmClass = struct {
     flags: cafebabe.BitSet(cafebabe.ClassFile.Flags),
     name: []const u8, // constant pool reference
+    src_file: ?[]const u8 = null, // constant pool reference
     super_cls: VmClassRef.Nullable,
     interfaces: []VmClassRef,
     loader: classloader.WhichLoader,

@@ -191,7 +191,17 @@ pub const Interpreter = struct {
 
             while (top) |f| {
                 try std.fmt.format(writer, "\n * {d}) {s} {s}", .{ i, f.method, f.method.descriptor.str });
-                try if (f.currentPc()) |pc| std.fmt.format(writer, " (pc={d})", .{pc}) else std.fmt.formatBuf(" (native)", .{}, writer);
+                if (f.currentPc()) |pc| {
+                    try std.fmt.format(writer, " (pc={d}", .{pc});
+                    const src = f.method.lookupSource(pc);
+                    try if (src.file) |src_file|
+                        if (src.line) |line|
+                            std.fmt.format(writer, " src={s}:{d})", .{ src_file, line })
+                        else
+                            std.fmt.format(writer, " src={s})", .{src_file})
+                    else
+                        std.fmt.format(writer, ")", .{});
+                } else try std.fmt.formatBuf(" (native)", .{}, writer);
                 top = f.parent_frame;
                 i += 1;
             }

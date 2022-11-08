@@ -403,6 +403,7 @@ pub const ClassLoader = struct {
             .flags = classfile.flags,
             .name = classfile.this_cls,
             .super_cls = super_class,
+            .src_file = classfile.src_file,
             .interfaces = interfaces,
             .status = .{ .ty = .object },
             .u = .{

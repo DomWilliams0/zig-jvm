@@ -28,6 +28,7 @@ pub const ClassFile = struct {
     flags: BitSet(Flags),
     this_cls: []const u8, // constant pool
     super_cls: ?[]const u8, // constant pool
+    src_file: ?[]const u8, // constant pool
     interfaces: std.ArrayListUnmanaged([]const u8), // point into constant pool
     fields: []Field,
     methods: []Method,
@@ -107,7 +108,12 @@ pub const ClassFile = struct {
         const fields = try parseFieldsOrMethods(Field, arena, persistent, this_cls, &constant_pool, &reader, buf);
         const methods = try parseFieldsOrMethods(Method, arena, persistent, this_cls, &constant_pool, &reader, buf);
         const attributes = try parseAttributes(arena, &constant_pool, &reader, buf);
-        _ = attributes; // TODO use class attributes
+
+        const src_file = if (attributes.get("SourceFile")) |attr|
+            constant_pool.lookupUtf8(std.mem.readIntBig(u16, attr[0..2])) orelse return error.BadConstantPoolIndex
+        else
+            null;
+
         return ClassFile{
             .constant_pool = constant_pool,
             .flags = flags,
@@ -116,6 +122,7 @@ pub const ClassFile = struct {
             .interfaces = ifaces,
             .fields = fields,
             .methods = methods,
+            .src_file = src_file,
         };
     }
     // TODO errdefer release list
@@ -290,6 +297,11 @@ pub const Method = struct {
         catch_type: ?[]const u8,
     };
 
+    pub const LineNumber = struct {
+        start_pc: u16,
+        line_no: u16,
+    };
+
     pub const Code = union(enum) {
         java: struct {
             max_stack: u16,
@@ -297,6 +309,7 @@ pub const Method = struct {
             /// null if abstract
             code: ?[]const u8,
             exception_handlers: []ExceptionHandler,
+            line_numbers: []LineNumber,
         },
 
         native: native.NativeCode,
@@ -305,6 +318,7 @@ pub const Method = struct {
             if (self == .java) {
                 if (self.java.code) |c| alloc.free(c);
                 alloc.free(self.java.exception_handlers);
+                alloc.free(self.java.line_numbers);
             }
         }
     };
@@ -317,6 +331,7 @@ pub const Method = struct {
                 .max_locals = 0,
                 .code = null,
                 .exception_handlers = &.{}, // should be safe to alloc.free
+                .line_numbers = &.{}, // should be safe to alloc.free
             },
         };
         if (attributes.get("Code")) |attr| {
@@ -349,13 +364,26 @@ pub const Method = struct {
             }
 
             const code_attributes = try ClassFile.parseAttributes(arena, cp, &reader, &buf);
-            _ = code_attributes; // TODO use code attributes
+            if (code_attributes.get("LineNumberTable")) |table| {
+                var stream = std.io.fixedBufferStream(table);
+                var lnt_reader = stream.reader();
+
+                var lnt_len = try lnt_reader.readIntBig(u16);
+                const line_numbers = try persistent.alloc(LineNumber, lnt_len);
+                errdefer persistent.free(line_numbers);
+
+                while (lnt_len > 0) : (lnt_len -= 1) {
+                    const pc = try lnt_reader.readIntBig(u16);
+                    const line = try lnt_reader.readIntBig(u16);
+                    line_numbers[line_numbers.len - lnt_len] = LineNumber{ .start_pc = pc, .line_no = line };
+                }
+                code.java.line_numbers = line_numbers;
+            }
 
             code.java.code = code_buf;
             code.java.exception_handlers = exc_table;
         }
         errdefer code.deinit(persistent);
-
         const has_code = code.java.code != null;
         const should_have_code = !(flags.contains(.abstract) or flags.contains(.native));
         if (has_code != should_have_code) {
@@ -379,6 +407,19 @@ pub const Method = struct {
         _ = options;
         _ = fmt;
         return std.fmt.format(writer, "{s}.{s}", .{ self.class().get().name, self.name });
+    }
+
+    /// Must have java code
+    pub fn lookupSource(self: @This(), pc: u32) struct { file: ?[]const u8, line: ?u16 } {
+        std.debug.assert(self.code.java.code != null);
+
+        const file = self.class().get().src_file;
+        // TODO binary search?
+        var line: ?u16 = for (self.code.java.line_numbers) |entry| {
+            if (pc < entry.start_pc) break entry.line_no;
+        } else null;
+
+        return .{ .file = file, .line = line };
     }
 
     pub fn deinit(self: @This(), persistent: Allocator) void {
