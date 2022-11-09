@@ -128,10 +128,11 @@ pub fn VmRef(comptime T: type) type {
                 if (self.toStrong()) |p| p.drop();
             }
 
-            pub fn clone(self: @This()) void {
+            pub fn clone(self: @This()) @This() {
                 if (self.toStrong()) |p| {
                     _ = p.clone();
                 }
+                return self;
             }
 
             pub fn cmpPtr(self: Nullable, other: Nullable) bool {
@@ -174,7 +175,7 @@ pub fn VmRef(comptime T: type) type {
                 const local = @atomicLoad(?*InnerRef, src_ptr, order);
                 const copy = Nullable{ .ptr = local };
 
-                copy.clone();
+                _ = copy.clone();
                 return copy;
             }
 
@@ -186,7 +187,7 @@ pub fn VmRef(comptime T: type) type {
                 if (ret == null) {
                     // expected was copied into dst
                     Nullable.fromPtr(old).drop();
-                    expected.clone();
+                    _ = expected.clone();
 
                     return null;
                 }

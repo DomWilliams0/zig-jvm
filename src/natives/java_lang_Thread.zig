@@ -12,6 +12,19 @@ pub export fn Java_java_lang_Thread_currentThread() sys.jobject {
     return jni.convert(obj);
 }
 
+pub export fn Java_java_lang_Thread_setPriority0() void {
+    std.log.debug("TODO set thread priority", .{});
+}
+
+pub export fn Java_java_lang_Thread_isAlive() sys.jboolean {
+    const t = jvm.state.thread_state();
+    return jni.convert(t.thread_obj.isNull());
+}
+
+pub export fn Java_java_lang_Thread_start0() void {
+    std.log.warn("TODO start thread", .{});
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Thread_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_Thread_currentThread", .desc = "()Ljava/lang/Thread;" },

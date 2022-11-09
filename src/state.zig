@@ -58,7 +58,7 @@ pub const GlobalState = struct {
         self.main_thread_group = thread_group.intoNullable();
 
         // init main thread's Thread object now
-        thread_state().thread_obj = thread.clone();
+        thread_state().thread_obj = thread.clone().intoNullable();
     }
 };
 
@@ -68,7 +68,7 @@ pub const ThreadEnv = struct {
     interpreter: interp.Interpreter,
     jni: *jni_sys.JniEnv,
     /// java.lang.Thread instance
-    thread_obj: object.VmObjectRef,
+    thread_obj: object.VmObjectRef.Nullable,
 
     /// String allocated in global allocator passed to next exception constructor
     error_context: ?[]const u8 = null,
@@ -118,7 +118,7 @@ pub const ThreadEnv = struct {
             .global = global,
             .interpreter = try interp.Interpreter.new(global.allocator.inner),
             .jni = jni_env,
-            .thread_obj = thread,
+            .thread_obj = thread.intoNullable(),
         };
         inited = true;
 

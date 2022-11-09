@@ -68,6 +68,22 @@ pub export fn Java_java_lang_Class_isPrimitive(raw_env: JniEnvPtr, jcls: sys.jcl
 
     return jni.convert(cls.get().isPrimitive());
 }
+pub export fn Java_java_lang_Class_isArray(raw_env: JniEnvPtr, jcls: sys.jclass) sys.jboolean {
+    const cls = jni.convert(jcls).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return sys.JNI_FALSE;
+    };
+
+    return jni.convert(cls.get().isArray());
+}
+pub export fn Java_java_lang_Class_isInterface(raw_env: JniEnvPtr, jcls: sys.jclass) sys.jboolean {
+    const cls = jni.convert(jcls).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return sys.JNI_FALSE;
+    };
+
+    return jni.convert(cls.get().isInterface());
+}
 
 pub export fn Java_java_lang_Class_forName0(raw_env: JniEnvPtr, _: sys.jclass, name: sys.jstring, initialize: sys.jboolean, jloader: sys.jobject, caller: sys.jclass) sys.jclass {
     _ = caller;
