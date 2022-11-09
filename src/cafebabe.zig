@@ -231,7 +231,6 @@ pub const Field = struct {
     flags: BitSet(Flags),
     name: []const u8, // points into constant pool
     descriptor: FieldDescriptor,
-    // TODO attributes
 
     u: union {
         /// Non static: offset of this field in object storage, calculated after cafebabe load
@@ -263,9 +262,10 @@ pub const Field = struct {
 
     fn setStaticValue(self: *@This(), val: anytype) void {
         var backing: u64 = undefined;
-        @ptrCast(*@TypeOf(val), &backing).* = val;
+        @ptrCast(*@TypeOf(val), @alignCast(@alignOf(@TypeOf(val)), &backing)).* = val;
         // TODO do this without a temporary
         self.u = .{ .value = backing };
+        std.log.debug("setting field {s} to constant value {any} (value at {p})", .{ self.name, val, &self.u.value });
     }
 
     fn new(persistent: Allocator, _: Allocator, _: []const u8, cp: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
@@ -296,11 +296,15 @@ pub const Field = struct {
                         .reference => |r| if (std.mem.eql(u8, r, "java/lang/String")) {
                             const utf8 = cp.lookupUtf8(try readInt(u16, value.body)) orelse return error.BadConstantValue;
                             std.log.warn("TODO ConstantValue for string {s}=\"{s}\"", .{ field.name, utf8 });
+                            field.setStaticValue(@as(u64, 0));
                         } else error.BadConstantValue,
                         else => error.BadConstantValue,
                     },
                     else => error.BadConstantValue,
                 };
+            } else {
+                // zero initialise
+                field.setStaticValue(@as(u64, 0));
             }
         }
 
@@ -381,6 +385,7 @@ pub const Method = struct {
 
     fn new(persistent: Allocator, arena: Allocator, class_name: []const u8, cp: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: MethodDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         _ = class_name;
+
         var code = Code{
             .java = .{
                 .max_stack = 0,

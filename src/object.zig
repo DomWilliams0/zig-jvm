@@ -962,8 +962,8 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
 
     for (sorted_fields) |f| {
         if (f.flags.contains(.static)) {
-            // static values just live in the class directly
-            f.u = .{ .value = 0 };
+            // static values just live in the class directly, and have already been initialised to zero or a constant value
+            std.debug.assert(f.u.value != undefined);
         } else {
             // instance
             const size = f.descriptor.size();
@@ -1002,11 +1002,17 @@ fn test_helper() type {
             var flags = cafebabe.BitSet(Field.Flags).init(.{});
             if (ctx.static) flags.insert(.static);
             flags.insert(if (ctx.public) .public else .private);
-            return .{
+            var f = cafebabe.Field{
                 .name = ctx.name,
                 .flags = flags,
                 .descriptor = @import("descriptor.zig").FieldDescriptor.new(ctx.desc) orelse unreachable,
             };
+
+            // static should be initialised
+            if (ctx.static)
+                f.u = .{ .value = 0 };
+
+            return f;
         }
 
         var fields = [_]cafebabe.Field{
