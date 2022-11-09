@@ -49,6 +49,7 @@ pub const GlobalState = struct {
         _ = try call.runMethod(t, java_lang_Object, "<init>", "()V", .{thread});
         call.setFieldInfallible(thread, "daemon", "Z", false);
         const prio = call.getStaticFieldInfallible(java_lang_Thread, "NORM_PRIORITY", i32);
+        std.debug.assert(prio != 0);
         call.setFieldInfallible(thread, "priority", "I", prio);
         call.setFieldInfallible(thread, "threadStatus", "I", @as(i32, 1));
         call.setFieldInfallible(thread, "group", "Ljava/lang/ThreadGroup;", thread_group.clone());

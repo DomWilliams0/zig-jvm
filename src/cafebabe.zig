@@ -20,6 +20,7 @@ pub const CafebabeError = error{
     InvalidDescriptor,
     DuplicateAttribute,
     UnexpectedCodeOrLackThereof,
+    BadConstantValue,
 };
 
 /// Mostly allocated persistently with everything moved out of this instance into a runtime type
@@ -255,14 +256,69 @@ pub const Field = struct {
 
     const enumFromInt = enumFromIntField; // temporary
 
-    fn new(persistent: Allocator, _: Allocator, _: []const u8, _: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
-        _ = attributes;
+    fn readInt(comptime T: type, buf: []const u8) !T {
+        if (buf.len < @sizeOf(T)) return error.BadConstantValue;
+        return std.mem.readIntBig(T, buf[0..@sizeOf(T)]);
+    }
+
+    fn setStaticValue(self: *@This(), val: anytype) void {
+        var backing: u64 = undefined;
+        @ptrCast(*@TypeOf(val), &backing).* = val;
+        // TODO do this without a temporary
+        self.u = .{ .value = backing };
+    }
+
+    fn new(persistent: Allocator, _: Allocator, _: []const u8, cp: *const ConstantPool, flags: BitSet(Flags), name: []const u8, desc: FieldDescriptor, attributes: std.StringHashMapUnmanaged([]const u8)) !@This() {
         _ = persistent;
 
-        // TODO consume needed field attributes
-        return Field{ .name = name, .descriptor = desc, .flags = flags };
+        var field = Field{ .name = name, .descriptor = desc, .flags = flags };
+
+        if (flags.contains(.static)) {
+            if (attributes.get("ConstantValue")) |attr| {
+                const idx = try readInt(u16, attr);
+
+                const Tag = ConstantPool.Tag;
+
+                const field_type = desc.getType();
+                const value = cp.lookupMany(idx, .{ Tag.integer, Tag.float, Tag.long, Tag.double, Tag.string }) orelse return error.BadConstantValue;
+                try switch (value.tag) {
+                    .integer => switch (field_type) {
+                        .primitive => |p| switch (p) {
+                            .int, .short, .char, .byte, .boolean => field.setStaticValue(try readInt(i32, value.body)),
+                            else => error.BadConstantValue,
+                        },
+                        else => error.BadConstantValue,
+                    },
+                    .long => if (field_type == .primitive and field_type.primitive == .long) field.setStaticValue(try readInt(i64, value.body)) else error.BadConstantValue,
+                    .double => if (field_type == .primitive and field_type.primitive == .double) field.setStaticValue(@bitCast(f64, try readInt(u64, value.body))) else error.BadConstantValue,
+                    .float => if (field_type == .primitive and field_type.primitive == .float) field.setStaticValue(@bitCast(f32, try readInt(u32, value.body))) else error.BadConstantValue,
+                    .string => switch (field_type) {
+                        .reference => |r| if (std.mem.eql(u8, r, "java/lang/String")) {
+                            const utf8 = cp.lookupUtf8(try readInt(u16, value.body)) orelse return error.BadConstantValue;
+                            std.log.warn("TODO ConstantValue for string {s}=\"{s}\"", .{ field.name, utf8 });
+                        } else error.BadConstantValue,
+                        else => error.BadConstantValue,
+                    },
+                    else => error.BadConstantValue,
+                };
+            }
+        }
+
+        return field;
     }
 };
+
+test "set small int field value from bigger int" {
+    var backing: u64 = undefined;
+
+    var int_ptr = @ptrCast(*i32, &backing);
+    int_ptr.* = @as(i32, 0x11223344);
+    try std.testing.expectEqual(int_ptr.*, 0x11223344);
+
+    var byte_ptr = @ptrCast(*i8, &backing);
+    byte_ptr.* = @as(i8, 0xc);
+    try std.testing.expectEqual(byte_ptr.*, 0xc);
+}
 
 pub const Method = struct {
     flags: BitSet(Flags),
@@ -668,6 +724,7 @@ pub const ConstantPool = struct {
             .long_double => .{ Tag.long, Tag.double },
         };
         const constant = self.lookupMany(idx_cp, tags) orelse return null;
+        // TODO validate body length before reading
         return switch (constant.tag) {
             .class => .{ .class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
             .long => .{ .long = @bitCast(i64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
