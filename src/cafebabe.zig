@@ -476,8 +476,9 @@ pub const Method = struct {
 
         const file = self.class().get().src_file;
         // TODO binary search?
-        var line: ?u16 = for (self.code.java.line_numbers) |entry| {
-            if (pc < entry.start_pc) break entry.line_no;
+        const lines = self.code.java.line_numbers;
+        var line: ?u16 = for (lines[1..]) |entry, i| {
+            if (pc < entry.start_pc) break lines[i].line_no;
         } else null;
 
         return .{ .file = file, .line = line };
