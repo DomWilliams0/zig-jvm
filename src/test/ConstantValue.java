@@ -4,7 +4,7 @@ public class ConstantValue {
     private static final int INT = 500;
     private static final double DOUBLE = 20.123;
     private static final byte BYTE = -23;
-    private static final String STRING = "oohlala";
+    public static final String STRING = "oohlala";
 
     public static int vmTest() throws IllegalArgumentException, IllegalAccessException, NoSuchFieldException, SecurityException {
         if (INT != 500) return 1;

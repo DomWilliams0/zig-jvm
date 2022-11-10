@@ -147,7 +147,7 @@ pub const VmClass = struct {
 
         // check superinterfaces
         // TODO return specific error if finds "multiple maximally-specific superinterface methods"
-        @panic("TODO find method in super interfaces");
+        std.debug.panic("TODO find method {s} {s} in super interfaces of {s}", .{ name, desc, self.name });
     }
 
     /// Checks self and super classes only

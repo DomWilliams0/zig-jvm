@@ -323,7 +323,7 @@ pub const Frame = struct {
             const src_base = self.stack - param_count;
             var params = method.iterateParamTypes();
             while (params.next()) |param_type| {
-                if (param_type[0] == 'D' or param_type[0] == 'J') {
+                if (param_type.isWide()) {
                     // wide, copy everything up to here including this double
                     const n = src - last_copy + 1;
                     std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);

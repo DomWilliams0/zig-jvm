@@ -70,6 +70,7 @@ const impl = struct {
         if (jni.convert(exc).toStrong()) |exception| {
             // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
             const thread = state.thread_state();
+            std.log.debug("throwing exception {?}", .{exception});
             thread.interpreter.setException(exception);
             return 0;
         }

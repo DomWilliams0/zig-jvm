@@ -66,7 +66,7 @@ pub const NativeMethodCode = struct {
         var i: usize = 2;
         var arg_iter = desc.iterateParamTypes();
         while (arg_iter.next()) |it| {
-            arg_types[i] = typeCharToFfi(it);
+            arg_types[i] = typeCharToFfi(it.str);
             i += 1;
         }
         const ret_type = desc.returnTypeSimple();

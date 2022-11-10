@@ -73,6 +73,13 @@ pub const FieldDescriptor = struct {
         };
     }
 
+    pub fn isWide(self: @This()) bool {
+        return switch (self.str[0]) {
+            'D', 'J' => true,
+            else => false,
+        };
+    }
+
     pub fn getType(self: @This()) union(enum) {
         primitive: types.PrimitiveDataType,
         reference: []const u8,
@@ -162,12 +169,12 @@ pub const MethodDescriptor = struct {
         str: []const u8,
         idx: usize = 0,
 
-        pub fn next(self: *@This()) ?[]const u8 {
+        pub fn next(self: *@This()) ?FieldDescriptor {
             if (self.str[self.idx] == ')') return null; // done
 
             const ty = FieldDescriptor.extractFromStreamTrusted(self.str[self.idx..]);
             self.idx += ty.len;
-            return ty;
+            return .{ .str = ty };
         }
     };
     pub fn iterateParamTypes(self: @This()) ParamIterator {

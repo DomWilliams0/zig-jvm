@@ -13,12 +13,10 @@ pub fn ConversionType(comptime from: type) type {
         JniEnvPtr => *const JniEnv,
 
         sys.jclass => VmClassRef.Nullable,
-        VmClassRef => sys.jclass,
+        VmClassRef, VmClassRef.Nullable => sys.jclass,
 
         sys.jobject => VmObjectRef.Nullable,
-        VmObjectRef => sys.jobject,
-        VmObjectRef.Nullable => sys.jobject,
-        VmObjectRef.NullablePtr => sys.jobject,
+        VmObjectRef, VmObjectRef.Nullable, VmObjectRef.NullablePtr => sys.jobject,
 
         sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray => VmObjectRef.Nullable,
         sys.jstring => VmObjectRef.Nullable,
@@ -57,6 +55,7 @@ pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
             break :blk cls.clone().intoNullable(); // TODO need to clone?
         },
         VmClassRef => vmRefToRaw(sys.jclass, val.get().getClassInstance().clone()),
+        VmClassRef.Nullable => if (val.toStrong()) |c| vmRefToRaw(sys.jclass, c.get().getClassInstance().clone()) else null,
 
         sys.jarray, sys.jbooleanArray, sys.jbyteArray, sys.jcharArray, sys.jshortArray, sys.jintArray, sys.jlongArray, sys.jfloatArray, sys.jdoubleArray, sys.jobjectArray => rawToVmRef(VmObjectRef, val),
         sys.jstring => rawToVmRef(VmObjectRef, val),
