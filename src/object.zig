@@ -388,8 +388,20 @@ pub const VmClass = struct {
         self_mut.monitor.notifyAll();
     }
 
-    /// Self is cloned to pass to object
-    pub fn instantiateObject(self: VmClassRef) error{OutOfMemory}!VmObjectRef {
+    /// Self is cloned to pass to object. Might initialise if .ensure_initialised is passed
+    pub fn instantiateObject(self: VmClassRef, comptime initialised: enum { ensure_initialised, already_initialised, ignore }) (if (initialised == .ensure_initialised) Error else error{OutOfMemory})!VmObjectRef {
+        switch (initialised) {
+            .ensure_initialised => try ensureInitialised(self),
+            .already_initialised => std.debug.assert(blk: {
+                const current_state = self.get().init_state;
+                switch (current_state) {
+                    .initialised, .initialising => break :blk true,
+                    else => break :blk false,
+                }
+            }),
+            .ignore => {},
+        }
+
         const cls = self.get();
         std.log.debug("instantiating object of class {s}", .{cls.name});
 
@@ -1119,7 +1131,7 @@ test "allocate object" {
     // defer cls.drop();
 
     // allocate object
-    const obj = try VmClass.instantiateObject(cls);
+    const obj = try VmClass.instantiateObject(cls, .already_initialised);
     // defer obj.drop();
 
     // check default field values

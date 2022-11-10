@@ -39,7 +39,7 @@ pub const StringPool = struct {
     }
 
     pub fn getString(self: *@This(), utf8: []const u8) error{ OutOfMemory, IllegalArgument }!object.VmObjectRef {
-        const obj = try object.VmClass.instantiateObject(self.stringClass());
+        const obj = try object.VmClass.instantiateObject(self.stringClass(), .already_initialised);
 
         // TODO run Object constructor
 

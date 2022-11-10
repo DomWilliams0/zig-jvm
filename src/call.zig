@@ -11,7 +11,7 @@ const StackEntry = @import("frame.zig").Frame.StackEntry;
 const Error = state.Error;
 
 pub fn initWithDefaultConstructor(thread: *state.ThreadEnv, cls: object.VmClassRef) Error!object.VmObjectRef {
-    const obj = try object.VmClass.instantiateObject(cls);
+    const obj = try object.VmClass.instantiateObject(cls, .ensure_initialised);
     return runMethod(thread, cls, "<init>", "()V", .{obj});
 }
 

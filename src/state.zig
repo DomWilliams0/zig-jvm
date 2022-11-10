@@ -38,13 +38,13 @@ pub const GlobalState = struct {
         const java_lang_Thread = self.classloader.getLoadedBootstrapClass("java/lang/Thread") orelse @panic("no java/lang/Thread");
         const java_lang_Object = self.classloader.getLoadedBootstrapClass("java/lang/Object") orelse unreachable;
 
-        const thread_group = try object.VmClass.instantiateObject(java_lang_ThreadGroup);
+        const thread_group = try object.VmClass.instantiateObject(java_lang_ThreadGroup, .already_initialised);
         _ = try call.runMethod(t, java_lang_ThreadGroup, "<init>", "()V", .{thread_group});
 
         const thread_name = try self.string_pool.getString("MainThread");
         _ = thread_name;
 
-        const thread = try object.VmClass.instantiateObject(java_lang_Thread);
+        const thread = try object.VmClass.instantiateObject(java_lang_Thread, .already_initialised);
         // can't run Thread constructor yet because it calls currentThread()
         _ = try call.runMethod(t, java_lang_Object, "<init>", "()V", .{thread});
         call.setFieldInfallible(thread, "daemon", "Z", false);
@@ -305,7 +305,7 @@ pub fn errorToException(err: Error) object.VmObjectRef {
                     std.log.warn("failed to load exception class {s} while instantiating: {any}", .{ cls, load_error });
                     return recurse.fail(load_error);
                 };
-                const exc_obj = try object.VmClass.instantiateObject(exc_class);
+                const exc_obj = object.VmClass.instantiateObject(exc_class, .ensure_initialised) catch |init_err| return recurse.fail(init_err);
 
                 // invoke constructor
                 var run_default_constructor = true;

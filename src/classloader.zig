@@ -353,7 +353,7 @@ pub const ClassLoader = struct {
             return;
         };
 
-        const class_obj = try object.VmClass.instantiateObject(java_lang_Class);
+        const class_obj = try object.VmClass.instantiateObject(java_lang_Class, .ignore);
 
         // classdata = VmClassRef TODO is this safe?
         const fid = state.thread_state().global.classloader.java_lang_Class_classData;

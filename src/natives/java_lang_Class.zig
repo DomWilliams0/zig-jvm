@@ -159,7 +159,7 @@ fn getDeclaredFields(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only: bool)
             .reference => |refname| try t.global.classloader.loadClass(refname, .bootstrap),
             .array => |arrname| try t.global.classloader.loadClassAsArrayElement(arrname, .bootstrap),
         };
-        const field_instance = try jvm.object.VmClass.instantiateObject(field_cls);
+        const field_instance = try jvm.object.VmClass.instantiateObject(field_cls, .ensure_initialised);
         _ = try jvm.call.runMethod(t, field_cls, "<init>", "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IZILjava/lang/String;[B)V", .{ field_instance, cls.get().getClassInstance(), name, ty.get().getClassInstance(), f.flags.bits, false, @intCast(i32, i), signature, jvm.object.VmObjectRef.Nullable.nullRef() });
 
         env.SetObjectArrayElement(raw_env, jarray, idx, jni.convert(field_instance));
@@ -258,7 +258,7 @@ fn getDeclaredConstructors(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only:
             const annotations = jvm.VmObjectRef.Nullable.nullRef(); // TODO
             const param_annotations = jvm.VmObjectRef.Nullable.nullRef(); // TODO
 
-            const instance = try jvm.object.VmClass.instantiateObject(cons_cls);
+            const instance = try jvm.object.VmClass.instantiateObject(cons_cls, .ensure_initialised);
             _ = try jvm.call.runMethod(t, cons_cls, "<init>", "(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)V", .{ instance.intoNullable(), decl_cls, param_types, checked_exceptions, modifiers, slot, signature, annotations, param_annotations });
 
             env.SetObjectArrayElement(raw_env, jarray, idx, jni.convert(instance));

@@ -836,7 +836,7 @@ pub const handlers = struct {
         const cls = try ctxt.resolveClass(name, .ensure_initialised);
 
         // instantiate object and push onto stack
-        const obj = try object.VmClass.instantiateObject(cls);
+        const obj = try object.VmClass.instantiateObject(cls, .already_initialised);
 
         ctxt.operandStack().push(obj);
     }
@@ -1530,7 +1530,7 @@ pub const handlers = struct {
             std.log.debug("trying to throw null, instantiating NPE", .{});
 
             const npe_cls = try ctxt.resolveClassWithLoader("java/lang/NullPointerException", .ensure_initialised, .bootstrap);
-            const npe = try object.VmClass.instantiateObject(npe_cls);
+            const npe = try object.VmClass.instantiateObject(npe_cls, .already_initialised);
             break :blk npe;
         };
 
