@@ -81,11 +81,11 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
     // setup jdk/internal/misc/UnsafeConstants
     {
         const jdk_internal_misc_UnsafeConstants = loader.getLoadedBootstrapClass("jdk/internal/misc/UnsafeConstants").?;
-        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "ADDRESS_SIZE0", @as(i32, @sizeOf(*u8)));
-        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "PAGE_SIZE", @as(i32, std.mem.page_size));
-        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "BIG_ENDIAN", @import("builtin").cpu.arch.endian() == .Big);
-        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "UNALIGNED_ACCESS", false); // TODO
-        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "DATA_CACHE_LINE_FLUSH_SIZE", @as(i32, 0)); // TODO
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "ADDRESS_SIZE0", "I", @as(i32, @sizeOf(*u8)));
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "PAGE_SIZE", "I", @as(i32, std.mem.page_size));
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "BIG_ENDIAN", "Z", @import("builtin").cpu.arch.endian() == .Big);
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "UNALIGNED_ACCESS", "Z", false); // TODO
+        call.setStaticFieldInfallible(jdk_internal_misc_UnsafeConstants, "DATA_CACHE_LINE_FLUSH_SIZE", "I", @as(i32, 0)); // TODO
     }
 
     // setup System class

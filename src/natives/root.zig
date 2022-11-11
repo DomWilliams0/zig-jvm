@@ -1,9 +1,9 @@
 comptime {
     // validateFunctionSignatures(@import("java_io_Console.zig"));
     // validateFunctionSignatures(@import("java_io_FileCleanable.zig"));
-    // validateFunctionSignatures(@import("java_io_FileDescriptor.zig"));
-    // validateFunctionSignatures(@import("java_io_FileInputStream.zig"));
-    // validateFunctionSignatures(@import("java_io_FileOutputStream.zig"));
+    validateFunctionSignatures(@import("java_io_FileDescriptor.zig"));
+    validateFunctionSignatures(@import("java_io_FileInputStream.zig"));
+    validateFunctionSignatures(@import("java_io_FileOutputStream.zig"));
     // validateFunctionSignatures(@import("java_io_ObjectStreamClass.zig"));
     // validateFunctionSignatures(@import("java_io_RandomAccessFile.zig"));
     // validateFunctionSignatures(@import("java_io_UnixFileSystem.zig"));
@@ -60,7 +60,7 @@ comptime {
     // validateFunctionSignatures(@import("jdk_internal_loader_BootLoader.zig"));
     // validateFunctionSignatures(@import("jdk_internal_loader_NativeLibraries.zig"));
     validateFunctionSignatures(@import("jdk_internal_misc_CDS.zig"));
-    // validateFunctionSignatures(@import("jdk_internal_misc_ScopedMemoryAccess.zig"));
+    validateFunctionSignatures(@import("jdk_internal_misc_ScopedMemoryAccess.zig"));
     // validateFunctionSignatures(@import("jdk_internal_misc_Signal.zig"));
     validateFunctionSignatures(@import("jdk_internal_misc_Unsafe.zig"));
     validateFunctionSignatures(@import("jdk_internal_misc_VM.zig"));

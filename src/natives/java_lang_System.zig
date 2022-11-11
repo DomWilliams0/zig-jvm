@@ -61,6 +61,33 @@ pub export fn Java_java_lang_System_arraycopy(raw_env: JniEnvPtr, system_cls: sy
     };
 }
 
+pub export fn Java_java_lang_System_setIn0(raw_env: JniEnvPtr, system_cls: sys.jclass, jfile: sys.jobject) void {
+    const cls = jni.convert(system_cls).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return;
+    };
+
+    jvm.call.setStaticField(cls, "in", "Ljava/io/InputStream;", jni.convert(jfile)) catch {};
+}
+
+pub export fn Java_java_lang_System_setOut0(raw_env: JniEnvPtr, system_cls: sys.jclass, jfile: sys.jobject) void {
+    const cls = jni.convert(system_cls).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return;
+    };
+
+    jvm.call.setStaticField(cls, "out", "Ljava/io/PrintStream;", jni.convert(jfile)) catch {};
+}
+
+pub export fn Java_java_lang_System_setErr0(raw_env: JniEnvPtr, system_cls: sys.jclass, jfile: sys.jobject) void {
+    const cls = jni.convert(system_cls).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return;
+    };
+
+    jvm.call.setStaticField(cls, "err", "Ljava/io/PrintStream;", jni.convert(jfile)) catch {};
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_System_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_System_setIn0", .desc = "(Ljava/io/InputStream;)V" },
