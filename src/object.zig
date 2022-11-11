@@ -237,18 +237,17 @@ pub const VmClass = struct {
 
     /// Looks in self, superinterfaces then superclasses (5.4.3.2)
     pub fn findFieldRecursively(
-        self: @This(),
+        self: *@This(),
         name: []const u8,
         desc: []const u8,
         flags: anytype,
     ) ?FindSearchResult {
         const helper = struct {
-            fn makeFieldId(super: ?*VmClass, field: *Field) FindSearchResult {
+            fn makeFieldId(field: *Field) FindSearchResult {
                 const fid = if (field.flags.contains(.static))
                     FieldId{ .static_field = field }
                 else blk: {
-                    const base = if (super) |s| s.u.obj.layout.instance_offset else 0;
-                    break :blk FieldId{ .instance_offset = base + field.u.layout_offset };
+                    break :blk FieldId{ .instance_offset = field.u.layout_offset };
                 };
 
                 return .{ .id = fid, .field = field };
@@ -259,31 +258,34 @@ pub const VmClass = struct {
                 field_name: []const u8,
                 field_desc: []const u8,
                 search_flags: anytype,
-                search_base: ?*VmClass,
             ) ?FindSearchResult {
                 // check self first
-                if (cls.findFieldInThisOnly(field_name, field_desc, search_flags)) |f| return makeFieldId(search_base, f);
+                if (cls.findFieldInThisOnly(field_name, field_desc, search_flags)) |f| return makeFieldId(f);
 
                 // check superinterfaces recursively
                 for (cls.interfaces) |iface|
-                    if (recurse(iface.get(), field_name, field_desc, search_flags, cls)) |f|
+                    if (recurse(iface.get(), field_name, field_desc, search_flags)) |f|
                         return f;
 
                 // check super class
                 if (cls.super_cls.toStrong()) |super|
-                    if (recurse(super.get(), field_name, field_desc, search_flags, cls)) |f|
+                    if (recurse(
+                        super.get(),
+                        field_name,
+                        field_desc,
+                        search_flags,
+                    )) |f|
                         return f;
 
                 return null;
             }
         };
-        var self_mut = self;
-        return helper.recurse(&self_mut, name, desc, flags, null);
+        return helper.recurse(self, name, desc, flags);
     }
 
     /// Looks in self only
     fn findFieldInThisOnly(
-        self: @This(),
+        self: *@This(),
         name: []const u8,
         desc: []const u8,
         flags: anytype,
@@ -301,7 +303,7 @@ pub const VmClass = struct {
 
     /// Looks in self only
     pub fn findFieldByName(
-        self: @This(),
+        self: *@This(),
         name: []const u8,
     ) ?*Field {
         return for (self.u.obj.fields) |m, i| {
@@ -701,8 +703,7 @@ pub const VmObject = struct {
     pub fn getField(self: *@This(), comptime T: type, field: FieldId) *T {
         switch (field) {
             .instance_offset => |offset| {
-                var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
-                return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+                return self.getRawFieldPointer(T, offset);
             },
             .static_field => |f| std.debug.panic("not an instance field ID ({s})", .{f.name}),
         }

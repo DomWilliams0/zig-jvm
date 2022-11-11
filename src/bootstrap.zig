@@ -16,8 +16,6 @@ const preload_classes: []const Preload = &.{
     .{ .cls = "[I" },
     .{ .cls = "java/lang/System", .initialise = true },
     .{ .cls = "jdk/internal/misc/UnsafeConstants", .initialise = true },
-    // required early on before jdk/internal/reflect/Reflection.<clinit>
-    .{ .cls = "java/lang/reflect/AccessibleObject", .initialise = true },
 };
 
 pub const Options = struct {
@@ -90,14 +88,15 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
 
     // setup System class
     if (!opts.skip_system) {
-        {
-            const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
-            const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
-            if ((try thread.interpreter.executeUntilReturn(method)) == null) {
-                const exc = thread.interpreter.exception().toStrongUnchecked();
-                call.logExceptionWithCause(thread, "initialising System", exc);
-                return error.InvocationError;
-            }
+        // required early on before jdk/internal/reflect/Reflection.<clinit>
+        try load(opts, .{ .cls = "java/lang/reflect/AccessibleObject", .initialise = true }, loader);
+
+        const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
+        const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
+        if ((try thread.interpreter.executeUntilReturn(method)) == null) {
+            const exc = thread.interpreter.exception().toStrongUnchecked();
+            call.logExceptionWithCause(thread, "initialising System", exc);
+            return error.InvocationError;
         }
     }
 }
