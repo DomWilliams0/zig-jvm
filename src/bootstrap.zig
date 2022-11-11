@@ -16,6 +16,8 @@ const preload_classes: []const Preload = &.{
     .{ .cls = "[I" },
     .{ .cls = "java/lang/System", .initialise = true },
     .{ .cls = "jdk/internal/misc/UnsafeConstants", .initialise = true },
+    // required early on before jdk/internal/reflect/Reflection.<clinit>
+    .{ .cls = "java/lang/reflect/AccessibleObject", .initialise = true },
 };
 
 pub const Options = struct {

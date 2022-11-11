@@ -1,5 +1,5 @@
-//! skip
-// skip until reflection works
+//! system
+// system is required for reflection
 public class ConstantValue {
     private static final int INT = 500;
     private static final double DOUBLE = 20.123;
