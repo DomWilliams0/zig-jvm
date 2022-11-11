@@ -113,7 +113,8 @@ pub const PlatformProperties = struct {
 
         // TODO get actual lang
         props.display_language = "en";
-        props.sun_jnu_encoding = if (big_endian) "UnicodeBig" else "UnicodeLittle";
+        props.sun_io_unicode_encoding = if (big_endian) "UnicodeBig" else "UnicodeLittle";
+        props.sun_jnu_encoding = "UTF-8";
 
         props.file_separator = comptime &.{std.fs.path.sep}; // TODO is this a local?
         props.path_separator = ":";
