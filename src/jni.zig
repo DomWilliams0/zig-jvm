@@ -110,7 +110,7 @@ pub const NativeMethodCode = struct {
         // 0 is already initialised to jni table ptr
         var i: u16 = if (static_class) |static| blk: {
             // class is arg 1
-            self.args[1] = @ptrCast(*anyopaque, static.intoNullable().ptr);
+            self.args[1] = @ptrCast(*const anyopaque, &static.ptr);
             break :blk 2; // pop from arg 2
         } else 1; // pop from arg 1 which includes `this`
 
