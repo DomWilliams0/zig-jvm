@@ -92,10 +92,24 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
         try load(opts, .{ .cls = "java/lang/reflect/AccessibleObject", .initialise = true }, loader);
 
         const java_lang_System = loader.getLoadedBootstrapClass("java/lang/System").?;
-        const method = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
-        if ((try thread.interpreter.executeUntilReturn(method)) == null) {
+
+        // phase1
+        const init_phase1 = java_lang_System.get().findMethodInThisOnly("initPhase1", "()V", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase1");
+        if ((try thread.interpreter.executeUntilReturn(init_phase1)) == null) {
             const exc = thread.interpreter.exception().toStrongUnchecked();
-            call.logExceptionWithCause(thread, "initialising System", exc);
+            call.logExceptionWithCause(thread, "initialising System phase1", exc);
+            return error.InvocationError;
+        }
+
+        const init_phase2 = java_lang_System.get().findMethodInThisOnly("initPhase2", "(ZZ)I", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase2");
+        if (try thread.interpreter.executeUntilReturn(init_phase2)) |ret| {
+            if (ret.convertToInt() != @import("sys/jni.zig").JNI_OK) {
+                std.log.err("System::initPhase2 failed", .{});
+                return error.Internal;
+            }
+        } else {
+            const exc = thread.interpreter.exception().toStrongUnchecked();
+            call.logExceptionWithCause(thread, "initialising System phase2", exc);
             return error.InvocationError;
         }
     }
