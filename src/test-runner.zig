@@ -249,6 +249,10 @@ pub fn log(
         nosuspend f.file_writer.writer().print(msg, args) catch {};
         f.file_writer.flush() catch {};
     }
-    nosuspend stderr_writer.writer().print(msg, args) catch {};
-    stderr_writer.flush() catch {};
+
+    if (message_level != .debug) {
+        // this is reeeally slow
+        nosuspend stderr_writer.writer().print(msg, args) catch {};
+        stderr_writer.flush() catch {};
+    }
 }
