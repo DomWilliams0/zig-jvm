@@ -4,6 +4,8 @@ const jni = jvm.jni;
 const sys = jni.sys;
 const JniEnvPtr = jvm.jni.JniEnvPtr;
 
+pub export fn Java_java_io_UnixFileSystem_initIDs() void {}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_io_UnixFileSystem_canonicalize0", .desc = "(Ljava/lang/String;)Ljava/lang/String;" },
     .{ .method = "Java_java_io_UnixFileSystem_getBooleanAttributes0", .desc = "(Ljava/io/File;)I" },

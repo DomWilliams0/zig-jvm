@@ -6,7 +6,7 @@ comptime {
     validateFunctionSignatures(@import("java_io_FileOutputStream.zig"));
     // validateFunctionSignatures(@import("java_io_ObjectStreamClass.zig"));
     // validateFunctionSignatures(@import("java_io_RandomAccessFile.zig"));
-    // validateFunctionSignatures(@import("java_io_UnixFileSystem.zig"));
+    validateFunctionSignatures(@import("java_io_UnixFileSystem.zig"));
     validateFunctionSignatures(@import("java_lang_Class.zig"));
     validateFunctionSignatures(@import("java_lang_ClassLoader.zig"));
     validateFunctionSignatures(@import("java_lang_Double.zig"));

@@ -170,6 +170,12 @@ pub export fn Java_jdk_internal_misc_Unsafe_getBooleanVolatile(_: jni.JniEnvPtr,
 // pub export fn Java_jdk_internal_misc_Unsafe_getDoubleVolatile(_: jni.JniEnvPtr, _: sys.jclass, jobj: sys.jobject, offset: sys.jlong) sys.jdouble {
 //     return get(f64, .volatile_, jobj, offset);
 // }
+pub export fn Java_jdk_internal_misc_Unsafe_ensureClassInitialized0(raw_env: jni.JniEnvPtr, _: sys.jclass, jcls: sys.jclass) void {
+    const cls = jni.convert(jcls).toStrongUnchecked();
+    jvm.object.VmClass.ensureInitialised(cls) catch |e| {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(e)));
+    };
+}
 
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_jdk_internal_misc_Unsafe_registerNatives", .desc = "()V" },
