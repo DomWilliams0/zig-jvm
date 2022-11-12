@@ -530,6 +530,21 @@ pub const VmClass = struct {
                 return false;
             }
 
+            fn implements(checkee: VmClassRef, interface: VmClassRef) bool {
+                std.debug.assert(!checkee.cmpPtr(interface)); // should already be filtered out
+                std.debug.assert(interface.get().isInterface());
+
+                if (isSuperInterface(checkee, interface)) return true;
+
+                if (checkee.get().super_cls.toStrong()) |super| {
+
+                    // recurse
+                    if (isSuperInterface(super, interface)) return true;
+                }
+
+                return false;
+            }
+
             fn strcmp(a: []const u8, b: []const u8) bool {
                 return std.mem.eql(u8, a, b);
             }
@@ -555,7 +570,7 @@ pub const VmClass = struct {
             else
                 helper.strcmp(t.name, "java/lang/Object") // T must be Object.
         else if (t.isInterface())
-            helper.isSuperInterface(s_ref, t_ref) //S must implement interface T.
+            helper.implements(s_ref, t_ref) //S must implement interface T.
         else
             helper.isSuperClass(s_ref, t_ref); // then S must be the same class as T, or S must be a subclass of T
     }
