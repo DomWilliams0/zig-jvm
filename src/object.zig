@@ -1147,7 +1147,7 @@ test "allocate object" {
     // defer cls.drop();
 
     // allocate object
-    const obj = try VmClass.instantiateObject(cls, .already_initialised);
+    const obj = try VmClass.instantiateObject(cls, .ignore);
     // defer obj.drop();
 
     // check default field values

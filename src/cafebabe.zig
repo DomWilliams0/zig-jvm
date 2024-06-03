@@ -381,7 +381,7 @@ pub const Method = struct {
 
         pub fn deinit(self: @This(), alloc: Allocator) void {
             if (self == .java) {
-                if (self.java.code) |c| alloc.free(c);
+                if (self.java.code) |c| alloc.free(@as([]align(4) const u8, @alignCast(c))); // code was allocated with alignment 4
                 alloc.free(self.java.exception_handlers);
                 alloc.free(self.java.line_numbers);
             }

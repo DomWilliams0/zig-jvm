@@ -44,11 +44,19 @@ pub fn VmRef(comptime T: type) type {
 
                     const alloc = global_allocator();
                     const alloc_size =
-                        std.mem.alignForward(usize, @sizeOf(InnerBlock), @alignOf(T)) + @sizeOf(T) + T.vmRefSize(self.ptr.get());
+                        @sizeOf(InnerBlock) + self.ptr.block.padding + @sizeOf(T) + T.vmRefSize(self.ptr.get());
 
-                    const destroy_slice = @as([*]u8, @ptrCast(self.ptr))[0..alloc_size];
                     // if (logging) std.log.debug("{*}: freeing {*} len {d}", .{ self.ptr, destroy_slice.ptr, destroy_slice.len });
-                    alloc.inner.free(destroy_slice);
+                    if (std.debug.runtime_safety) {
+                        switch (self.ptr.block.alignment) {
+                            8 => alloc.inner.free(@as([*]align(8) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
+                            4 => alloc.inner.free(@as([*]align(4) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
+                            2 => alloc.inner.free(@as([*]align(2) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
+                            else => alloc.inner.free(@as([*]align(1) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
+                        }
+                    } else {
+                        alloc.inner.free(@as([*]u8, @ptrCast(self.ptr))[0..alloc_size]);
+                    }
                 }
             }
         };
@@ -201,6 +209,7 @@ pub fn VmRef(comptime T: type) type {
             weak: Counter,
             strong: Counter,
             padding: u8, // between block and start of data
+            alignment: if (std.debug.runtime_safety) u8 else void,
         };
 
         const InnerRef = extern struct {
@@ -222,6 +231,7 @@ pub fn VmRef(comptime T: type) type {
             const alloc = global_allocator();
             const padding = std.mem.alignForward(usize, @sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
             const alloc_size = @sizeOf(InnerBlock) + padding + @sizeOf(T) + size;
+            // TODO pack innerblock? it has extra unnecessary padding
 
             // TODO should be able to get cheaply zero allocated memory from OS, to avoid needing to zero it manually
             //  (which is exactly what is needed for default initialising arrays/objects)
@@ -233,6 +243,7 @@ pub fn VmRef(comptime T: type) type {
                     .weak = Counter.init(1),
                     .strong = Counter.init(1),
                     .padding = @truncate(padding),
+                    .alignment = if (std.debug.runtime_safety) @truncate(alignment) else void{},
                 },
                 // padding and data follows immediately
             };
