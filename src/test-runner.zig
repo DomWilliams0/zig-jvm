@@ -5,7 +5,6 @@ usingnamespace @import("natives");
 
 const Allocator = std.mem.Allocator;
 
-pub const log_level: std.log.Level = .debug;
 const LogFile = struct {
     file: std.fs.File,
     file_writer: std.io.BufferedWriter(8192, std.fs.File.Writer),
@@ -13,6 +12,11 @@ const LogFile = struct {
 var log_file: ?*LogFile = null;
 var log_mutex: std.Thread.Mutex = .{};
 var stderr_writer: std.io.BufferedWriter(8192, std.fs.File.Writer) = .{ .unbuffered_writer = std.io.getStdErr().writer() };
+
+pub const std_options: std.Options = .{
+    .log_level = .debug,
+    .logFn = log,
+};
 
 fn openLogFile(alloc: Allocator) !void {
     if (log_file != null) @panic("log file already initialised");
