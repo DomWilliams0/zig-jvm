@@ -90,8 +90,7 @@ debug: call stack:
 
 Please note that this is:
 * very much WIP
-* built with the Zig master branch, and is randomly updated to the latest
-    (currently `0.10.0-dev.4418+99c3578f6`).
+* built with Zig `0.12.0`, and is randomly updated
 * will be very unlikely to run arbitrary Java programs any time soon
 
 The way I am progressing through the massive amount of functionality expected from a JVM is to build
