@@ -118,7 +118,7 @@ pub const PlatformProperties = struct {
 
         props.file_separator = comptime &.{std.fs.path.sep}; // TODO is this a local?
         props.path_separator = ":";
-        props.line_separator = if (@import("builtin").os.tag == .windows) "\r\n" else "\n";
+        props.line_separator = if (builtin.os.tag == .windows) "\r\n" else "\n";
 
         return props;
     }
@@ -173,23 +173,23 @@ pub const SystemProperties = struct {
         };
     }
 
-    pub fn keyValues(self: @This()) [@typeInfo(@This()).Struct.fields.len][2][:0]const u8 {
-        // const fields = @typeInfo(@This()).Struct.fields;
-        // comptime var out: [fields.len][2][:0]const u8 = undefined;
+    const FieldCount = @typeInfo(@This()).Struct.fields.len;
+    pub fn keyValues(self: @This()) [FieldCount][2][:0]const u8 {
+        const fields = @typeInfo(@This()).Struct.fields;
+        var vals: [fields.len][2][:0]const u8 = undefined;
 
-        // inline for (fields, 0..) |f, i| {
-        //     comptime var key: [f.name.len:0]u8 = undefined;
-        //     comptime {
-        //         @memcpy(&key, f.name);
-        //         std.mem.replaceScalar(u8, &key, '_', '.');
-        //         out[i][0] = &key;
-        //         out[i][1] = "shit"; // @field(self, f.name);
-        //     }
-        // }
+        inline for (fields, 0..) |f, i| {
+            const key = comptime blk: {
+                var buf: [f.name.len:0]u8 = undefined;
+                @memcpy(&buf, f.name);
+                std.mem.replaceScalar(u8, &buf, '_', '.');
+                break :blk buf;
+            };
 
-        // const final_out = out;
-        // return final_out;
-        _ = self;
-        @panic("shit");
+            vals[i][0] = &key;
+            vals[i][1] = @field(self, f.name);
+        }
+
+        return vals;
     }
 };
