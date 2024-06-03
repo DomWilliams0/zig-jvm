@@ -91,7 +91,7 @@ pub export fn Java_java_lang_Class_forName0(raw_env: JniEnvPtr, _: sys.jclass, n
     const env = jni.convert(raw_env);
     const t = jvm.state.thread_state();
     var is_copy: sys.jboolean = undefined;
-    var cls_name_c = env.GetStringUTFChars(raw_env, name, &is_copy) orelse {
+    const cls_name_c = env.GetStringUTFChars(raw_env, name, &is_copy) orelse {
         _ = env.Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
         return null;
     };
@@ -147,7 +147,7 @@ fn getDeclaredFields(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only: bool)
     const jarray = jni.convertObject(sys.jobjectArray, array);
 
     var idx: i32 = 0;
-    for (all_fields) |f, i| {
+    for (all_fields, 0..) |f, i| {
         if (!public_only or !f.flags.contains(.public)) continue;
 
         const name = try t.global.string_pool.getString(f.name);
@@ -160,7 +160,7 @@ fn getDeclaredFields(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only: bool)
             .array => |arrname| try t.global.classloader.loadClassAsArrayElement(arrname, .bootstrap),
         };
         const field_instance = try jvm.object.VmClass.instantiateObject(field_cls, .ensure_initialised);
-        _ = try jvm.call.runMethod(t, field_cls, "<init>", "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IZILjava/lang/String;[B)V", .{ field_instance, cls.get().getClassInstance(), name, ty.get().getClassInstance(), f.flags.bits, false, @intCast(i32, i), signature, jvm.object.VmObjectRef.Nullable.nullRef() });
+        _ = try jvm.call.runMethod(t, field_cls, "<init>", "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IZILjava/lang/String;[B)V", .{ field_instance, cls.get().getClassInstance(), name, ty.get().getClassInstance(), f.flags.bits, false, @as(i32, @intCast(i)), signature, jvm.object.VmObjectRef.Nullable.nullRef() });
 
         env.SetObjectArrayElement(raw_env, jarray, idx, jni.convert(field_instance));
         idx += 1;
@@ -187,8 +187,8 @@ fn getInterfaces(raw_env: JniEnvPtr, cls: jvm.VmClassRef) jvm.state.Error!sys.jo
     const array = try jvm.object.VmClass.instantiateArray(array_cls, ifaces.len);
     const jarray = jni.convertObject(sys.jobjectArray, array);
 
-    for (ifaces) |iface, i| {
-        env.SetObjectArrayElement(raw_env, jarray, @intCast(sys.jsize, i), jni.convert(iface.cast(jvm.object.VmObject)));
+    for (ifaces, 0..) |iface, i| {
+        env.SetObjectArrayElement(raw_env, jarray, @intCast(i), jni.convert(iface.cast(jvm.object.VmObject)));
     }
 
     return jarray;
@@ -228,7 +228,7 @@ fn getDeclaredConstructors(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only:
     const jarray = jni.convertObject(sys.jobjectArray, array);
 
     var idx: i32 = 0;
-    for (all_methods) |m, i| {
+    for (all_methods, 0..) |m, i| {
         if ((!public_only or m.flags.contains(.public)) and std.mem.eql(u8, m.name, "<init>")) {
             const param_types = blk: {
                 var params_array = try jvm.object.VmClass.instantiateArray(cls_array_cls, m.descriptor.param_count);
@@ -252,8 +252,8 @@ fn getDeclaredConstructors(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only:
             // TODO parse out checked exceptions
             const decl_cls = cls.get().getClassInstance().intoNullable();
             const checked_exceptions = try jvm.object.VmClass.instantiateArray(cls_array_cls, 0);
-            const modifiers = @intCast(i32, m.flags.bits);
-            const slot = @intCast(i32, i);
+            const modifiers: i32 = @intCast(m.flags.bits);
+            const slot: i32 = @intCast(i);
             const signature = try t.global.string_pool.getString(m.descriptor.str);
             const annotations = jvm.VmObjectRef.Nullable.nullRef(); // TODO
             const param_annotations = jvm.VmObjectRef.Nullable.nullRef(); // TODO

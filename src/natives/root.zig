@@ -129,7 +129,7 @@ fn validateFunctionSignatures(comptime module: type) void {
         _ = class_name;
 
         // lookup in decls
-        const decl = for (decls) |d, i| {
+        const decl = for (decls, 0..) |d, i| {
             if (std.mem.eql(u8, d.name, m.method)) break .{ .idx = i, .method = @field(module, m.method) };
         } else {
             // generate a panicking stub instead
@@ -159,8 +159,8 @@ fn validateFunctionSignatures(comptime module: type) void {
         };
 
         if (actual_return_type != expected_return_type) {
-            var expected: [1]u8 = .{expected_return_type};
-            var actual: [1]u8 = .{actual_return_type};
+            const expected: [1]u8 = .{expected_return_type};
+            const actual: [1]u8 = .{actual_return_type};
             @compileError("method return type mismatch on " ++ @typeName(module) ++ "." ++ m.method ++ ": expected " ++ expected ++ " but found " ++ actual);
         }
 
@@ -168,7 +168,7 @@ fn validateFunctionSignatures(comptime module: type) void {
     }
 
     // find undeclared methods
-    for (decls) |d, i|
-        if (std.mem.startsWith(u8, d.name, "Java_") and !visited[i])
+    for (decls, &visited) |d, *v|
+        if (std.mem.startsWith(u8, d.name, "Java_") and !v.*)
             @compileError("native method must be declared in `methods`: " ++ @typeName(module) ++ "." ++ d.name);
 }

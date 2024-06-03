@@ -5,7 +5,7 @@ const desc = @import("descriptor.zig");
 const types = @import("type.zig");
 const Allocator = std.mem.Allocator;
 
-pub const logging = std.log.level == .debug; // and !@import("builtin").is_test;
+pub const logging = std.log.default_level == .debug; // and !@import("builtin").is_test;
 
 pub const Frame = struct {
     method: *const cafebabe.Method,
@@ -30,8 +30,8 @@ pub const Frame = struct {
         return switch (self.payload) {
             .java => |code| blk: {
                 const base = self.method.code.java.code.?; // cant be abstract
-                const offset = @ptrToInt(code.code_window) - @ptrToInt(base.ptr);
-                break :blk @truncate(u32, offset);
+                const offset = @intFromPtr(code.code_window) - @intFromPtr(base.ptr);
+                break :blk @truncate(offset);
             },
             else => null,
         };
@@ -92,13 +92,13 @@ pub const Frame = struct {
 
         pub fn convertToInt(self: @This()) i32 {
             return if (self.ty == .byte)
-                @intCast(i32, convert(i8).from(self.value))
+                @intCast(convert(i8).from(self.value))
             else if (self.ty == .short)
-                @intCast(i32, convert(i16).from(self.value))
+                @intCast(convert(i16).from(self.value))
             else if (self.ty == .char)
-                @intCast(i32, convert(u16).from(self.value))
+                @intCast(convert(u16).from(self.value))
             else if (self.ty == .boolean)
-                @boolToInt(convert(bool).from(self.value))
+                @intFromBool(convert(bool).from(self.value))
             else if (self.ty == .int)
                 convert(i32).from(self.value)
             else
@@ -112,7 +112,7 @@ pub const Frame = struct {
 
         fn convertToPtr(self: *@This(), comptime T: type) *T {
             if (self.ty != types.DataType.fromType(T)) typeMismatch(T, self.ty);
-            return @ptrCast(*T, &self.value);
+            return @ptrCast(&self.value);
         }
 
         fn convertToPtrFfi(self: *@This(), comptime T: type) *T {
@@ -121,7 +121,7 @@ pub const Frame = struct {
                 else => self.ty == types.DataType.fromType(T),
             };
             if (!valid) typeMismatch(T, self.ty);
-            return @ptrCast(*T, &self.value);
+            return @ptrCast(&self.value);
         }
 
         test "ffi ptr" {
@@ -171,8 +171,8 @@ pub const Frame = struct {
         }
 
         fn depth(self: @This()) usize {
-            std.debug.assert(@ptrToInt(self.stack) >= @ptrToInt(self.bottom)); // stack is more than empty o_O
-            return (@ptrToInt(self.stack) - @ptrToInt(self.bottom)) / @sizeOf(StackEntry);
+            std.debug.assert(@intFromPtr(self.stack) >= @intFromPtr(self.bottom)); // stack is more than empty o_O
+            return (@intFromPtr(self.stack) - @intFromPtr(self.bottom)) / @sizeOf(StackEntry);
         }
 
         pub fn pushRaw(self: *@This(), val: Frame.StackEntry) void {
@@ -189,7 +189,7 @@ pub const Frame = struct {
             comptime var i = 1;
             inline while (i <= idx) : (i += 1) {
                 const src = (self.stack - i)[0];
-                var dst = &(self.stack - i + 1)[0];
+                const dst = &(self.stack - i + 1)[0];
                 dst.* = src;
             }
 
@@ -326,7 +326,7 @@ pub const Frame = struct {
                 if (param_type.isWide()) {
                     // wide, copy everything up to here including this double
                     const n = src - last_copy + 1;
-                    std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+                    @memcpy(callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
 
                     // mark as initialised for logging
                     if (logging) {
@@ -346,7 +346,7 @@ pub const Frame = struct {
             // final args
             const n = src - last_copy;
             if (n > 0) {
-                std.mem.copy(Frame.StackEntry, callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
+                @memcpy(callee.vars[dst .. dst + n], src_base[last_copy .. last_copy + n]);
                 if (logging) {
                     var i: u16 = dst;
                     while (i < dst + n) : (i += 1)
@@ -399,7 +399,7 @@ pub const Frame = struct {
         pub fn log(self: @This(), max: u16) void {
             if (!logging) return;
 
-            var ptr = self.vars;
+            const ptr = self.vars;
             _ = ptr;
             var i: u16 = 0;
 
@@ -492,7 +492,7 @@ test "convert to integer" {
         ) void {
             const entry = Frame.StackEntry.new(val);
             const res_int = entry.convertToInt();
-            const res_expected = if (@typeInfo(@TypeOf(val)) == .Bool) @intCast(i32, @boolToInt(val)) else @intCast(i32, val);
+            const res_expected: i32 = if (@typeInfo(@TypeOf(val)) == .Bool) @intCast(@intFromBool(val)) else @intCast(val);
             std.testing.expectEqual(res_expected, res_int) catch unreachable;
         }
     };
@@ -576,17 +576,17 @@ pub const ContiguousBufferStack = struct {
         else
             current;
 
-        var ret = buf.buf[buf.used .. buf.used + n];
+        const ret = buf.buf[buf.used .. buf.used + n];
         buf.used += n;
 
-        try self.stack.append(self.bufs.allocator, .{ .ptr = @ptrToInt(ret.ptr), .len = n });
+        try self.stack.append(self.bufs.allocator, .{ .ptr = @intFromPtr(ret.ptr), .len = n });
 
         return ret.ptr;
     }
 
     pub fn drop(self: *@This(), ptr: [*]Frame.StackEntry) !void {
         if (self.stack.popOrNull()) |prev| {
-            if (prev.ptr == @ptrToInt(ptr)) {
+            if (prev.ptr == @intFromPtr(ptr)) {
                 // nice, it matches
                 var buf = self.top();
                 if (prev.len >= buf.used) {

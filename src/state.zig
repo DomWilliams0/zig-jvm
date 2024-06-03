@@ -92,7 +92,7 @@ pub const ThreadEnv = struct {
             .classloader = try classloader.ClassLoader.new(alloc),
             .allocator = vm_alloc.VmAllocator{ .inner = alloc },
             .args = args,
-            .hashcode_rng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.timestamp())),
+            .hashcode_rng = std.rand.DefaultPrng.init(@bitCast(std.time.timestamp())),
             .string_pool = undefined, // set next
             .main_thread = object.VmObjectRef.Nullable.nullRef(),
             .main_thread_group = object.VmObjectRef.Nullable.nullRef(),
@@ -222,7 +222,7 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
 comptime {
     // ensure all exception errors have defined a Java class to instantiate
     const exception_set = @typeInfo(ExceptionError).ErrorSet.?;
-    inline for (exception_set) |exc| {
+    for (exception_set) |exc| {
         const err = @field(ExceptionError, exc.name);
         if (errorToExceptionClass(err) == null) @compileError("no class defined for ExceptionError." ++ exc.name);
     }
@@ -277,7 +277,7 @@ pub fn makeError(e: Error, ctxt: anytype) Error {
     };
 
     if (t.error_context) |old| {
-        std.log.warn("overwriting error context without consuming it: {s}", .{old});
+        std.log.warn("overwriting error context without consuming it: old={s}", .{old});
         alloc.free(old);
     }
 
@@ -331,7 +331,7 @@ pub fn errorToException(err: Error) object.VmObjectRef {
                 try thread.interpreter.popExceptionCauses(exc_obj);
 
                 return exc_obj;
-            } else return @errSetCast(ExecutionError, e);
+            } else return @as(ExecutionError, @errorCast(e));
         }
 
         fn execDetailConstructor(thread: *ThreadEnv, exc_class: object.VmClassRef, exc_obj: object.VmObjectRef, ctxt: []const u8) Error!bool {

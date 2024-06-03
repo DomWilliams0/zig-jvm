@@ -1,6 +1,5 @@
 const std = @import("std");
 const jvm = @import("jvm");
-const arg = @import("arg.zig");
 
 usingnamespace @import("natives");
 
@@ -15,14 +14,14 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
-    defer if (@import("alloc.zig").logging) {
+    defer if (jvm.alloc.logging) {
         _ = gpa.detectLeaks();
     };
 
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);
 
-    var jvm_args = try arg.JvmArgs.parse(alloc, raw_args, .{}) orelse {
+    var jvm_args = try jvm.arg.JvmArgs.parse(alloc, raw_args, .{}) orelse {
         std.log.info("TODO show usage", .{});
         return;
     };
@@ -52,7 +51,7 @@ pub fn main() !void {
     const main_method = main_cls.get().findMethodInThisOnly("main", "([Ljava/lang/String;)V", .{ .public = true, .static = true }) orelse unreachable;
 
     // invoke main
-    _ = try jvm.state.thread_state().interpreter.executeUntilReturn(main_cls, main_method);
+    _ = try jvm.state.thread_state().interpreter.executeUntilReturn(main_method);
     // TODO handle exception like test runner
 
     std.log.info("done", .{});

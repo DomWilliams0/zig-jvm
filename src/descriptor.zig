@@ -21,7 +21,7 @@ pub const FieldDescriptor = struct {
 
         // count array dimensions
         const array_dims = blk: {
-            for (str) |c, i| {
+            for (str, 0..) |c, i| {
                 if (c != '[') break :blk i;
             }
             break :blk 0;
@@ -29,13 +29,13 @@ pub const FieldDescriptor = struct {
 
         if (array_dims > 255) return null;
         const ty = extractTy(str[array_dims..]) orelse return null;
-        return .{ .ty = ty, .array_dims = @truncate(u8, array_dims) };
+        return .{ .ty = ty, .array_dims = @truncate(array_dims) };
     }
 
     fn extractFromStreamTrusted(str: []const u8) []const u8 {
         // count array dimensions
         const array_dims = blk: {
-            for (str) |c, i| {
+            for (str, 0..) |c, i| {
                 if (c != '[') break :blk i;
             }
             break :blk 0;
@@ -118,7 +118,8 @@ pub const MethodDescriptor = struct {
         while (str[idx] != ')') {
             const ty = FieldDescriptor.extractFromStream(str[idx..]) orelse return null;
             idx += ty.array_dims + ty.ty.len;
-            if (@addWithOverflow(u8, count, 1, &count)) return null; // too many args
+            count, const overflowed = @addWithOverflow(count, 1);
+            if (overflowed != 0) return null; // too many args
         }
 
         idx += 1; // skip past )
@@ -235,9 +236,9 @@ test "valid method descriptors" {
     const desc = MethodDescriptor.new("(IDLjava/lang/Thread;)Ljava/lang/Object;").?;
     try std.testing.expectEqual(@as(u8, 3), desc.param_count);
     var params = desc.iterateParamTypes();
-    try std.testing.expectEqualStrings("I", params.next().?);
-    try std.testing.expectEqualStrings("D", params.next().?);
-    try std.testing.expectEqualStrings("Ljava/lang/Thread;", params.next().?);
+    try std.testing.expectEqualStrings("I", params.next().?.str);
+    try std.testing.expectEqualStrings("D", params.next().?.str);
+    try std.testing.expectEqualStrings("Ljava/lang/Thread;", params.next().?.str);
     try std.testing.expect(params.next() == null);
 }
 

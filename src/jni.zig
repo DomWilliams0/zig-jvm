@@ -47,7 +47,7 @@ pub const NativeMethodCode = struct {
     fn_ptr: *const anyopaque,
 
     pub fn new(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: anytype) state.Error!@This() {
-        return newInner(alloc, desc, @ptrCast(*const anyopaque, fn_ptr));
+        return newInner(alloc, desc, @ptrCast(fn_ptr));
     }
 
     fn newInner(alloc: std.mem.Allocator, desc: descriptor.MethodDescriptor, fn_ptr: *const anyopaque) state.Error!@This() {
@@ -57,7 +57,7 @@ pub const NativeMethodCode = struct {
 
         var arg_types = try alloc.alloc([*c]libffi.ffi_type, arg_count);
         errdefer alloc.free(arg_types);
-        var args = try alloc.alloc(*const anyopaque, arg_count);
+        const args = try alloc.alloc(*const anyopaque, arg_count);
         errdefer alloc.free(args);
 
         arg_types[0] = &libffi.ffi_type_pointer; // jni table
@@ -87,7 +87,7 @@ pub const NativeMethodCode = struct {
     }
 
     fn peekArg(self: @This(), caller: *frame.Frame.OperandStack, idx: u16) *anyopaque {
-        const peek_idx = @truncate(u16, self.arg_types.len) - idx - 1;
+        const peek_idx = @as(u16, @truncate(self.arg_types.len)) - idx - 1;
 
         return switch (self.arg_types[idx].*.type) {
             libffi.FFI_TYPE_SINT8 => caller.peekAtPtrFfi(i8, peek_idx),
@@ -104,13 +104,13 @@ pub const NativeMethodCode = struct {
 
     pub fn invoke(self: *@This(), caller: *frame.Frame.OperandStack, static_class: ?object.VmObjectRef) void {
         // populate args with ptrs to caller stack
-        var jnienv = &&state.thread_state().jni;
-        self.args[0] = @ptrCast(*const anyopaque, jnienv);
+        const jnienv = &&state.thread_state().jni;
+        self.args[0] = @ptrCast(jnienv);
 
         // 0 is already initialised to jni table ptr
         var i: u16 = if (static_class) |static| blk: {
             // class is arg 1
-            self.args[1] = @ptrCast(*const anyopaque, &static.ptr);
+            self.args[1] = @ptrCast(&static.ptr);
             break :blk 2; // pop from arg 2
         } else 1; // pop from arg 1 which includes `this`
 
@@ -119,8 +119,8 @@ pub const NativeMethodCode = struct {
         }
 
         var ret_slot: usize = undefined;
-        const func_ptr = @ptrCast(*const fn () callconv(.C) void, self.fn_ptr);
-        libffi.ffi_call(@ptrCast([*c]libffi.ffi_cif, &self.cif), func_ptr, &ret_slot, @ptrCast([*c]?*anyopaque, self.args));
+        const func_ptr: *const fn () callconv(.C) void = @ptrCast(self.fn_ptr);
+        libffi.ffi_call(@ptrCast(&self.cif), func_ptr, &ret_slot, @ptrCast(self.args));
 
         // pop args
         var to_pop: usize = self.arg_types.len - 1; // don't pop for jni table arg

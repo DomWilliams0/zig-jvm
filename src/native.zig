@@ -37,6 +37,7 @@ pub const NativeLibraries = struct {
     }
 };
 
+// allows null
 extern "c" fn dlerror() ?[*:0]const u8;
 extern "c" fn dlopen(path: [*c]const u8, mode: c_int) ?*anyopaque;
 extern "c" fn dlsym(handle: *anyopaque, symbol: [*c]const u8) ?*anyopaque;
@@ -44,7 +45,7 @@ pub const NativeLibrary = struct {
     lib: *anyopaque,
 
     pub fn openSelf() !@This() {
-        const handle = dlopen(null, std.os.system.RTLD.LAZY) orelse {
+        const handle = dlopen(null, std.c.RTLD.LAZY) orelse {
             const err = dlerror() orelse "unknown";
 
             std.log.warn("failed to dlopen self: {s}", .{err});
@@ -78,7 +79,7 @@ pub const NativeLibrary = struct {
     pub fn deinit(self: *@This()) void {
         // TODO call jni destructor
 
-        _ = std.os.system.dlclose(self.lib);
+        _ = std.posix.system.dlclose(self.lib);
         self.* = undefined;
     }
 
@@ -87,8 +88,8 @@ pub const NativeLibrary = struct {
 
         // dlsym (and other dl-functions) secretly take shadow parameter - return address on stack
         // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66826
-        return if (@call(.{ .modifier = .never_tail }, dlsym, .{ self.lib, symbol })) |sym|
-            @ptrCast(*anyopaque, sym)
+        return if (@call(.never_tail, dlsym, .{ self.lib, symbol })) |sym|
+            @ptrCast(sym)
         else
             null;
     }

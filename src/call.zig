@@ -33,10 +33,10 @@ pub fn runMethod(thread: *state.ThreadEnv, cls: object.VmClassRef, name: []const
     }
 
     var method_args: [arg_count]StackEntry = undefined;
-    inline for (std.meta.fields(ArgsType)) |_, i| {
+    inline for (std.meta.fields(ArgsType), 0.., &method_args) |_, i, *method_arg| {
         const field_name = comptime std.fmt.comptimePrint("{}", .{i});
         const val = @field(args, @as([]const u8, field_name));
-        method_args[i] = StackEntry.new(val);
+        method_arg.* = StackEntry.new(val);
     }
 
     return (thread.interpreter.executeUntilReturnWithArgs(method, method_args.len, method_args) catch |ex| {

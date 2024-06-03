@@ -73,7 +73,7 @@ pub const Interpreter = struct {
 
                 // ready to call, create frame now
                 const alloc = self.frameAllocator();
-                var f = try alloc.create(frame.Frame);
+                const f = try alloc.create(frame.Frame);
                 errdefer alloc.destroy(f);
                 f.* = .{
                     .method = method,
@@ -107,8 +107,8 @@ pub const Interpreter = struct {
                     const n_operands = code.max_stack;
 
                     var alloc = try self.frames_alloc.reserve(n_locals + n_operands);
-                    var local_vars_buf = alloc[0..n_locals];
-                    var operands_buf = alloc[n_locals .. n_locals + n_operands];
+                    const local_vars_buf = alloc[0..n_locals];
+                    const operands_buf = alloc[n_locals .. n_locals + n_operands];
 
                     operands = frame.Frame.OperandStack.new(operands_buf.ptr);
                     local_vars = try frame.Frame.LocalVars.new(local_vars_buf.ptr, self.frameAllocator(), n_locals);
@@ -144,7 +144,7 @@ pub const Interpreter = struct {
                 var dummy_return_slot: frame.Frame.StackEntry = undefined;
 
                 const alloc = self.frameAllocator();
-                var f = try alloc.create(frame.Frame);
+                const f = try alloc.create(frame.Frame);
                 errdefer alloc.destroy(f);
                 f.* = .{
                     .method = method,
@@ -347,7 +347,7 @@ test "exception stack" {
 //   in generated code, local var lookup should reference the caller's stack when i<param count, to avoid copying
 fn interpreterLoop() void {
     const thread = state.thread_state();
-    const top_frame_ptr = @ptrToInt(thread.interpreter.top_frame);
+    const top_frame_ptr = @intFromPtr(thread.interpreter.top_frame);
     var ctxt_mut = insn.InsnContextMut{};
     var ctxt = insn.InsnContext{ .thread = thread, .frame = undefined, .mutable = &ctxt_mut };
 
@@ -378,7 +378,7 @@ fn interpreterLoop() void {
             // unhandled exception
             std.log.debug("exception is unhandled, bubbling up", .{});
             if (thread.interpreter.top_frame) |f| {
-                root_reached = @ptrToInt(f) == top_frame_ptr;
+                root_reached = @intFromPtr(f) == top_frame_ptr;
                 popFrame(
                     f,
                     thread,
@@ -427,7 +427,7 @@ fn interpreterLoop() void {
                     }
                 }
 
-                root_reached = @ptrToInt(this_frame) == top_frame_ptr;
+                root_reached = @intFromPtr(this_frame) == top_frame_ptr;
                 popFrame(
                     this_frame,
                     thread,
@@ -442,7 +442,7 @@ fn interpreterLoop() void {
 
                 const this_frame = thread.interpreter.top_frame.?;
                 std.log.debug("bubbling exception {} to caller from {s}.{s}", .{ exc, this_frame.class.get().name, this_frame.method.name });
-                root_reached = @ptrToInt(this_frame) == top_frame_ptr;
+                root_reached = @intFromPtr(this_frame) == top_frame_ptr;
                 popFrame(this_frame, thread);
 
                 // keep looping

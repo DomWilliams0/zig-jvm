@@ -8,14 +8,14 @@ pub export fn Java_java_lang_Double_doubleToRawLongBits(raw_env: JniEnvPtr, jcls
     _ = jcls;
     _ = raw_env;
 
-    return @bitCast(i64, double);
+    return @bitCast(double);
 }
 
 pub export fn Java_java_lang_Double_longBitsToDouble(raw_env: JniEnvPtr, jcls: sys.jclass, long: sys.jlong) sys.jdouble {
     _ = jcls;
     _ = raw_env;
 
-    return @bitCast(f64, long);
+    return @bitCast(long);
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

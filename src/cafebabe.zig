@@ -72,9 +72,9 @@ pub const ClassFile = struct {
         //  would need to convert from big to native endian anyway
 
         var reader = buf.reader();
-        if (try reader.readIntBig(u32) != 0xcafebabe) return CafebabeError.BadMagic;
+        if (try reader.readInt(u32, .big) != 0xcafebabe) return CafebabeError.BadMagic;
 
-        var version = try readVersion(reader);
+        const version = try readVersion(reader);
         log.debug("class version {d}.{d}", .{ version.major, version.minor });
 
         const is_supported = version.major >= 45 and version.major <= 62;
@@ -83,23 +83,23 @@ pub const ClassFile = struct {
             return CafebabeError.UnsupportedVersion;
         }
 
-        const cp_len = try reader.readIntBig(u16);
+        const cp_len = try reader.readInt(u16, .big);
         var constant_pool = try ConstantPool.parse(persistent, buf, cp_len);
         errdefer constant_pool.deinit(persistent);
 
-        const access_flags = try reader.readIntBig(u16);
+        const access_flags = try reader.readInt(u16, .big);
         const flags = enumFromIntClass(ClassFile.Flags, access_flags) orelse return CafebabeError.BadFlags;
 
-        const this_cls_idx = try reader.readIntBig(u16);
+        const this_cls_idx = try reader.readInt(u16, .big);
         const this_cls = constant_pool.lookupClass(this_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
-        const super_cls_idx = try reader.readIntBig(u16);
+        const super_cls_idx = try reader.readInt(u16, .big);
         const super_cls = if (super_cls_idx == 0 and std.mem.eql(u8, this_cls, "java/lang/Object")) null else constant_pool.lookupClass(super_cls_idx) orelse return CafebabeError.BadConstantPoolIndex;
 
-        var iface_count = try reader.readIntBig(u16);
+        var iface_count = try reader.readInt(u16, .big);
         var ifaces = try std.ArrayListUnmanaged([]const u8).initCapacity(persistent, iface_count);
         {
             while (iface_count > 0) {
-                const idx = try reader.readIntBig(u16);
+                const idx = try reader.readInt(u16, .big);
                 const iface = constant_pool.lookupClass(idx) orelse return CafebabeError.BadConstantPoolIndex;
                 ifaces.appendAssumeCapacity(iface);
                 iface_count -= 1;
@@ -111,7 +111,7 @@ pub const ClassFile = struct {
         const attributes = try parseAttributes(arena, &constant_pool, &reader, buf);
 
         const src_file = if (attributes.get("SourceFile")) |attr|
-            constant_pool.lookupUtf8(std.mem.readIntBig(u16, attr[0..2])) orelse return error.BadConstantPoolIndex
+            constant_pool.lookupUtf8(readBigInt(u16, attr)) orelse return error.BadConstantPoolIndex
         else
             null;
 
@@ -132,14 +132,14 @@ pub const ClassFile = struct {
     // TODO dont do this, pass the name+reader to T who can read it into persistent
     // alloc or just skip it
     fn parseAttributes(arena: Allocator, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) !std.StringHashMapUnmanaged([]const u8) {
-        var attr_count = try reader.readIntBig(u16);
+        var attr_count = try reader.readInt(u16, .big);
         var attrs: std.StringHashMapUnmanaged([]const u8) = .{};
         try attrs.ensureTotalCapacity(arena, attr_count);
         while (attr_count > 0) {
-            const attr_name_idx = try reader.readIntBig(u16);
+            const attr_name_idx = try reader.readInt(u16, .big);
             const attr_name = cp.lookupUtf8(attr_name_idx) orelse return CafebabeError.BadConstantPoolIndex;
 
-            const attr_len = try reader.readIntBig(u32);
+            const attr_len = try reader.readInt(u32, .big);
             const body_start = buf.pos;
             try reader.skipBytes(attr_len, .{});
             const attr_bytes = buf.buffer[body_start..buf.pos];
@@ -158,16 +158,16 @@ pub const ClassFile = struct {
 
     /// Arena is just for temporary attribute storage (TODO redo this)
     fn parseFieldsOrMethods(comptime T: type, arena: Allocator, persistent: Allocator, class_name: []const u8, cp: *const ConstantPool, reader: *Reader, buf: *std.io.FixedBufferStream([]const u8)) ![]T {
-        const count = try reader.readIntBig(u16);
+        const count = try reader.readInt(u16, .big);
         var slice = try persistent.alloc(T, count);
         errdefer persistent.free(slice);
         var cursor: usize = 0;
 
         while (cursor < count) {
-            const access_flags = try reader.readIntBig(u16);
+            const access_flags = try reader.readInt(u16, .big);
             const flags = T.enumFromInt(T.Flags, access_flags) orelse return CafebabeError.BadFlags;
-            const name_idx = try reader.readIntBig(u16);
-            const desc_idx = try reader.readIntBig(u16);
+            const name_idx = try reader.readInt(u16, .big);
+            const desc_idx = try reader.readInt(u16, .big);
 
             const name = cp.lookupUtf8(name_idx) orelse return CafebabeError.BadConstantPoolIndex;
             const desc_str = cp.lookupUtf8(desc_idx) orelse return CafebabeError.BadConstantPoolIndex;
@@ -227,6 +227,11 @@ const ClassAccessibility = enum(u16) {
     module = 0x8000,
 };
 
+fn readBigInt(comptime T: type, buf: []const u8) T {
+    if (buf.len < @sizeOf(T)) @panic("oh no");
+    return std.mem.readInt(T, buf[0..@sizeOf(T)], .big);
+}
+
 pub const Field = struct {
     flags: BitSet(Flags),
     name: []const u8, // points into constant pool
@@ -257,12 +262,12 @@ pub const Field = struct {
 
     fn readInt(comptime T: type, buf: []const u8) !T {
         if (buf.len < @sizeOf(T)) return error.BadConstantValue;
-        return std.mem.readIntBig(T, buf[0..@sizeOf(T)]);
+        return std.mem.readInt(T, buf[0..@sizeOf(T)], .big);
     }
 
     fn setStaticValue(self: *@This(), val: anytype) void {
         var backing: u64 = undefined;
-        @ptrCast(*@TypeOf(val), @alignCast(@alignOf(@TypeOf(val)), &backing)).* = val;
+        @as(*@TypeOf(val), @ptrCast(@alignCast(&backing))).* = val;
         // TODO do this without a temporary
         self.u = .{ .value = backing };
         std.log.debug("setting field {s} to constant value {any} (value at {p})", .{ self.name, val, &self.u.value });
@@ -290,8 +295,8 @@ pub const Field = struct {
                         else => error.BadConstantValue,
                     },
                     .long => if (field_type == .primitive and field_type.primitive == .long) field.setStaticValue(try readInt(i64, value.body)) else error.BadConstantValue,
-                    .double => if (field_type == .primitive and field_type.primitive == .double) field.setStaticValue(@bitCast(f64, try readInt(u64, value.body))) else error.BadConstantValue,
-                    .float => if (field_type == .primitive and field_type.primitive == .float) field.setStaticValue(@bitCast(f32, try readInt(u32, value.body))) else error.BadConstantValue,
+                    .double => if (field_type == .primitive and field_type.primitive == .double) field.setStaticValue(@as(f64, @bitCast(try readInt(u64, value.body)))) else error.BadConstantValue,
+                    .float => if (field_type == .primitive and field_type.primitive == .float) field.setStaticValue(@as(f32, @bitCast(try readInt(u32, value.body)))) else error.BadConstantValue,
                     .string => switch (field_type) {
                         .reference => |r| if (std.mem.eql(u8, r, "java/lang/String")) {
                             const utf8 = cp.lookupUtf8(try readInt(u16, value.body)) orelse return error.BadConstantValue;
@@ -315,11 +320,11 @@ pub const Field = struct {
 test "set small int field value from bigger int" {
     var backing: u64 = undefined;
 
-    var int_ptr = @ptrCast(*i32, &backing);
+    const int_ptr: *i32 = @ptrCast(&backing);
     int_ptr.* = @as(i32, 0x11223344);
     try std.testing.expectEqual(int_ptr.*, 0x11223344);
 
-    var byte_ptr = @ptrCast(*i8, &backing);
+    const byte_ptr: *i8 = @ptrCast(&backing);
     byte_ptr.* = @as(i8, 0xc);
     try std.testing.expectEqual(byte_ptr.*, 0xc);
 }
@@ -399,9 +404,9 @@ pub const Method = struct {
             var buf = std.io.fixedBufferStream(attr);
             var reader = buf.reader();
 
-            code.java.max_stack = try reader.readIntBig(u16);
-            code.java.max_locals = try reader.readIntBig(u16);
-            const code_len = try reader.readIntBig(u32);
+            code.java.max_stack = try reader.readInt(u16, .big);
+            code.java.max_locals = try reader.readInt(u16, .big);
+            const code_len = try reader.readInt(u32, .big);
             // align code to 4 bytes so tableswitch and lookupswitch are aligned too (4.7.3)
             const code_buf = try persistent.allocWithOptions(u8, code_len, 4, null);
             errdefer persistent.free(code_buf);
@@ -409,16 +414,16 @@ pub const Method = struct {
             const n = try reader.read(code_buf);
             if (n != code_len) return error.MalformedConstantPool;
 
-            var exc_len = try reader.readIntBig(u16);
+            var exc_len = try reader.readInt(u16, .big);
             const exc_table = try persistent.alloc(ExceptionHandler, exc_len);
             errdefer persistent.free(exc_table);
             while (exc_len > 0) : (exc_len -= 1) {
                 exc_table[exc_table.len - exc_len] = ExceptionHandler{
-                    .start_pc = try reader.readIntBig(u16),
-                    .end_pc = try reader.readIntBig(u16),
-                    .handler_pc = try reader.readIntBig(u16),
+                    .start_pc = try reader.readInt(u16, .big),
+                    .end_pc = try reader.readInt(u16, .big),
+                    .handler_pc = try reader.readInt(u16, .big),
                     .catch_type = blk: {
-                        const idx = try reader.readIntBig(u16);
+                        const idx = try reader.readInt(u16, .big);
                         break :blk if (idx == 0) null else cp.lookupClass(idx) orelse return error.BadConstantPoolIndex;
                     },
                 };
@@ -429,13 +434,13 @@ pub const Method = struct {
                 var stream = std.io.fixedBufferStream(table);
                 var lnt_reader = stream.reader();
 
-                var lnt_len = try lnt_reader.readIntBig(u16);
+                var lnt_len = try lnt_reader.readInt(u16, .big);
                 const line_numbers = try persistent.alloc(LineNumber, lnt_len);
                 errdefer persistent.free(line_numbers);
 
                 while (lnt_len > 0) : (lnt_len -= 1) {
-                    const pc = try lnt_reader.readIntBig(u16);
-                    const line = try lnt_reader.readIntBig(u16);
+                    const pc = try lnt_reader.readInt(u16, .big);
+                    const line = try lnt_reader.readInt(u16, .big);
                     line_numbers[line_numbers.len - lnt_len] = LineNumber{ .start_pc = pc, .line_no = line };
                 }
                 code.java.line_numbers = line_numbers;
@@ -480,7 +485,7 @@ pub const Method = struct {
         var line: ?u16 = null;
 
         if (lines.len > 0) {
-            for (lines[1..]) |entry, i| {
+            for (lines[1..], 0..) |entry, i| {
                 if (pc < entry.start_pc) {
                     line = lines[i].line_no;
                     break;
@@ -502,7 +507,7 @@ pub const Method = struct {
 fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(Field.Flags) {
     const all = comptime blk: {
         var bits = 0;
-        inline for (@typeInfo(T).Enum.fields) |d| {
+        for (@typeInfo(T).Enum.fields) |d| {
             bits |= d.value;
         }
         break :blk bits;
@@ -511,7 +516,7 @@ fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet
     if ((input | all) != all) return null;
 
     var set: BitSet(T) = undefined;
-    set.bits = @truncate(u16, input);
+    set.bits = @truncate(input);
     return set;
 }
 
@@ -519,7 +524,7 @@ fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet
 fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(Method.Flags) {
     const all = comptime blk: {
         var bits = 0;
-        inline for (@typeInfo(T).Enum.fields) |d| {
+        for (@typeInfo(T).Enum.fields) |d| {
             bits |= d.value;
         }
         break :blk bits;
@@ -528,7 +533,7 @@ fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSe
     if ((input | all) != all) return null;
 
     var set: BitSet(T) = undefined;
-    set.bits = @truncate(u16, input);
+    set.bits = @truncate(input);
     return set;
 }
 
@@ -536,7 +541,7 @@ fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSe
 fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(ClassFile.Flags) {
     const all = comptime blk: {
         var bits = 0;
-        inline for (@typeInfo(T).Enum.fields) |d| {
+        for (@typeInfo(T).Enum.fields) |d| {
             bits |= d.value;
         }
         break :blk bits;
@@ -545,7 +550,7 @@ fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet
     if ((input | all) != all) return null;
 
     var set: BitSet(T) = undefined;
-    set.bits = @truncate(u16, input);
+    set.bits = @truncate(input);
     return set;
 }
 
@@ -556,8 +561,8 @@ pub const Attribute = union(enum) {
 const Reader = std.io.FixedBufferStream([]const u8).Reader;
 
 fn readVersion(reader: Reader) !Version {
-    const minor = try reader.readIntBig(u16);
-    const major = try reader.readIntBig(u16);
+    const minor = try reader.readInt(u16, .big);
+    const major = try reader.readInt(u16, .big);
     return Version{ .major = major, .minor = minor };
 }
 
@@ -598,12 +603,12 @@ pub const ConstantPool = struct {
         var i: u16 = 1;
         const reader = buf.reader();
         while (i < count) {
-            indices[next_idx] = @intCast(u16, buf.pos - start_idx);
+            indices[next_idx] = @intCast(buf.pos - start_idx);
             next_idx += 1;
 
-            const tag = reader.readEnum(Tag, std.builtin.Endian.Big) catch return CafebabeError.MalformedConstantPool;
+            const tag = reader.readEnum(Tag, .big) catch return CafebabeError.MalformedConstantPool;
             const len = switch (tag) {
-                Tag.utf8 => try reader.readIntBig(u16),
+                Tag.utf8 => try reader.readInt(u16, .big),
                 Tag.integer => 4,
                 Tag.float => 4,
                 Tag.long => 8,
@@ -634,7 +639,7 @@ pub const ConstantPool = struct {
         }
 
         // copy from arena into persistent
-        var copy_buf = try alloc.dupe(u8, buf.buffer[start_idx..buf.pos]);
+        const copy_buf = try alloc.dupe(u8, buf.buffer[start_idx..buf.pos]);
         return .{ .indices = indices, .slice = copy_buf };
     }
 
@@ -645,14 +650,14 @@ pub const ConstantPool = struct {
     pub fn lookupClass(self: Self, idx_cp: u16) ?[]const u8 {
         const cls = self.lookup(idx_cp, Tag.class) orelse return null;
 
-        const name_idx = std.mem.readInt(u16, &cls[0], std.builtin.Endian.Big);
+        const name_idx = readBigInt(u16, cls);
         return self.lookupUtf8(name_idx);
     }
 
     pub fn lookupMethod(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8 } {
         const body = self.lookup(idx_cp, Tag.methodRef) orelse return null;
-        const cls_idx = std.mem.readInt(u16, &body[0], std.builtin.Endian.Big);
-        const name_and_type_idx = std.mem.readInt(u16, &body[2], std.builtin.Endian.Big);
+        const cls_idx = readBigInt(u16, body);
+        const name_and_type_idx = readBigInt(u16, body[2..]);
 
         const cls = self.lookupClass(cls_idx) orelse return null;
         const name_and_type = self.lookupNameAndType(name_and_type_idx) orelse return null;
@@ -661,8 +666,8 @@ pub const ConstantPool = struct {
 
     pub fn lookupInterfaceMethod(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8 } {
         const body = self.lookup(idx_cp, Tag.interfaceMethodRef) orelse return null;
-        const cls_idx = std.mem.readInt(u16, &body[0], std.builtin.Endian.Big);
-        const name_and_type_idx = std.mem.readInt(u16, &body[2], std.builtin.Endian.Big);
+        const cls_idx = readBigInt(u16, body);
+        const name_and_type_idx = readBigInt(u16, body[2..]);
 
         const cls = self.lookupClass(cls_idx) orelse return null;
         const name_and_type = self.lookupNameAndType(name_and_type_idx) orelse return null;
@@ -671,8 +676,8 @@ pub const ConstantPool = struct {
 
     pub fn lookupMethodOrInterfaceMethod(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8, is_interface: bool } {
         const method = self.lookupMany(idx_cp, .{ Tag.methodRef, Tag.interfaceMethodRef }) orelse return null;
-        const cls_idx = std.mem.readInt(u16, &method.body[0], std.builtin.Endian.Big);
-        const name_and_type_idx = std.mem.readInt(u16, &method.body[2], std.builtin.Endian.Big);
+        const cls_idx = readBigInt(u16, method.body);
+        const name_and_type_idx = readBigInt(u16, method.body[2..]);
 
         const cls = self.lookupClass(cls_idx) orelse return null;
         const name_and_type = self.lookupNameAndType(name_and_type_idx) orelse return null;
@@ -681,8 +686,8 @@ pub const ConstantPool = struct {
 
     pub fn lookupField(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8, cls: []const u8 } {
         const body = self.lookup(idx_cp, Tag.fieldRef) orelse return null;
-        const cls_idx = std.mem.readInt(u16, &body[0], std.builtin.Endian.Big);
-        const name_and_type_idx = std.mem.readInt(u16, &body[2], std.builtin.Endian.Big);
+        const cls_idx = readBigInt(u16, body);
+        const name_and_type_idx = readBigInt(u16, body[2..]);
 
         const cls = self.lookupClass(cls_idx) orelse return null;
         const name_and_type = self.lookupNameAndType(name_and_type_idx) orelse return null;
@@ -691,8 +696,8 @@ pub const ConstantPool = struct {
 
     fn lookupNameAndType(self: Self, idx_cp: u16) ?struct { name: []const u8, ty: []const u8 } {
         const body = self.lookup(idx_cp, Tag.nameAndType) orelse return null;
-        const name_idx = std.mem.readInt(u16, &body[0], std.builtin.Endian.Big);
-        const ty_idx = std.mem.readInt(u16, &body[2], std.builtin.Endian.Big);
+        const name_idx = readBigInt(u16, body);
+        const ty_idx = readBigInt(u16, body[2..]);
 
         return .{
             .name = self.lookupUtf8(name_idx) orelse return null,
@@ -703,7 +708,7 @@ pub const ConstantPool = struct {
     pub fn lookupUtf8(self: Self, idx_cp: u16) ?[]const u8 {
         const name = self.lookup(idx_cp, Tag.utf8) orelse return null;
 
-        const len = std.mem.readInt(u16, &name[0], std.builtin.Endian.Big);
+        const len = readBigInt(u16, name);
         return name[2 .. 2 + len];
     }
 
@@ -739,12 +744,12 @@ pub const ConstantPool = struct {
         const constant = self.lookupMany(idx_cp, tags) orelse return null;
         // TODO validate body length before reading
         return switch (constant.tag) {
-            .class => .{ .class = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
-            .long => .{ .long = @bitCast(i64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
-            .double => .{ .double = @bitCast(f64, (@as(u64, std.mem.readIntBig(u32, &constant.body[0])) << 32) + std.mem.readIntBig(u32, &constant.body[4])) },
-            .float => .{ .float = @bitCast(f32, (@as(u32, std.mem.readIntBig(u32, &constant.body[0])))) },
-            .integer => .{ .int = @bitCast(i32, (@as(u32, std.mem.readIntBig(u32, &constant.body[0])))) },
-            .string => .{ .string = self.lookupUtf8(std.mem.readIntBig(u16, &constant.body[0])) orelse return null },
+            .class => .{ .class = self.lookupUtf8(std.mem.readInt(u16, constant.body[0..2], .big)) orelse return null },
+            .long => .{ .long = @bitCast((@as(u64, std.mem.readInt(u32, constant.body[0..4], .big)) << 32) + std.mem.readInt(u32, constant.body[4..8], .big)) },
+            .double => .{ .double = @bitCast((@as(u64, std.mem.readInt(u32, constant.body[0..4], .big)) << 32) + std.mem.readInt(u32, constant.body[4..8], .big)) },
+            .float => .{ .float = @bitCast((@as(u32, std.mem.readInt(u32, constant.body[0..4], .big)))) },
+            .integer => .{ .int = @bitCast((@as(u32, std.mem.readInt(u32, constant.body[0..4], .big)))) },
+            .string => .{ .string = self.lookupUtf8(std.mem.readInt(u16, constant.body[0..2], .big)) orelse return null },
             else => std.debug.panic("TODO other constants: {s}", .{@tagName(constant.tag)}),
         };
     }
@@ -763,9 +768,9 @@ pub const ConstantPool = struct {
     fn lookupMany(self: Self, index: u16, comptime tags: anytype) ?struct { body: []const u8, tag: Tag } {
         const slice_idx = self.validateIndexCp(index) orelse return null;
         inline for (@typeInfo(@TypeOf(tags)).Struct.fields) |decl| {
-            const enum_value = @ptrCast(*const Tag, decl.default_value.?).*;
+            const enum_value = @as(*const Tag, @ptrCast(decl.default_value.?)).*;
 
-            if (self.slice[slice_idx] == @enumToInt(enum_value))
+            if (self.slice[slice_idx] == @intFromEnum(enum_value))
                 return .{ .body = self.slice[slice_idx + 1 ..], .tag = enum_value };
         }
 
@@ -776,7 +781,7 @@ pub const ConstantPool = struct {
     /// Checks one-based index. Returns slice starting at body of element
     fn lookup(self: Self, index: u16, comptime tag: Tag) ?[]const u8 {
         const slice_idx = self.validateIndexCp(index) orelse return null;
-        if (self.slice[slice_idx] != @enumToInt(tag)) {
+        if (self.slice[slice_idx] != @intFromEnum(tag)) {
             std.log.err("constant pool index {d} is a {d}, not expected {any}", .{ index, self.slice[slice_idx], tag });
             return null;
         } else {
@@ -844,15 +849,15 @@ pub fn BitSet(comptime E: type) type {
         }
 
         pub fn insert(self: *@This(), e: E) void {
-            self.bits |= @enumToInt(e);
+            self.bits |= @intFromEnum(e);
         }
 
         pub fn remove(self: *@This(), e: E) void {
-            self.bits &= ~@enumToInt(e);
+            self.bits &= ~@intFromEnum(e);
         }
 
         pub fn contains(self: @This(), e: E) bool {
-            return (self.bits & @enumToInt(e)) != 0;
+            return (self.bits & @intFromEnum(e)) != 0;
         }
     };
 }

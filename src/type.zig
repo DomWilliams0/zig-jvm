@@ -12,7 +12,7 @@ pub const PrimitiveDataType = enum(u3) {
     double = 7,
 
     pub fn toDataType(self: @This()) DataType {
-        return @intToEnum(DataType, @enumToInt(self));
+        return @enumFromInt(@intFromEnum(self));
     }
 
     pub fn size(self: @This()) u8 {
@@ -79,14 +79,14 @@ pub const DataType = enum(u4) {
 
     pub fn asPrimitive(self: @This()) ?PrimitiveDataType {
         return switch (self) {
-            .boolean, .byte, .short, .int, .long, .char, .float, .double => @intToEnum(PrimitiveDataType, @enumToInt(self)),
+            .boolean, .byte, .short, .int, .long, .char, .float, .double => @enumFromInt(@intFromEnum(self)),
             else => null,
         };
     }
 
     pub fn fromName(name: []const u8, comptime primitives_only: bool) ?DataType {
         return inline for (@typeInfo(@This()).Enum.fields) |field| {
-            const val = @intToEnum(@This(), field.value);
+            const val: @This() = @enumFromInt(field.value);
             if (!primitives_only or val.isPrimitive())
                 if (std.mem.eql(u8, name, field.name))
                     break val;

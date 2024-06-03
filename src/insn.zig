@@ -33,9 +33,9 @@ pub const Handler = struct {
                         if (err_union.payload != void) @compileError("unexpected return type from insn handler: " ++ @typeName(ret_type));
 
                         // insn that could raise an exception
-                        @call(.{ .modifier = .always_inline }, func, .{ctxt}) catch |err| {
+                        @call(.always_inline, func, .{ctxt}) catch |err| {
                             // dont inline to avoid bloating insn handler funcs with the same exception handling code
-                            @call(.{ .modifier = .never_inline }, handleThrownException, .{ insn.name, ctxt, err });
+                            @call(.never_inline, handleThrownException, .{ insn.name, ctxt, err });
 
                             // early return, do not increment pc
                             return;
@@ -43,7 +43,7 @@ pub const Handler = struct {
                     },
                     .Void => {
                         // normal insn with no possible errors
-                        @call(.{ .modifier = .always_inline }, func, .{ctxt});
+                        @call(.always_inline, func, .{ctxt});
                     },
                     else => @compileError("unexpected return type from insn handler: " ++ @typeName(ret_type)),
                 }
@@ -63,7 +63,7 @@ pub const Handler = struct {
                         std.log.debug("exception thrown in insn {s} handler: {any}", .{ insn_name, err });
 
                         // instantiate exception and throw
-                        const e = @errSetCast(Error, err);
+                        const e: Error = @errorCast(err);
                         const exc = state.errorToException(e);
                         ctxt.throwException(exc);
                     },
@@ -164,12 +164,12 @@ pub const InsnContext = struct {
 
     fn readI8(self: Self) i8 {
         const b = self.body();
-        return @bitCast(i8, b[1]);
+        return @bitCast(b[1]);
     }
 
     fn readSecondI8(self: Self) i8 {
         const b = self.body();
-        return @bitCast(i8, b[2]);
+        return @bitCast(b[2]);
     }
 
     fn parseI32(bytes: []const u8) i32 {
@@ -412,15 +412,15 @@ pub const InsnContext = struct {
         const array_obj = array_opt.toStrong() orelse return error.NullPointer;
         const array = array_obj.get().getArrayHeader();
 
-        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len)
+        const idx: usize = if (idx_unchecked < 0 or idx_unchecked >= array.array_len)
             return error.ArrayIndexOutOfBounds
         else
-            @intCast(usize, idx_unchecked);
+            @intCast(idx_unchecked);
 
         switch (opt) {
-            .int => |ty| array.getElems(ty)[idx] = @intCast(ty, val),
+            .int => |ty| array.getElems(ty)[idx] = @intCast(val),
             .specific => |ty| array.getElems(ty)[idx] = val,
-            .byte_bool => array.getElems(i8)[idx] = @intCast(i8, val),
+            .byte_bool => array.getElems(i8)[idx] = @intCast(val),
         }
 
         std.log.debug("array store {} idx {} = {}", .{ array_obj, idx, val });
@@ -439,15 +439,15 @@ pub const InsnContext = struct {
         const array_obj = array_opt.toStrong() orelse return error.NullPointer;
         const array = array_obj.get().getArrayHeader();
 
-        const idx = if (idx_unchecked < 0 or idx_unchecked >= array.array_len)
+        const idx: usize = if (idx_unchecked < 0 or idx_unchecked >= array.array_len)
             return error.ArrayIndexOutOfBounds
         else
-            @intCast(usize, idx_unchecked);
+            @intCast(idx_unchecked);
 
         self.operandStack().push(switch (opt) {
-            .int => |ty| @intCast(i32, array.getElems(ty)[idx]),
+            .int => |ty| @as(i32, @intCast(array.getElems(ty)[idx])),
             .specific => |ty| array.getElems(ty)[idx],
-            .byte_bool => @intCast(i32, array.getElems(i8)[idx]),
+            .byte_bool => @as(i32, @intCast(array.getElems(i8)[idx])),
         });
 
         std.log.debug("array load {} idx {} = {}", .{ array_obj, idx, self.operandStack().peekRaw() });
@@ -487,8 +487,8 @@ pub const InsnContext = struct {
             fn maskLowBits(int: i32) std.math.Log2Int(T) {
                 const mask_ty = std.math.Log2Int(T);
                 const mask = std.math.maxInt(mask_ty); // low 5 or 6 bits of int/long value
-                const unsigned = std.meta.Int(.unsigned, std.meta.bitCount(T));
-                return @truncate(mask_ty, @intCast(unsigned, int & @intCast(@TypeOf(int), mask)));
+                const unsigned = std.meta.Int(.unsigned, @bitSizeOf(T));
+                return @truncate(@as(unsigned, @intCast(int & @as(@TypeOf(int), @intCast(mask)))));
             }
         };
 
@@ -675,9 +675,9 @@ pub const InsnContext = struct {
     /// Adds offset to pc
     fn goto(self: @This(), offset: anytype) void {
         if (offset >= 0) {
-            self.frame.payload.java.code_window += @intCast(usize, offset);
+            self.frame.payload.java.code_window += @as(usize, @intCast(offset));
         } else {
-            self.frame.payload.java.code_window -= @intCast(usize, -offset);
+            self.frame.payload.java.code_window -= @as(usize, @intCast(-offset));
         }
     }
     fn gotoAbsolute(self: @This(), pc: u32) void {
@@ -714,21 +714,21 @@ pub const InsnContext = struct {
             else => null,
         };
 
-        const new_val = if (from_int) |from_int_|
+        const new_val: to = if (from_int) |from_int_|
             if (to_int) |to_int_|
-                if (to_int_.bits > from_int_.bits or to_int_.signedness == .unsigned) @intCast(to, val) else @truncate(to, val) // int to int
+                if (to_int_.bits > from_int_.bits or to_int_.signedness == .unsigned) @intCast(val) else @truncate(val) // int to int
             else
-                @intToFloat(to, val)
+                @floatFromInt(val)
         else if (to_int) |_|
-            @floatToInt(to, val)
+            @intFromFloat(val)
         else
-            @floatCast(to, val);
+            @floatCast(val);
 
         if (from == i32) {
             if (to_int) |i| {
                 if (i.bits < 32) {
                     // i2X extends back up to int again
-                    const extended_val = @intCast(i32, new_val);
+                    const extended_val: i32 = @intCast(new_val);
                     self.operandStack().push(extended_val);
                     return;
                 }
@@ -755,13 +755,13 @@ pub const InsnContext = struct {
     }
 
     fn switch_(self: @This(), comptime variant: enum { lookup, table }) void {
-        const padding = blk: {
+        const padding: u8 = blk: {
             // method code should be aligned to 4 bytes already
-            std.debug.assert(std.mem.isAligned(@ptrToInt(self.frame.method.code.java.code.?.ptr), 4));
+            std.debug.assert(std.mem.isAligned(@intFromPtr(self.frame.method.code.java.code.?.ptr), 4));
 
-            const current = @ptrToInt(self.body());
+            const current = @intFromPtr(self.body());
             const pad = 3 - (current % 4);
-            break :blk @truncate(u8, pad);
+            break :blk @truncate(pad);
         };
 
         const int = self.operandStack().pop(i32);
@@ -784,13 +784,13 @@ pub const InsnContext = struct {
                 std.debug.assert(lo <= hi);
 
                 const offsets_begin_offset = 1 + padding + 12;
-                const offsets_len = @sizeOf(TableEntry) * @intCast(usize, (hi - lo + 1));
+                const offsets_len = @sizeOf(TableEntry) * @as(usize, @intCast((hi - lo + 1)));
                 const offsets = std.mem.bytesAsSlice(TableEntry, self.body()[offsets_begin_offset .. offsets_begin_offset + offsets_len]);
 
-                break :blk if (int < lo or int > hi) default else offsets[@intCast(usize, int - lo)].value();
+                break :blk if (int < lo or int > hi) default else offsets[@intCast(int - lo)].value();
             },
             .lookup => blk: {
-                const npairs = @intCast(usize, self.readI32(1 + padding + 4));
+                const npairs: usize = @intCast(self.readI32(1 + padding + 4));
                 std.log.debug("lookupswitch(padding={d}, default={d}, npairs={d})", .{ padding, default, npairs });
 
                 const MatchPair = extern struct {
@@ -1145,10 +1145,10 @@ pub const handlers = struct {
         switch (field_ty) {
             .primitive => |p| switch (p) {
                 .int => obj.get().getField(i32, field.fid).* = val.convertToInt(),
-                .byte => obj.get().getField(i8, field.fid).* = @truncate(i8, val.convertToInt()),
+                .byte => obj.get().getField(i8, field.fid).* = @truncate(val.convertToInt()),
                 .boolean => obj.get().getField(bool, field.fid).* = val.convertToInt() != 0,
-                .char => obj.get().getField(u16, field.fid).* = @intCast(u16, val.convertToInt()),
-                .short => obj.get().getField(i16, field.fid).* = @truncate(i16, val.convertToInt()),
+                .char => obj.get().getField(u16, field.fid).* = @intCast(val.convertToInt()),
+                .short => obj.get().getField(i16, field.fid).* = @truncate(val.convertToInt()),
 
                 .float => obj.get().getField(f32, field.fid).* = val.convertToUnchecked(f32),
                 .double => obj.get().getField(f64, field.fid).* = val.convertToUnchecked(f64),
@@ -1303,7 +1303,7 @@ pub const handlers = struct {
 
         const array_cls = try ctxt.resolveClassWithLoader(elem_ty, .resolve_only, .bootstrap);
 
-        const array = try object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
+        const array = try object.VmClass.instantiateArray(array_cls, @intCast(count));
         ctxt.operandStack().push(array);
     }
 
@@ -1317,7 +1317,7 @@ pub const handlers = struct {
 
         const array_cls = try ctxt.thread.global.classloader.loadClassAsArrayElement(elem_cls_name, ctxt.class().loader);
 
-        const array = try object.VmClass.instantiateArray(array_cls, @intCast(usize, count));
+        const array = try object.VmClass.instantiateArray(array_cls, @intCast(count));
         ctxt.operandStack().push(array);
     }
 
@@ -1374,7 +1374,7 @@ pub const handlers = struct {
         const array_opt = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const array_obj = array_opt.toStrong() orelse return error.NullPointer;
         const len = array_obj.get().getArrayHeader().array_len;
-        ctxt.operandStack().push(@intCast(i32, len));
+        ctxt.operandStack().push(@as(i32, @intCast(len)));
     }
 
     pub fn _ifeq(ctxt: InsnContext) void {
@@ -1445,8 +1445,8 @@ pub const handlers = struct {
     }
 
     pub fn _iinc(ctxt: InsnContext) void {
-        var lvar = ctxt.localVars().getPtr(i32, ctxt.readU8());
-        const offset = @intCast(i32, ctxt.readSecondI8());
+        const lvar = ctxt.localVars().getPtr(i32, ctxt.readU8());
+        const offset: i32 = @intCast(ctxt.readSecondI8());
         std.log.debug("increment {} += {}", .{ lvar.*, offset });
         lvar.* += offset;
     }
@@ -1454,7 +1454,7 @@ pub const handlers = struct {
     pub fn _goto(ctxt: InsnContext) void {
         const offset = ctxt.readI16();
         const pc = ctxt.frame.currentPc().?;
-        std.log.debug("goto {}", .{@as(i33, pc) +% @intCast(i33, offset)});
+        std.log.debug("goto {}", .{@as(i33, pc) +% @as(i33, @intCast(offset))});
         ctxt.goto(offset);
     }
 
@@ -1555,7 +1555,7 @@ pub const handlers = struct {
         const cls = try ctxt.resolveClass(cls_name, .resolve_only);
         const result = object.VmClass.isInstanceOf(obj.get().class, cls);
         std.log.debug("isinstanceof({?}, {s}) = {any}", .{ obj, cls.get().name, result });
-        ctxt.operandStack().push(@as(i32, @boolToInt(result)));
+        ctxt.operandStack().push(@as(i32, @intFromBool(result)));
     }
     pub fn _checkcast(ctxt: InsnContext) Error!void {
         const obj = ctxt.operandStack().peekAt(VmObjectRef.Nullable, 0).toStrong() orelse return;

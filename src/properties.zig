@@ -89,8 +89,8 @@ pub const PlatformProperties = struct {
         var props = PlatformProperties{};
 
         // TODO better non-env reliant way of getting user things
-        if (std.os.getenv("HOME")) |s| props.user_home = try alloc.dupeZ(u8, s);
-        if (std.os.getenv("USER")) |s| props.user_name = try alloc.dupeZ(u8, s);
+        if (std.posix.getenv("HOME")) |s| props.user_home = try alloc.dupeZ(u8, s);
+        if (std.posix.getenv("USER")) |s| props.user_name = try alloc.dupeZ(u8, s);
 
         {
             var buf = try alloc.alloc(u8, std.fs.MAX_NAME_BYTES);
@@ -100,12 +100,12 @@ pub const PlatformProperties = struct {
         }
 
         const builtin = @import("builtin");
-        const big_endian = builtin.cpu.arch.endian() == .Big;
+        const big_endian = builtin.cpu.arch.endian() == .big;
         // TODO not portable
         props.java_io_tmpdir = "/tmp";
         props.sun_cpu_endian = if (big_endian) "big" else "little";
 
-        const uname = std.os.uname();
+        const uname = std.posix.uname();
         // std.mem.span doesn't get the length properly
         props.os_name = try alloc.dupeZ(u8, uname.sysname[0..std.mem.indexOfSentinel(u8, 0, &uname.sysname)]);
         props.os_version = try alloc.dupeZ(u8, uname.release[0..std.mem.indexOfSentinel(u8, 0, &uname.release)]);
@@ -118,7 +118,7 @@ pub const PlatformProperties = struct {
 
         props.file_separator = comptime &.{std.fs.path.sep}; // TODO is this a local?
         props.path_separator = ":";
-        props.line_separator = std.cstr.line_sep;
+        props.line_separator = if (@import("builtin").os.tag == .windows) "\r\n" else "\n";
 
         return props;
     }
@@ -174,19 +174,22 @@ pub const SystemProperties = struct {
     }
 
     pub fn keyValues(self: @This()) [@typeInfo(@This()).Struct.fields.len][2][:0]const u8 {
-        const fields = @typeInfo(@This()).Struct.fields;
-        var out: [fields.len][2][:0]const u8 = undefined;
+        // const fields = @typeInfo(@This()).Struct.fields;
+        // comptime var out: [fields.len][2][:0]const u8 = undefined;
 
-        inline for (fields) |f, i| {
-            comptime var key: [f.name.len:0]u8 = undefined;
-            comptime {
-                std.mem.copy(u8, &key, f.name);
-                std.mem.replaceScalar(u8, &key, '_', '.');
-                out[i][0] = &key;
-                out[i][1] = @field(self, f.name);
-            }
-        }
+        // inline for (fields, 0..) |f, i| {
+        //     comptime var key: [f.name.len:0]u8 = undefined;
+        //     comptime {
+        //         @memcpy(&key, f.name);
+        //         std.mem.replaceScalar(u8, &key, '_', '.');
+        //         out[i][0] = &key;
+        //         out[i][1] = "shit"; // @field(self, f.name);
+        //     }
+        // }
 
-        return out;
+        // const final_out = out;
+        // return final_out;
+        _ = self;
+        @panic("shit");
     }
 };

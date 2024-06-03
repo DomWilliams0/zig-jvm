@@ -9,17 +9,17 @@ pub const JniEnv = blk: {
     const field_count = @typeInfo(sys.struct_JNINativeInterface_).Struct.fields.len;
     var fields: [field_count]std.builtin.Type.StructField = .{undefined} ** field_count;
 
-    inline for (@typeInfo(sys.struct_JNINativeInterface_).Struct.fields) |f, i| {
+    for (@typeInfo(sys.struct_JNINativeInterface_).Struct.fields, &fields) |f, *dst| {
         var new_field = f;
-        comptime var non_optional_ptr = @typeInfo(f.field_type).Optional.child;
+        const non_optional_ptr = @typeInfo(f.type).Optional.child;
         const ptr_ty = @typeInfo(non_optional_ptr).Pointer.child;
         if (ptr_ty != anyopaque)
-            new_field.field_type = non_optional_ptr; // fn pointer
-        fields[i] = new_field;
+            new_field.type = non_optional_ptr; // fn pointer
+        dst.* = new_field;
     }
 
     break :blk @Type(.{ .Struct = .{
-        .layout = .Extern,
+        .layout = .@"extern",
         .is_tuple = false,
         .fields = &fields,
         .decls = &.{},
@@ -45,11 +45,11 @@ pub fn makeEnv() JniEnv {
                         }
                     };
 
-                    return @ptrCast(T, &inner.func);
+                    return @ptrCast(&inner.func);
                 }
             };
 
-            break :blk S.unimplemented(f.name, f.field_type);
+            break :blk S.unimplemented(f.name, f.type);
         };
     }
     return result;
@@ -102,7 +102,7 @@ const impl = struct {
             return null;
         };
 
-        const len = @intCast(usize, size); // expected to be valid
+        const len: usize = @intCast(size); // expected to be valid
         const array = object.VmClass.instantiateArray(array_cls, len) catch |e| {
             thread.interpreter.setException(state.errorToException(e));
             return null;
@@ -134,7 +134,7 @@ const impl = struct {
             }
         }
 
-        elems[@intCast(usize, index)] = value;
+        elems[@intCast(index)] = value;
     }
 
     pub fn NewStringUTF(raw_env: JniEnvPtr, bytes: [*c]const u8) callconv(.C) sys.jstring {

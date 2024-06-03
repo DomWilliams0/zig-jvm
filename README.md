@@ -101,7 +101,7 @@ up a supply of small programs that exercise different parts of the JVM. These pr
 * Extract the JDK modules file to a directory (until modules are supported)
     * `jimage extract --dir $EXTRACT_DIR /usr/lib/jvm/java-18-openjdk/lib/modules`
     * This should give a directory structure where `java.base/java/lang/Object.class` exists
-* `zig build run -- -testrunner -Xbootclasspath $EXTRACT_DIR`
+* `zig build testrunner -- -Xbootclasspath $EXTRACT_DIR`
 
 If you're feeling brave, you can run a given class file, just like the normal `java` command. Don't
 expect it to work though.

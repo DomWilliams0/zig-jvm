@@ -39,16 +39,16 @@ pub fn ConversionType(comptime from: type) type {
 }
 
 fn vmRefToRaw(comptime T: type, vmref: anytype) T {
-    return @ptrCast(T, vmref.ptr);
+    return @ptrCast(vmref.ptr);
 }
 
 fn rawToVmRef(comptime T: type, raw: anytype) T.Nullable {
-    return T.Nullable{ .ptr = @ptrCast(T.NullablePtr, @alignCast(@alignOf(T.NullablePtr), raw)) };
+    return T.Nullable{ .ptr = @ptrCast(@alignCast(raw)) };
 }
 
 pub fn convert(val: anytype) ConversionType(@TypeOf(val)) {
     return switch (@TypeOf(val)) {
-        JniEnvPtr => @ptrCast(*const JniEnv, val.*),
+        JniEnvPtr => @ptrCast(val.*),
         sys.jclass => blk: {
             const java_lang_Class_instance = rawToVmRef(VmObjectRef, val).toStrong() orelse break :blk VmClassRef.Nullable.nullRef();
             const cls = java_lang_Class_instance.get().getClassDataUnchecked();

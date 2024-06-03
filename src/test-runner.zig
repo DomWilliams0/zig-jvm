@@ -3,7 +3,6 @@ const jvm = @import("jvm");
 
 usingnamespace @import("natives");
 
-const arg = @import("arg.zig");
 const Allocator = std.mem.Allocator;
 
 pub const log_level: std.log.Level = .debug;
@@ -58,7 +57,7 @@ pub fn main() !void {
     const raw_args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, raw_args);
 
-    var jvm_args = try arg.JvmArgs.parse(alloc, raw_args, .{ .require_main_class = false }) orelse {
+    var jvm_args = try jvm.arg.JvmArgs.parse(alloc, raw_args, .{ .require_main_class = false }) orelse {
         std.log.info("TODO show test usage", .{});
         return;
     };
@@ -72,12 +71,12 @@ pub fn main() !void {
 
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const test_alloc = test_gpa.allocator();
-    const test_filter = std.os.getenv("ZIG_JVM_TEST_FILTER");
+    const test_filter = std.posix.getenv("ZIG_JVM_TEST_FILTER");
     const tests = try Test.discover(test_alloc, test_filter);
     defer tests.deinit();
 
     try Test.prepareForAll();
-    for (tests.items) |t, i| {
+    for (tests.items, 0..) |t, i| {
         std.log.info("running test {d}/{d} {s}", .{ i + 1, tests.items.len, t.testName() });
 
         // TODO isolate errors to the test and just fail the test
@@ -114,14 +113,14 @@ const Test = struct {
         else
             std.log.debug("looking for tests in {s}", .{path});
 
-        var dir = try std.fs.openIterableDirAbsolute(path, .{});
+        var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
         defer dir.close();
 
         var iter = dir.iterate();
         var tests = std.ArrayList(Test).init(alloc);
         errdefer tests.deinit();
         while (try iter.next()) |it| {
-            if (it.kind == .File and std.mem.endsWith(u8, it.name, ".java")) {
+            if (it.kind == .file and std.mem.endsWith(u8, it.name, ".java")) {
                 if (filter) |f| {
                     if (std.mem.indexOf(u8, it.name, f) == null) continue;
                 }

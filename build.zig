@@ -1,92 +1,71 @@
 const std = @import("std");
-const Pkg = std.build.Pkg;
 
-const pkg_jvm = Pkg{
-    .name = "jvm",
-    .source = .{ .path = "src/root.zig" },
-};
-const pkg_natives = Pkg{ .name = "natives", .source = .{ .path = "src/natives/root.zig" }, .dependencies = &[_]Pkg{
-    pkg_jvm,
-} };
-
-const pkgs = [2]Pkg{ pkg_jvm, pkg_natives };
-var build_helpers = false;
-
-pub fn build(b: *std.build.Builder) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const jvm = b.addModule("jvm", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
-    var test_runner = false;
-    var args = if (b.args) |args|
-        for (args) |a, i| {
-            if (std.mem.eql(u8, a, "-testrunner")) {
-                test_runner = true;
+    const natives = b.createModule(.{
+        .root_source_file = b.path("src/natives/root.zig"),
+        .imports = &.{
+            .{ .name = "jvm", .module = jvm },
+        },
+        .target = target,
+        .optimize = optimize,
+    });
 
-                // remove this arg
-                var args_mut = args;
-                var j = i + 1;
-                while (j < args_mut.len) : (j += 1)
-                    args_mut[j - 1] = args_mut[j];
-                args_mut.len -= 1;
-                break args_mut;
-            }
-        } else args
-    else
-        null;
+    const test_runner_step = b.step("testrunner", "Run integration tests against suite of small Java programs");
+    const run_step = b.step("run", "Run JVM");
 
-    const exe = if (test_runner)
-        b.addExecutable("jvm-test-runner", "src/test-runner.zig")
-    else
-        b.addExecutable("java", "src/main.zig");
+    const test_runner_exe = b.addExecutable(.{ .name = "jvm-test-runner", .root_source_file = b.path("src/test-runner.zig"), .target = target, .optimize = optimize });
+    const run_exe = b.addExecutable(.{ .name = "java", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
 
-    inline for (pkgs) |pkg| exe.addPackage(pkg);
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.linkLibC();
-    exe.rdynamic = true;
-    exe.linkSystemLibrary("ffi");
-    exe.install();
+    inline for (.{ .{ test_runner_step, test_runner_exe }, .{ run_step, run_exe } }) |tup| {
+        const step, const exe = tup;
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (args) |a| {
-        run_cmd.addArgs(a);
-    }
+        // exe.use_llvm = false;
+        // exe.use_lld = false;
 
-    const run_step = b.step("run", "Run JVM (or test runner with -testrunner)");
-    run_step.dependOn(&run_cmd.step);
+        exe.root_module.addImport("jvm", jvm);
+        exe.root_module.addImport("natives", natives);
+        exe.linkLibC();
+        exe.linkSystemLibrary("ffi");
+        exe.rdynamic = true;
+        b.installArtifact(exe);
 
-    if (build_helpers) {
-        const native_finder = b.addExecutable("native-finder", "src/scripts/native-finder.zig");
-        inline for (pkgs) |pkg| native_finder.addPackage(pkg);
-        native_finder.setTarget(target);
-        native_finder.setBuildMode(mode);
-        native_finder.linkLibC();
-        native_finder.install();
-        const native_finder_cmd = native_finder.run();
-        native_finder_cmd.step.dependOn(b.getInstallStep());
-        if (args) |a| {
-            native_finder_cmd.addArgs(a);
+        const run_artifact_step = b.addRunArtifact(exe);
+        if (b.args) |args| {
+            run_artifact_step.addArgs(args);
         }
-
-        const native_finder_step = b.step("find-natives", "Discover native methods");
-        native_finder_step.dependOn(&native_finder_cmd.step);
+        step.dependOn(&run_artifact_step.step);
     }
 
-    const exe_tests = b.addTest("src/root.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
+    const exe_tests = b.addTest(.{ .root_source_file = b.path("src/root.zig"), .target = target });
     exe_tests.linkLibC();
-    exe_tests.rdynamic = true;
     exe_tests.linkSystemLibrary("ffi");
-
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    const run_unit_tests = b.addRunArtifact(exe_tests);
+    test_step.dependOn(&run_unit_tests.step);
 }
+
+//     if (build_helpers) {
+//         const native_finder = b.addExecutable("native-finder", "src/scripts/native-finder.zig");
+//         inline for (pkgs) |pkg| native_finder.addPackage(pkg);
+//         native_finder.setTarget(target);
+//         native_finder.setBuildMode(mode);
+//         native_finder.linkLibC();
+//         native_finder.install();
+//         const native_finder_cmd = native_finder.run();
+//         native_finder_cmd.step.dependOn(b.getInstallStep());
+//         if (args) |a| {
+//             native_finder_cmd.addArgs(a);
+//         }
+
+//         const native_finder_step = b.step("find-natives", "Discover native methods");
+//         native_finder_step.dependOn(&native_finder_cmd.step);
+//     }

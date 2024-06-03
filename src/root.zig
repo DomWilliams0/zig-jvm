@@ -1,4 +1,5 @@
 pub const alloc = @import("alloc.zig");
+pub const arg = @import("arg.zig");
 pub const bootstrap = @import("bootstrap.zig");
 pub const call = @import("call.zig");
 pub const cafebabe = @import("cafebabe.zig");

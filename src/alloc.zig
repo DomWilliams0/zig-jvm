@@ -10,7 +10,7 @@ pub var logging = false;
 pub fn VmRef(comptime T: type) type {
     // based on Rust's Arc
     return packed struct {
-        const Counter = std.atomic.Atomic(u32);
+        const Counter = std.atomic.Value(u32);
         const max_counter = std.math.maxInt(u32) - 1;
 
         fn global_allocator() VmAllocator {
@@ -21,7 +21,7 @@ pub fn VmRef(comptime T: type) type {
         pub const Weak = struct {
             ptr: *InnerRef,
 
-            const dangle_ptr: *InnerRef = @intToPtr(*InnerRef, std.mem.alignBackwardGeneric(usize, std.math.maxInt(usize), @alignOf(InnerRef)));
+            const dangle_ptr: *InnerRef = @ptrFromInt(std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(InnerRef)));
 
             fn new_dangling() Weak {
                 return .{ .ptr = dangle_ptr };
@@ -35,18 +35,18 @@ pub fn VmRef(comptime T: type) type {
                 if (self.is_dangling()) return;
 
                 // TODO extra debug field to track double drop
-                const old = self.ptr.block.weak.fetchSub(1, .Release);
+                const old = self.ptr.block.weak.fetchSub(1, .release);
                 // if (logging) std.log.debug("{}: dropped weak count to {d}", .{ self, old - 1 });
 
                 if (old == 1) {
-                    self.ptr.block.weak.fence(.Acquire);
+                    self.ptr.block.weak.fence(.acquire);
                     // if (logging) std.log.debug("{}: dropping inner", .{self});
 
                     const alloc = global_allocator();
                     const alloc_size =
-                        std.mem.alignForward(@sizeOf(InnerBlock), @alignOf(T)) + @sizeOf(T) + T.vmRefSize(self.ptr.get());
+                        std.mem.alignForward(usize, @sizeOf(InnerBlock), @alignOf(T)) + @sizeOf(T) + T.vmRefSize(self.ptr.get());
 
-                    var destroy_slice = @ptrCast([*]u8, self.ptr)[0..alloc_size];
+                    const destroy_slice = @as([*]u8, @ptrCast(self.ptr))[0..alloc_size];
                     // if (logging) std.log.debug("{*}: freeing {*} len {d}", .{ self.ptr, destroy_slice.ptr, destroy_slice.len });
                     alloc.inner.free(destroy_slice);
                 }
@@ -63,7 +63,7 @@ pub fn VmRef(comptime T: type) type {
         }
 
         pub fn clone(self: Strong) Strong {
-            const old = self.ptr.block.strong.fetchAdd(1, .Monotonic);
+            const old = self.ptr.block.strong.fetchAdd(1, .monotonic);
 
             if (logging) std.log.debug("{}: bumped strong count to {d}", .{ self, old + 1 });
 
@@ -75,11 +75,11 @@ pub fn VmRef(comptime T: type) type {
 
         pub fn drop(self: Strong) void {
             // TODO extra debug field to track double drop
-            const old = self.ptr.block.strong.fetchSub(1, .Release);
+            const old = self.ptr.block.strong.fetchSub(1, .release);
             if (logging) std.log.debug("{}: dropped strong count to {d}", .{ self, old - 1 });
             if (old != 1) return;
 
-            self.ptr.block.strong.fence(.Acquire);
+            self.ptr.block.strong.fence(.acquire);
 
             // destroy data
             T.vmRefDrop(self.get());
@@ -154,7 +154,7 @@ pub fn VmRef(comptime T: type) type {
                     else
                         std.fmt.format(writer, "VmRef({s})", .{@typeName(T)});
 
-                    return std.fmt.format(writer, "@{x}", .{@ptrToInt(strong.ptr)});
+                    return std.fmt.format(writer, "@{x}", .{@intFromPtr(strong.ptr)});
                 } else return std.fmt.formatBuf("(null)", options, writer);
             }
 
@@ -166,7 +166,7 @@ pub fn VmRef(comptime T: type) type {
                 @atomicStore(?*InnerRef, dst_ptr, src_ptr, order);
 
                 Nullable.fromPtr(old).drop();
-                src.clone();
+                _ = src.clone();
             }
 
             /// Returns owned reference
@@ -208,9 +208,9 @@ pub fn VmRef(comptime T: type) type {
             // data: T,
 
             fn get(self: *InnerRef) *T {
-                var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
+                const byte_ptr: [*]u8 = @ptrCast(self);
                 const offset = @sizeOf(InnerBlock) + self.block.padding;
-                return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+                return @ptrCast(@alignCast(byte_ptr + offset));
             }
         };
 
@@ -220,19 +220,19 @@ pub fn VmRef(comptime T: type) type {
         pub fn new_uninit(size: usize, comptime override_alignment: ?u29) error{OutOfMemory}!Strong {
             const alignment = override_alignment orelse @alignOf(T);
             const alloc = global_allocator();
-            const padding = std.mem.alignForward(@sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
+            const padding = std.mem.alignForward(usize, @sizeOf(InnerBlock), alignment) - @sizeOf(InnerBlock);
             const alloc_size = @sizeOf(InnerBlock) + padding + @sizeOf(T) + size;
 
             // TODO should be able to get cheaply zero allocated memory from OS, to avoid needing to zero it manually
             //  (which is exactly what is needed for default initialising arrays/objects)
-            const buf = try alloc.inner.allocAdvanced(u8, alignment, alloc_size, .exact);
+            const buf = try alloc.inner.allocAdvancedWithRetAddr(u8, alignment, alloc_size, 0);
             if (logging) std.log.debug("allocated {*} len {d} with align={d}, size={d}", .{ buf.ptr, buf.len, alignment, alloc_size });
-            const inner = @ptrCast(*InnerRef, buf);
+            const inner: *InnerRef = @ptrCast(buf);
             inner.* = .{
                 .block = .{
                     .weak = Counter.init(1),
                     .strong = Counter.init(1),
-                    .padding = @truncate(u8, padding),
+                    .padding = @truncate(padding),
                 },
                 // padding and data follows immediately
             };
@@ -257,7 +257,7 @@ pub fn VmRef(comptime T: type) type {
 
         /// Pretty dangerous
         pub fn cast(self: Strong, comptime S: type) VmRef(S) {
-            return VmRef(S){ .ptr = @ptrCast(*VmRef(S).InnerRef, self.ptr) };
+            return VmRef(S){ .ptr = @ptrCast(self.ptr) };
         }
     };
 }
@@ -290,13 +290,13 @@ test "vmref" {
     defer handle.deinit();
 
     // simulate runtime known size, like a class field count
-    var runtime_sz: u16 = 25;
+    const runtime_sz: u16 = 25;
     const strong1 = try IntRef.new_uninit(runtime_sz, @alignOf(VmInt.ActualInt));
     strong1.get().* = VmInt{ .actual_count = runtime_sz };
     const strong2 = strong1.clone();
 
     const u32_ref = strong1.get();
-    const actual_ref = @ptrCast(*VmInt.ActualInt, @alignCast(@alignOf(*VmInt.ActualInt), u32_ref));
+    const actual_ref: *VmInt.ActualInt = @ptrCast(@alignCast(u32_ref));
     {
         var i = runtime_sz;
         while (i > 0) {
@@ -346,10 +346,10 @@ test "vmref nullable ptr" {
 
     // atomically switch the_obj to point at another
     var dst = the_obj.intoNullable();
-    dst.atomicStore(copy_src.intoNullable(), .SeqCst);
+    dst.atomicStore(copy_src.intoNullable(), .seq_cst);
     try std.testing.expectEqual(dst.toStrongUnchecked().get().x, 0x01234567_89abcedf);
 
     // atomically switch the_obj to null
-    dst.atomicStore(null_ref, .SeqCst);
+    dst.atomicStore(null_ref, .seq_cst);
     try std.testing.expect(dst.isNull());
 }

@@ -5,7 +5,7 @@ const sys = jni.sys;
 const JniEnvPtr = jvm.jni.JniEnvPtr;
 
 pub export fn Java_java_lang_StringUTF16_isBigEndian() sys.jboolean {
-    const is_big = @import("builtin").cpu.arch.endian() == .Big;
+    const is_big = @import("builtin").cpu.arch.endian() == .big;
     return jni.convert(is_big);
 }
 

@@ -58,9 +58,9 @@ pub const JvmArgs = struct {
             try self.indices.ensureTotalCapacity(16);
             var it = std.mem.split(u8, path, ":");
             while (it.next()) |s| {
-                const idx = @ptrToInt(s.ptr) - @ptrToInt(path.ptr);
+                const idx = @intFromPtr(s.ptr) - @intFromPtr(path.ptr);
                 const len = s.len;
-                try self.indices.append(.{ .idx = @truncate(u32, idx), .len = @truncate(u32, len) });
+                try self.indices.append(.{ .idx = @truncate(idx), .len = @truncate(len) });
             }
         }
 
@@ -142,7 +142,13 @@ pub const JvmArgs = struct {
         var cursor: usize = 1; // skip argv0
         var state = State.new_arg;
 
-        var results = std.EnumMap(ArgType, ?[]const u8).init(.{});
+        // TODO surely dont have to list them all here
+        var results = std.EnumMap(ArgType, ?[]const u8).init(.{
+            .bootclasspath = undefined,
+            .help = undefined,
+            .main_class = undefined,
+            .classpath = undefined,
+        });
 
         while (cursor < args.len) {
             // TODO make more data oriented to support more

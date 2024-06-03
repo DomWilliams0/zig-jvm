@@ -6,7 +6,7 @@ const JniEnvPtr = jvm.jni.JniEnvPtr;
 
 pub export fn Java_jdk_internal_reflect_Reflection_getCallerClass() sys.jclass {
     const this_frame = jvm.state.thread_state().interpreter.top_frame;
-    var frame = this_frame.?.parent_frame;
+    const frame = this_frame.?.parent_frame;
 
     while (frame) |f| {
         // TODO skip java.lang.reflect.Method.invoke()
@@ -23,7 +23,7 @@ pub export fn Java_jdk_internal_reflect_Reflection_getClassAccessFlags(raw_env: 
         return 0;
     };
 
-    return jni.convert(@intCast(i32, cls.get().flags.bits));
+    return jni.convert(@as(i32, @intCast(cls.get().flags.bits)));
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

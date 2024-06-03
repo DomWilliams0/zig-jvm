@@ -8,14 +8,14 @@ pub export fn Java_java_lang_Float_floatToRawIntBits(raw_env: JniEnvPtr, jcls: s
     _ = jcls;
     _ = raw_env;
 
-    return @bitCast(i32, float);
+    return @bitCast(float);
 }
 
 pub export fn Java_java_lang_Float_intBitsToFloat(raw_env: JniEnvPtr, jcls: sys.jclass, int: sys.jint) sys.jfloat {
     _ = jcls;
     _ = raw_env;
 
-    return @bitCast(f32, int);
+    return @bitCast(int);
 }
 
 pub const methods = [_]@import("root.zig").JniMethod{

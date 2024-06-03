@@ -9,7 +9,7 @@ pub export fn Java_java_io_FileDescriptor_initIDs() void {}
 pub export fn Java_java_io_FileDescriptor_getHandle(_: JniEnvPtr, _: sys.jclass, fd: sys.jint) sys.jlong {
     if (@import("builtin").os.tag == .windows) @compileError("actually open handles");
 
-    return jni.convert(@intCast(i64, fd));
+    return jni.convert(@as(i64, @intCast(fd)));
 }
 
 const fcntl = @cImport({
@@ -17,7 +17,7 @@ const fcntl = @cImport({
 });
 
 pub export fn Java_java_io_FileDescriptor_getAppend(raw_env: JniEnvPtr, _: sys.jclass, fd: sys.jint) sys.jboolean {
-    const flags = std.os.fcntl(fd, fcntl.F_GETFL, undefined) catch |e| {
+    const flags = std.posix.fcntl(fd, fcntl.F_GETFL, undefined) catch |e| {
         std.log.warn("fnctl failed: {any}", .{e});
         _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.Internal)));
         return sys.JNI_FALSE;

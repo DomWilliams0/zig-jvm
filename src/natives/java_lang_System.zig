@@ -7,10 +7,15 @@ const JniEnvPtr = jvm.jni.JniEnvPtr;
 pub export fn Java_java_lang_System_registerNatives() void {}
 
 fn arraycopy(src: sys.jobjectArray, src_pos: sys.jint, dst: sys.jobjectArray, dst_pos: sys.jint, length: sys.jint) jvm.state.Error!void {
-    var src_end: i32 = undefined;
-    var dst_end: i32 = undefined;
-    if (src_pos < 0 or dst_pos < 0 or length < 0 or @addWithOverflow(i32, src_pos, length, &src_end) or @addWithOverflow(i32, dst_pos, length, &dst_end))
+    if (src_pos < 0 or dst_pos < 0 or length < 0)
         return error.IndexOutOfBounds;
+
+    const src_end: i32, const src_overflow = @addWithOverflow(src_pos, length);
+    const dst_end: i32, const dst_overflow = @addWithOverflow(dst_pos, length);
+
+    if (src_overflow != 0 or dst_overflow != 0) {
+        return error.IndexOutOfBounds;
+    }
 
     var src_obj = jni.convert(src).toStrong() orelse return error.NullPointer;
     var dst_obj = jni.convert(dst).toStrong() orelse return error.NullPointer;
@@ -40,15 +45,15 @@ fn arraycopy(src: sys.jobjectArray, src_pos: sys.jint, dst: sys.jobjectArray, ds
         // copy byte slice
         std.debug.assert(elem_sz == dst_array.elem_sz);
 
-        const src_slice = src_array.getElemsRaw()[@intCast(usize, src_pos) * elem_sz .. @intCast(usize, src_end) * elem_sz];
-        const dst_slice = dst_array.getElemsRaw()[@intCast(usize, dst_pos) * elem_sz .. @intCast(usize, dst_end) * elem_sz];
-        std.mem.copy(u8, dst_slice, src_slice);
+        const src_slice = src_array.getElemsRaw()[@as(usize, @intCast(src_pos)) * elem_sz .. @as(usize, @intCast(src_end)) * elem_sz];
+        const dst_slice = dst_array.getElemsRaw()[@as(usize, @intCast(dst_pos)) * elem_sz .. @as(usize, @intCast(dst_end)) * elem_sz];
+        @memcpy(dst_slice, src_slice);
     } else {
-        const src_slice = src_array.getElems(jvm.VmObjectRef.Nullable)[@intCast(usize, src_pos)..@intCast(usize, src_end)];
-        const dst_slice = dst_array.getElems(jvm.VmObjectRef.Nullable)[@intCast(usize, dst_pos)..@intCast(usize, dst_end)];
-        for (src_slice) |obj, i| {
+        const src_slice = src_array.getElems(jvm.VmObjectRef.Nullable)[@intCast(src_pos)..@intCast(src_end)];
+        const dst_slice = dst_array.getElems(jvm.VmObjectRef.Nullable)[@intCast(dst_pos)..@intCast(dst_end)];
+        for (src_slice, dst_slice) |obj, *dst_copy| {
             const obj_copy = if (obj.toStrong()) |o| o.clone().intoNullable() else obj;
-            dst_slice[i] = obj_copy;
+            dst_copy.* = obj_copy;
         }
     }
 }

@@ -46,7 +46,7 @@ pub const StringPool = struct {
         // encode to utf16
         const utf16_len = std.unicode.calcUtf16LeLen(utf8) catch return error.IllegalArgument;
         const value = try object.VmClass.instantiateArray(self.byte_array.toStrongUnchecked(), utf16_len * 2);
-        var utf16_slice = value.get().getArrayHeader().getElems(u16);
+        const utf16_slice = value.get().getArrayHeader().getElems(u16);
         _ = std.unicode.utf8ToUtf16Le(utf16_slice, utf8) catch return error.IllegalArgument;
 
         // set value field

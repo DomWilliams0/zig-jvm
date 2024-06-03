@@ -56,7 +56,7 @@ pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset1(raw_env: jni.JniE
 }
 
 pub export fn Java_jdk_internal_misc_Unsafe_fullFence() void {
-    @fence(.Acquire);
+    @fence(.acquire);
 }
 
 fn Sys(comptime from: type) type {
@@ -90,23 +90,23 @@ fn sys_convert(val: anytype) SysConvert(@TypeOf(val)) {
 }
 
 fn resolvePtr(comptime T: type, jobj: sys.jobject, offset: sys.jlong) *T {
-    const base = if (jni.convert(jobj).toStrong()) |obj| @ptrToInt(obj.get()) else 0; // could be null
-    const byte_offset = @intCast(usize, jni.convert(offset)); // never negative
-    const byte_ptr = @intToPtr([*]u8, base + byte_offset);
-    std.log.debug("resolving unsafe ptr to {s}: base={?}, offset={d}, result={x}", .{ @typeName(T), jni.convert(jobj), byte_offset, @ptrToInt(byte_ptr) });
-    return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr)); // should be well aligned
+    const base = if (jni.convert(jobj).toStrong()) |obj| @intFromPtr(obj.get()) else 0; // could be null
+    const byte_offset: usize = @intCast(jni.convert(offset)); // never negative
+    const byte_ptr: [*]u8 = @ptrFromInt(base + byte_offset);
+    std.log.debug("resolving unsafe ptr to {s}: base={?}, offset={d}, result={x}", .{ @typeName(T), jni.convert(jobj), byte_offset, @intFromPtr(byte_ptr) });
+    return @ptrCast(@alignCast(byte_ptr)); // should be well aligned
 }
 
 fn compareAndExchange(comptime T: type, jobj: sys.jobject, offset: sys.jlong, expected: Sys(T), x: Sys(T)) ?T {
     const ptr = resolvePtr(T, jobj, offset);
 
     // hotspot defaults to "conservative" ordering, i.e. 2 way fence
-    @fence(.SeqCst);
+    @fence(.seq_cst);
     const ret = if (T == jvm.VmObjectRef.Nullable)
-        jvm.VmObjectRef.Nullable.atomicCompareAndExchange(ptr, jni.convert(expected), jni.convert(x), .Monotonic)
+        jvm.VmObjectRef.Nullable.atomicCompareAndExchange(ptr, jni.convert(expected), jni.convert(x), .monotonic)
     else
-        @cmpxchgStrong(T, ptr, jni.convert(expected), jni.convert(x), .Monotonic, .Monotonic);
-    @fence(.SeqCst);
+        @cmpxchgStrong(T, ptr, jni.convert(expected), jni.convert(x), .monotonic, .monotonic);
+    @fence(.seq_cst);
 
     return ret;
 }
@@ -115,7 +115,7 @@ fn get(comptime T: type, comptime atomic: enum { volatile_, normal }, jobj: sys.
     const ptr = resolvePtr(T, jobj, offset);
 
     const loaded = switch (atomic) {
-        .volatile_ => if (T == jvm.VmObjectRef.Nullable) jvm.VmObjectRef.Nullable.atomicLoad(ptr, .SeqCst) else @atomicLoad(T, ptr, .SeqCst),
+        .volatile_ => if (T == jvm.VmObjectRef.Nullable) jvm.VmObjectRef.Nullable.atomicLoad(ptr, .seq_cst) else @atomicLoad(T, ptr, .seq_cst),
         .normal => ptr.*,
     };
     return sys_convert(loaded);

@@ -71,7 +71,7 @@ pub const ClassLoader = struct {
             var hasher = std.hash.Wyhash.init(4);
             hasher.update(key.name);
             std.hash.autoHash(&hasher, key.loader);
-            return @truncate(u32, hasher.final());
+            return @truncate(hasher.final());
         }
 
         pub fn eql(_: @This(), a: Key, b: Key, _: usize) bool {
@@ -137,7 +137,7 @@ pub const ClassLoader = struct {
         // prepend [
         var array_cls_name: []u8 = try self.alloc.alloc(u8, elem_name.len + 1);
         array_cls_name[0] = '[';
-        std.mem.copy(u8, array_cls_name[1..], elem_name);
+        @memcpy(array_cls_name[1..], elem_name);
         // TODO this is leaked if the class is already loaded
 
         return self.loadClassInternal(array_cls_name, requested_loader, .reference);
@@ -165,7 +165,7 @@ pub const ClassLoader = struct {
         } else .not;
 
         // use bootstrap loader for primitive arrays
-        var loader = if (array_type == .primitive) .bootstrap else requested_loader;
+        const loader = if (array_type == .primitive) .bootstrap else requested_loader;
 
         if (array_type == .reference) {
             // load element class first
@@ -310,14 +310,14 @@ pub const ClassLoader = struct {
     /// Must be already loaded.
     /// Returns BORROWED class reference
     pub fn getLoadedPrimitive(self: *Self, ty: vm_type.PrimitiveDataType) VmClassRef {
-        var entry = &self.primitives[@enumToInt(ty)];
+        var entry = &self.primitives[@intFromEnum(ty)];
         return entry.toStrongUnchecked();
     }
 
     /// Name should be static if loading for the first time (during startup).
     /// Returns BORROWED class reference
     pub fn loadPrimitiveWithType(self: *Self, name: []const u8, ty: vm_type.PrimitiveDataType) state.Error!VmClassRef {
-        var entry = &self.primitives[@enumToInt(ty)];
+        var entry = &self.primitives[@intFromEnum(ty)];
         if (entry.toStrong()) |cls| return cls;
 
         std.log.debug("loading primitive {s}", .{name});
@@ -387,11 +387,11 @@ pub const ClassLoader = struct {
 
         // resolve interfaces
         const interfaces = blk: {
-            var slice = try self.alloc.alloc(VmClassRef, classfile.interfaces.items.len);
+            const slice = try self.alloc.alloc(VmClassRef, classfile.interfaces.items.len);
             errdefer self.alloc.free(slice);
 
-            for (classfile.interfaces.items) |iface_name, i|
-                slice[i] = (try self.loadClass(iface_name, loader)).clone();
+            for (classfile.interfaces.items, slice) |iface_name, *iface|
+                iface.* = (try self.loadClass(iface_name, loader)).clone();
 
             break :blk slice;
         };
@@ -420,8 +420,8 @@ pub const ClassLoader = struct {
         try self.assignClassInstance(class);
 
         // link up method class refs
-        for (class.get().u.obj.methods) |_, i| {
-            class.get().u.obj.methods[i].class_ref = class.clone().intoNullable();
+        for (class.get().u.obj.methods) |*m| {
+            m.class_ref = class.clone().intoNullable();
         }
 
         // preparation
@@ -442,8 +442,8 @@ pub const ClassLoader = struct {
         var buf_backing = try alloc.alloc(u8, std.fs.MAX_PATH_BYTES * 2);
         defer alloc.free(buf_backing);
 
-        var candidate_rel = buf_backing[0..std.fs.MAX_PATH_BYTES];
-        var candidate_abs = buf_backing[std.fs.MAX_PATH_BYTES .. std.fs.MAX_PATH_BYTES * 2];
+        const candidate_rel = buf_backing[0..std.fs.MAX_PATH_BYTES];
+        const candidate_abs = buf_backing[std.fs.MAX_PATH_BYTES .. std.fs.MAX_PATH_BYTES * 2];
 
         const io = struct {
             pub fn readFile(io_arena: Allocator, rel_path: []const u8, abs_path_buf: *[std.fs.MAX_PATH_BYTES]u8) ![]const u8 {

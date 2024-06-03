@@ -98,7 +98,7 @@ pub const VmClass = struct {
             },
             .static_field => |f| {
                 const ptr = &f.u.value;
-                return @ptrCast(*T, @alignCast(@alignOf(T), ptr));
+                return @ptrCast(@alignCast(ptr));
             },
         }
     }
@@ -170,7 +170,7 @@ pub const VmClass = struct {
         flags: anytype,
     ) ?*const Method {
         const pls = makeFlagsAndAntiFlags(Method.Flags, flags);
-        return for (self.u.obj.methods) |m, i| {
+        return for (self.u.obj.methods, 0..) |m, i| {
             if ((m.flags.bits & pls.flags.bits) == pls.flags.bits and
                 (m.flags.bits & ~(pls.antiflags.bits)) == m.flags.bits and
                 std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
@@ -208,7 +208,7 @@ pub const VmClass = struct {
 
             fn selectRecursively(cls: *const VmClass, method: *const cafebabe.Method) ?*const cafebabe.Method {
                 // check own methods
-                for (cls.u.obj.methods) |m, i| {
+                for (cls.u.obj.methods, 0..) |m, i| {
                     if (canMethodOverride(&m, method)) return &cls.u.obj.methods[i];
                 }
 
@@ -291,7 +291,7 @@ pub const VmClass = struct {
         flags: anytype,
     ) ?*Field {
         const pls = makeFlagsAndAntiFlags(Field.Flags, flags);
-        return for (self.u.obj.fields) |m, i| {
+        return for (self.u.obj.fields, 0..) |m, i| {
             if ((m.flags.bits & pls.flags.bits) == pls.flags.bits and
                 (m.flags.bits & ~(pls.antiflags.bits)) == m.flags.bits and
                 std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
@@ -306,7 +306,7 @@ pub const VmClass = struct {
         self: *@This(),
         name: []const u8,
     ) ?*Field {
-        return for (self.u.obj.fields) |m, i| {
+        return for (self.u.obj.fields, 0..) |m, i| {
             if (std.mem.eql(u8, name, m.name))
                 break &self.u.obj.fields[i];
         } else null;
@@ -415,8 +415,8 @@ pub const VmClass = struct {
         };
 
         // set default field values, luckily all zero bits is +0.0 for floats+doubles, and null ptrs (TODO really for objects?)
-        var field_bytes = @ptrCast([*]u8, @alignCast(1, obj_ref.get().storage()));
-        std.mem.set(u8, field_bytes[0..layout.instance_offset], 0);
+        var field_bytes: [*]u8 = @ptrCast(@alignCast(obj_ref.get().storage()));
+        @memset(field_bytes[0..layout.instance_offset], 0);
 
         return obj_ref;
     }
@@ -428,7 +428,7 @@ pub const VmClass = struct {
     /// Returns padding between end of ArrayHeader and elements
     pub fn arrayPreElementPadding(elem_alignment: u8) u8 {
         const base = @as(i32, @sizeOf(VmObject) + @sizeOf(ArrayHeader));
-        return @intCast(u8, (-base) & (elem_alignment - 1));
+        return @intCast((-base) & (elem_alignment - 1));
     }
 
     test "array padding" {
@@ -467,8 +467,8 @@ pub const VmClass = struct {
             @alignOf(usize);
         _ = elem_align;
 
-        var array_size: usize = undefined;
-        if (len >= std.math.maxInt(u32) or @mulWithOverflow(usize, len, elem_sz, &array_size)) @panic("overflow, array is too big!!");
+        const array_size: usize, const overflow = @mulWithOverflow(len, elem_sz);
+        if (len >= std.math.maxInt(u32) or overflow != 0) @panic("overflow, array is too big!!");
 
         const padding = cls.u.array.padding;
         // store a u32 len, padding, then the elems
@@ -483,13 +483,13 @@ pub const VmClass = struct {
         // init array
         var header = array_ref.get().getArrayHeader();
         header.* = ArrayHeader{
-            .array_len = @truncate(u32, len),
-            .elem_sz = @truncate(u8, elem_sz),
+            .array_len = @truncate(len),
+            .elem_sz = @truncate(elem_sz),
             .padding = padding,
         };
         // TODO zero allocator?
         // set default field values, luckily all zero bits is +0.0 for floats+doubles, and null ptrs (TODO really for objects?)
-        std.mem.set(u8, header.getElemsRaw(), 0);
+        @memset(header.getElemsRaw(), 0);
 
         return array_ref;
     }
@@ -644,7 +644,7 @@ pub const VmClass = struct {
         }
 
         if (opt.shouldGetBase()) {
-            unsafe.base = @ptrToInt(&field.u.value);
+            unsafe.base = @intFromPtr(&field.u.value);
         }
 
         return unsafe;
@@ -694,7 +694,7 @@ pub const VmObject = struct {
             const res = self.getStringValueUtf8(alloc.allocator()) catch |e|
                 if (e == error.OutOfMemory)
             {
-                std.mem.set(u8, buf[buf.len - 4 ..], '.');
+                @memset(buf[buf.len - 4 ..], '.');
                 break :blk &buf;
             } else return;
 
@@ -706,12 +706,12 @@ pub const VmObject = struct {
 
     pub fn storage(self: *VmObject) [*]u8 {
         const byte_offset = @sizeOf(VmObject);
-        return @ptrCast([*]u8, self) + byte_offset;
+        return @as([*]u8, @ptrCast(self)) + byte_offset;
     }
 
     pub fn storageConst(self: *const VmObject) [*]const u8 {
         const byte_offset = @sizeOf(VmObject);
-        return @ptrCast([*]const u8, self) + byte_offset;
+        return @as([*]const u8, @ptrCast(self)) + byte_offset;
     }
 
     /// Instance field
@@ -742,25 +742,25 @@ pub const VmObject = struct {
     }
 
     fn getRawFieldPointer(self: *@This(), comptime T: type, offset: u16) *T {
-        var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
-        return @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+        const byte_ptr: [*]u8 = @ptrCast(self);
+        return @ptrCast(@alignCast(byte_ptr + offset));
     }
 
     fn getRawFieldCopy(self: *@This(), comptime T: type, offset: u16) T {
-        var byte_ptr: [*]u8 = @ptrCast([*]u8, self);
-        const ptr = @ptrCast(*T, @alignCast(@alignOf(T), byte_ptr + offset));
+        const byte_ptr: [*]u8 = @ptrCast(self);
+        const ptr: *T = @ptrCast(@alignCast(byte_ptr + offset));
         // TODO need to clone vm object?
         return ptr.*;
     }
 
     pub fn getArrayHeader(self: *@This()) *ArrayHeader {
         std.debug.assert(self.class.get().isArray());
-        return @ptrCast(*ArrayHeader, @alignCast(@alignOf(ArrayHeader), self.storage()));
+        return @ptrCast(@alignCast(self.storage()));
     }
 
     fn getArrayHeaderConst(self: *const @This()) *const ArrayHeader {
         std.debug.assert(self.class.get().isArray());
-        return @ptrCast(*const ArrayHeader, @alignCast(@alignOf(ArrayHeader), self.storageConst()));
+        return @ptrCast(@alignCast(self.storageConst()));
     }
 
     /// Runs `toString()` and returns the string ref. Slow, for debugging.
@@ -899,7 +899,7 @@ pub const ToString = struct {
             if (e == error.OutOfMemory)
         blk: {
             if (buf.len > 3)
-                std.mem.set(u8, buf[buf.len - 3 ..], '.');
+                @memset(buf[buf.len - 3 ..], '.');
             break :blk buf;
         } else return null) orelse return null;
         return .{ .str = str, .alloc = null };
@@ -929,13 +929,13 @@ const ArrayHeader = struct {
 
     // Must be within a VmObject
     pub fn getElemsRaw(self: *@This()) []u8 {
-        var start: [*]u8 = @ptrCast([*]u8, @alignCast(1, self)) + @sizeOf(ArrayHeader) + self.padding;
+        var start: [*]u8 = @as([*]u8, @ptrCast(@alignCast(self))) + @sizeOf(ArrayHeader) + self.padding;
         const slice_len = self.array_len * self.elem_sz;
         return start[0..slice_len];
     }
 
     pub fn getElems(self: *@This(), comptime T: type) []T {
-        return @alignCast(@alignOf(T), std.mem.bytesAsSlice(T, self.getElemsRaw()));
+        return @alignCast(std.mem.bytesAsSlice(T, self.getElemsRaw()));
     }
 };
 
@@ -966,7 +966,7 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
     //  we should shove as many fields into that space as possible
     var sorted_fields = try alloc.alloc(*Field, fields.len);
     defer alloc.free(sorted_fields);
-    for (fields) |_, i| {
+    for (fields, 0..) |_, i| {
         sorted_fields[i] = &fields[i];
     }
 
@@ -977,12 +977,12 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
             const b_static = b.flags.contains(.static);
 
             return if (a_static != b_static)
-                @boolToInt(a_static) < @boolToInt(b_static) // non static first
+                @intFromBool(a_static) < @intFromBool(b_static) // non static first
             else
                 a.descriptor.size() > b.descriptor.size(); // larger first
         }
     };
-    std.sort.insertionSort(*const Field, sorted_fields, {}, helper.cmpFieldDesc);
+    std.sort.insertion(*const Field, sorted_fields, {}, helper.cmpFieldDesc);
 
     // track offsets of each field (maximum 2^16 as stated in class file spec)
     var out_offset = base;
@@ -995,7 +995,7 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
         } else {
             // instance
             const size = f.descriptor.size();
-            out_offset.instance_offset = std.mem.alignForwardGeneric(u16, out_offset.instance_offset, size);
+            out_offset.instance_offset = std.mem.alignForward(u16, out_offset.instance_offset, size);
             f.u = .{ .layout_offset = out_offset.instance_offset };
             std.log.debug(" {s} {s} at offset {d}", .{ f.descriptor.str, f.name, out_offset.instance_offset });
             out_offset.instance_offset += size;
@@ -1006,7 +1006,7 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
 /// Must not have a super class
 fn lookupFieldId(fields: []Field, name: []const u8, desc: []const u8, input_flags: anytype) ?FieldId {
     const flags = makeFlagsAndAntiFlags(Field.Flags, input_flags);
-    for (fields) |f, i| {
+    for (fields, 0..) |f, i| {
         if ((f.flags.bits & flags.flags.bits) == flags.flags.bits and
             (f.flags.bits & ~(flags.antiflags.bits)) == f.flags.bits and
             std.mem.eql(u8, desc, f.descriptor.str) and std.mem.eql(u8, name, f.name))
