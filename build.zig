@@ -37,6 +37,7 @@ pub fn build(b: *std.Build) !void {
         exe.linkSystemLibrary("ffi");
         exe.rdynamic = true;
         b.installArtifact(exe);
+        step.dependOn(&exe.step);
 
         var buf: [128]u8 = undefined;
         const run_step_name = try std.fmt.bufPrint(&buf, "run-{s}", .{step.name});
@@ -48,8 +49,8 @@ pub fn build(b: *std.Build) !void {
         run_step.dependOn(&run_artifact.step);
     }
 
-    b.getInstallStep().dependOn(test_runner_step);
-    b.getInstallStep().dependOn(jvm_step);
+    // b.getInstallStep().dependOn(test_runner_step);
+    // b.getInstallStep().dependOn(jvm_step);
 
     const exe_tests = b.addTest(.{ .root_source_file = b.path("src/root.zig"), .target = target });
     exe_tests.linkLibC();

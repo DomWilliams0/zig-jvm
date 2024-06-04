@@ -145,9 +145,58 @@ pub const VmClass = struct {
         // check self and supers recursively first
         if (self.findMethodInSelfOrSupers(name, desc)) |m| return m;
 
-        // check superinterfaces
-        // TODO return specific error if finds "multiple maximally-specific superinterface methods"
-        std.debug.panic("TODO find method {s} {s} in super interfaces of {s}", .{ name, desc, self.name });
+        // check superinterfaces (5.4.3.3 point 3)
+        const helper = struct {
+            var found: ?*const Method = null;
+            fn findMaximallySpecific(m: *const Method) bool {
+                if (found == null) {
+                    found = m;
+                    return true;
+                } else {
+                    std.log.debug("multiple matching non abstract methods found", .{});
+                    found = null;
+                    return false;
+                }
+            }
+
+            fn findFallback(m: *const Method) bool {
+                found = m;
+                return false;
+            }
+        };
+
+        self.iterateMethodMatchesInSuperInterfaces(name, desc, .{ .abstract = false }, helper.findMaximallySpecific);
+
+        if (helper.found != null) {
+            return helper.found;
+        }
+
+        self.iterateMethodMatchesInSuperInterfaces(name, desc, .{ .private = false, .static = false }, helper.findFallback);
+        return helper.found;
+    }
+
+    fn iterateMethodMatchesInSuperInterfaces(self: *const @This(), method_name: []const u8, method_desc: []const u8, method_flags: anytype, comptime cb: fn (*const Method) bool) void {
+        const helper = struct {
+            fn recurse(cls: *const VmClass, name: []const u8, desc: []const u8, flags: anytype, comptime callback: fn (*const Method) bool) bool {
+                // check superinterfaces before self
+                for (cls.interfaces) |iface| {
+                    if (!recurse(iface.get(), name, desc, flags, callback))
+                        return false;
+                }
+
+                // check all methods
+                var lastIdx: usize = 0;
+                while (cls.findMethodIndexInThisOnly(name, desc, flags, lastIdx)) |i| {
+                    const m = &cls.u.obj.methods[i];
+                    if (!callback(m)) return false;
+                    lastIdx = i + 1;
+                }
+
+                return true;
+            }
+        };
+
+        _ = helper.recurse(self, method_name, method_desc, method_flags, cb);
     }
 
     /// Checks self and super classes only
@@ -169,14 +218,27 @@ pub const VmClass = struct {
         desc: []const u8,
         flags: anytype,
     ) ?*const Method {
+        const idx = self.findMethodIndexInThisOnly(name, desc, flags, 0);
+        return if (idx) |i|
+            &self.u.obj.methods[i]
+        else
+            null;
+    }
+
+    fn findMethodIndexInThisOnly(
+        self: *const @This(),
+        name: []const u8,
+        desc: []const u8,
+        flags: anytype,
+        skip: usize,
+    ) ?usize {
         const pls = makeFlagsAndAntiFlags(Method.Flags, flags);
-        return for (self.u.obj.methods, 0..) |m, i| {
+        return for (self.u.obj.methods[skip..], skip..) |m, i| {
             if ((m.flags.bits & pls.flags.bits) == pls.flags.bits and
                 (m.flags.bits & ~(pls.antiflags.bits)) == m.flags.bits and
                 std.mem.eql(u8, desc, m.descriptor.str) and std.mem.eql(u8, name, m.name))
             {
-                // seems like returning &m is returning a function local...
-                break &self.u.obj.methods[i];
+                break i;
             }
         } else null;
     }
