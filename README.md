@@ -90,7 +90,8 @@ debug: call stack:
 
 Please note that this is:
 * very much WIP
-* built with Zig `0.12.0`, and is randomly updated
+* built with the Zig master branch, and is randomly updated to the latest
+    (currently `0.13.0-dev.363+7fc3fb955`).
 * will be very unlikely to run arbitrary Java programs any time soon
 
 The way I am progressing through the massive amount of functionality expected from a JVM is to build
@@ -100,13 +101,13 @@ up a supply of small programs that exercise different parts of the JVM. These pr
 * Extract the JDK modules file to a directory (until modules are supported)
     * `jimage extract --dir $EXTRACT_DIR /usr/lib/jvm/java-18-openjdk/lib/modules`
     * This should give a directory structure where `java.base/java/lang/Object.class` exists
-* `zig build testrunner -- -Xbootclasspath $EXTRACT_DIR/java.base`
+* `zig build run-testrunner -- -Xbootclasspath $EXTRACT_DIR/java.base`
 
 If you're feeling brave, you can run a given class file, just like the normal `java` command. Don't
 expect it to work though.
 
 If `Test.class` is in `$CLASS_DIR`, then run
-    `zig build run -- -Xbootclasspath $EXTRACT_DIR:$CLASS_DIR Test`
+    `zig build run-java -- -Xbootclasspath $EXTRACT_DIR:$CLASS_DIR Test`
 
 
 # Why?

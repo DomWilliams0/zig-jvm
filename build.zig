@@ -19,13 +19,13 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const test_runner_step = b.step("testrunner", "Run integration tests against suite of small Java programs");
-    const run_step = b.step("run", "Run JVM");
+    const test_runner_step = b.step("testrunner", "Build integration tests to run against suite of small Java programs");
+    const jvm_step = b.step("java", "Build JVM");
 
     const test_runner_exe = b.addExecutable(.{ .name = "jvm-test-runner", .root_source_file = b.path("src/test-runner.zig"), .target = target, .optimize = optimize });
-    const run_exe = b.addExecutable(.{ .name = "java", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
+    const java_exe = b.addExecutable(.{ .name = "java", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
 
-    inline for (.{ .{ test_runner_step, test_runner_exe }, .{ run_step, run_exe } }) |tup| {
+    inline for (.{ .{ test_runner_step, test_runner_exe }, .{ jvm_step, java_exe } }) |tup| {
         const step, const exe = tup;
 
         // exe.use_llvm = false;
@@ -38,12 +38,18 @@ pub fn build(b: *std.Build) !void {
         exe.rdynamic = true;
         b.installArtifact(exe);
 
-        const run_artifact_step = b.addRunArtifact(exe);
+        var buf: [128]u8 = undefined;
+        const run_step_name = try std.fmt.bufPrint(&buf, "run-{s}", .{step.name});
+        const run_step = b.step(run_step_name, "Run");
+        var run_artifact = b.addRunArtifact(exe);
         if (b.args) |args| {
-            run_artifact_step.addArgs(args);
+            run_artifact.addArgs(args);
         }
-        step.dependOn(&run_artifact_step.step);
+        run_step.dependOn(&run_artifact.step);
     }
+
+    b.getInstallStep().dependOn(test_runner_step);
+    b.getInstallStep().dependOn(jvm_step);
 
     const exe_tests = b.addTest(.{ .root_source_file = b.path("src/root.zig"), .target = target });
     exe_tests.linkLibC();

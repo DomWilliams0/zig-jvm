@@ -194,7 +194,7 @@ const Test = struct {
     fn run(self: Test, alloc: Allocator) !void {
         // compile
         std.log.debug("compiling {s}", .{std.fs.path.basename(self.src_path)});
-        var javac = std.ChildProcess.init(&.{ "javac", "-d", class_dir, self.src_path }, alloc);
+        var javac = std.process.Child.init(&.{ "javac", "-d", class_dir, self.src_path }, alloc);
         const res = try javac.spawnAndWait();
         if (res != .Exited or res.Exited != 0) {
             std.log.err("test failed to compile: {any}", .{res});
