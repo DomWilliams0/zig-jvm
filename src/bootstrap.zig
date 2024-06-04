@@ -4,6 +4,7 @@ const vm_type = @import("type.zig");
 const object = @import("object.zig");
 const state = @import("state.zig");
 const call = @import("call.zig");
+const frame = @import("frame.zig");
 
 const Preload = struct {
     cls: []const u8,
@@ -102,7 +103,12 @@ pub fn initBootstrapClasses(loader: *classloader.ClassLoader, opts: Options) !vo
         }
 
         const init_phase2 = java_lang_System.get().findMethodInThisOnly("initPhase2", "(ZZ)I", .{ .static = true }) orelse @panic("missing method java.lang.System::initPhase2");
-        if (try thread.interpreter.executeUntilReturn(init_phase2)) |ret| {
+        const StackEntry = frame.Frame.StackEntry;
+        const args: [2]StackEntry = .{
+            StackEntry.new(false),
+            StackEntry.new(false),
+        };
+        if (try thread.interpreter.executeUntilReturnWithArgs(init_phase2, 2, args)) |ret| {
             if (ret.convertToInt() != @import("sys/jni.zig").JNI_OK) {
                 std.log.err("System::initPhase2 failed", .{});
                 return error.Internal;
