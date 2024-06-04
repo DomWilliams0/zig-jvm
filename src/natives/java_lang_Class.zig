@@ -283,6 +283,21 @@ pub export fn Java_java_lang_Class_getSuperclass(raw_env: JniEnvPtr, jclass: sys
     return jni.convert(cls.get().super_cls);
 }
 
+pub export fn Java_java_lang_Class_isAssignableFrom(raw_env: JniEnvPtr, jclass: sys.jclass, other_class: sys.jclass) sys.jboolean {
+    const this_cls = jni.convert(jclass).toStrong() orelse return sys.JNI_FALSE;
+    const other_cls = jni.convert(other_class).toStrong() orelse {
+        _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(error.NullPointer)));
+        return sys.JNI_FALSE;
+    };
+
+    const eq = if (this_cls.get().isPrimitive())
+        this_cls.cmpPtr(other_cls) // must be same class
+    else
+        jvm.object.VmClass.isSuperClassOrSuperInterface(this_cls, other_cls);
+
+    return if (eq) sys.JNI_TRUE else sys.JNI_FALSE;
+}
+
 pub const methods = [_]@import("root.zig").JniMethod{
     .{ .method = "Java_java_lang_Class_registerNatives", .desc = "()V" },
     .{ .method = "Java_java_lang_Class_forName0", .desc = "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;" },

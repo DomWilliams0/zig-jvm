@@ -561,37 +561,44 @@ pub const VmClass = struct {
         return self.class_instance.toStrongUnchecked();
     }
 
+    fn isSuperInterface(checkee: VmClassRef, needle: VmClassRef) bool {
+        std.debug.assert(!checkee.cmpPtr(needle)); // should already be filtered out
+
+        for (checkee.get().interfaces) |i| {
+            if (needle.cmpPtr(i)) return true;
+
+            // recurse
+            if (isSuperInterface(i, needle)) return true;
+        }
+
+        return false;
+    }
+
+    fn isSuperClass(checkee: VmClassRef, needle: VmClassRef) bool {
+        std.debug.assert(!checkee.cmpPtr(needle)); // should already be filtered out
+
+        if (checkee.get().super_cls.toStrong()) |super| {
+            if (needle.cmpPtr(super)) return true;
+
+            // recurse
+            if (isSuperClass(super, needle)) return true;
+        }
+
+        return false;
+    }
+
+    /// Is `candidate` equal to or a superclass to or interface of `self`
+    pub fn isSuperClassOrSuperInterface(self: VmClassRef, candidate: VmClassRef) bool {
+        if (self.cmpPtr(candidate)) return true;
+
+        return isSuperClass(self, candidate) or isSuperInterface(self, candidate);
+    }
+
     /// `self` instanceof `candidate`
     pub fn isInstanceOf(self: VmClassRef, candidate: VmClassRef) bool {
         if (self.cmpPtr(candidate)) return true;
 
         const helper = struct {
-            fn isSuperInterface(checkee: VmClassRef, needle: VmClassRef) bool {
-                std.debug.assert(!checkee.cmpPtr(needle)); // should already be filtered out
-
-                for (checkee.get().interfaces) |i| {
-                    if (needle.cmpPtr(i)) return true;
-
-                    // recurse
-                    if (isSuperInterface(i, needle)) return true;
-                }
-
-                return false;
-            }
-
-            fn isSuperClass(checkee: VmClassRef, needle: VmClassRef) bool {
-                std.debug.assert(!checkee.cmpPtr(needle)); // should already be filtered out
-
-                if (checkee.get().super_cls.toStrong()) |super| {
-                    if (needle.cmpPtr(super)) return true;
-
-                    // recurse
-                    if (isSuperClass(super, needle)) return true;
-                }
-
-                return false;
-            }
-
             fn implements(checkee: VmClassRef, interface: VmClassRef) bool {
                 std.debug.assert(!checkee.cmpPtr(interface)); // should already be filtered out
                 std.debug.assert(interface.get().isInterface());
@@ -628,13 +635,13 @@ pub const VmClass = struct {
                 helper.strcmp(t.name, "java/lang/Object") //  T must be Object.
         else if (s.isInterface())
             if (t.isInterface())
-                helper.isSuperInterface(s_ref, t_ref) // T must be the same interface as S or a superinterface of S.
+                isSuperInterface(s_ref, t_ref) // T must be the same interface as S or a superinterface of S.
             else
                 helper.strcmp(t.name, "java/lang/Object") // T must be Object.
         else if (t.isInterface())
             helper.implements(s_ref, t_ref) //S must implement interface T.
         else
-            helper.isSuperClass(s_ref, t_ref); // then S must be the same class as T, or S must be a subclass of T
+            isSuperClass(s_ref, t_ref); // then S must be the same class as T, or S must be a subclass of T
     }
 
     pub const UnsafeArray = struct {
