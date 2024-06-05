@@ -24,7 +24,7 @@ comptime {
     // validateFunctionSignatures(@import("java_lang_ProcessImpl.zig"));
     // validateFunctionSignatures(@import("java_lang_ref_Finalizer.zig"));
     // validateFunctionSignatures(@import("java_lang_ref_PhantomReference.zig"));
-    // validateFunctionSignatures(@import("java_lang_ref_Reference.zig"));
+    validateFunctionSignatures(@import("java_lang_ref_Reference.zig"));
     // validateFunctionSignatures(@import("java_lang_reflect_Array.zig"));
     // validateFunctionSignatures(@import("java_lang_reflect_Executable.zig"));
     // validateFunctionSignatures(@import("java_lang_reflect_Field.zig"));
