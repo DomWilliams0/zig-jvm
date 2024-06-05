@@ -96,7 +96,7 @@ pub fn main() !void {
 
         try jvm.bootstrap.initBootstrapClasses(
             &jvm_handle.global.classloader,
-            .{ .skip_system = !config.initialise_system }, // skip until string concat helper actually works
+            .{ .skip_system = !config.initialise_system },
         );
 
         t.run(test_alloc) catch std.debug.panic("TEST {s} FAILED", .{t.testName()});

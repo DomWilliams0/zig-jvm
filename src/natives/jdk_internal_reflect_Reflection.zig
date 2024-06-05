@@ -6,10 +6,13 @@ const JniEnvPtr = jvm.jni.JniEnvPtr;
 
 pub export fn Java_jdk_internal_reflect_Reflection_getCallerClass() sys.jclass {
     const this_frame = jvm.state.thread_state().interpreter.top_frame;
-    const frame = this_frame.?.parent_frame;
+    const caller_frame = this_frame.?.parent_frame orelse @panic("no caller?");
 
+    // TODO ensure caller frame is @CallerSensitive
+    const frame = caller_frame.parent_frame;
+
+    // TODO iter and skip java.lang.reflect.Method.invoke()
     while (frame) |f| {
-        // TODO skip java.lang.reflect.Method.invoke()
         return jni.convert(f.class);
     }
 

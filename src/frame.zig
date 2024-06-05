@@ -5,7 +5,7 @@ const desc = @import("descriptor.zig");
 const types = @import("type.zig");
 const Allocator = std.mem.Allocator;
 
-pub const logging = std.log.default_level == .debug; // and !@import("builtin").is_test;
+pub const logging = std.debug.runtime_safety;
 
 pub const Frame = struct {
     method: *const cafebabe.Method,
