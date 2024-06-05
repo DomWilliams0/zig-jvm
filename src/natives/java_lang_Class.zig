@@ -293,7 +293,7 @@ pub export fn Java_java_lang_Class_isAssignableFrom(raw_env: JniEnvPtr, jclass: 
     const eq = if (this_cls.get().isPrimitive())
         this_cls.cmpPtr(other_cls) // must be same class
     else
-        jvm.object.VmClass.isSuperClassOrSuperInterface(this_cls, other_cls);
+        jvm.object.VmClass.isSuperClassOrSuperInterface(other_cls, this_cls);
 
     return if (eq) sys.JNI_TRUE else sys.JNI_FALSE;
 }
