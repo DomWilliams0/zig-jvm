@@ -755,10 +755,14 @@ pub const VmObject = struct {
     pub fn formatVmRef(self: *@This(), writer: anytype) !void {
         try std.fmt.format(writer, "{s}", .{self.class.get().name});
 
-        // TODO use fmt to determine whether to print string value
         var buf: [1025]u8 = undefined;
         var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
+        if (self.getClassDataChecked().toStrong()) |cls_data| {
+            return try std.fmt.format(writer, "({s})", .{cls_data.get().name});
+        }
+
+        // TODO use fmt to determine whether to print string value
         const str: []const u8 = blk: {
             const res = self.getStringValueUtf8(alloc.allocator()) catch |e|
                 if (e == error.OutOfMemory)
@@ -891,6 +895,14 @@ pub const VmObject = struct {
         const field_opt = self_mut.getField(VmObjectRef.Nullable, fid);
         const field = field_opt.toStrongUnchecked();
         return field.cast(VmClass);
+    }
+
+    /// Checks it is an instance of java/lang/Class. Must be called post-bootstrap. Returns borrowed ref
+    pub fn getClassDataChecked(self: *@This()) VmClassRef.Nullable {
+        if (!std.mem.eql(u8, self.class.get().name, "java/lang/Class"))
+            return nullRef(VmClass);
+
+        return self.getClassDataUnchecked().intoNullable();
     }
 
     /// Inits if first call
