@@ -874,7 +874,7 @@ pub const VmObject = struct {
     pub fn getStringValueUtf8(
         self: *@This(),
         alloc: std.mem.Allocator,
-    ) error{ OutOfMemory, IllegalArgument }!?[:0]const u8 {
+    ) error{ OutOfMemory, IllegalArgument }!?[:0]u8 {
         const global = state.thread_state().global;
         const strings = global.string_pool;
         const java_lang_String = strings.java_lang_String.toStrong() orelse return null; // not yet loaded
