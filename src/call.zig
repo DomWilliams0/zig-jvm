@@ -21,14 +21,14 @@ pub fn runMethod(thread: *state.ThreadEnv, cls: object.VmClassRef, name: []const
 
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
-    if (args_type_info != .Struct or !args_type_info.Struct.is_tuple) {
+    if (args_type_info != .@"struct" or !args_type_info.@"struct".is_tuple) {
         @compileError("expected tuple argument, found " ++ @typeName(ArgsType));
     }
 
-    const arg_count = args_type_info.Struct.fields.len;
+    const arg_count = args_type_info.@"struct".fields.len;
     const expected_count = method.descriptor.param_count + (if (!method.flags.contains(.static)) @as(u8, 1) else 0);
     if (arg_count != expected_count) {
-        std.log.err("expected {d} params for {?} but got {d}", .{ expected_count, method, arg_count });
+        std.log.err("expected {d} params for {f} but got {d}", .{ expected_count, method, arg_count });
         return state.makeError(error.Internal, "wrong number of arguments");
     }
 
@@ -41,15 +41,15 @@ pub fn runMethod(thread: *state.ThreadEnv, cls: object.VmClassRef, name: []const
 
     return (thread.interpreter.executeUntilReturnWithArgs(method, method_args.len, method_args) catch |ex| {
         if (method.flags.contains(.static))
-            std.log.warn("failed to run {?}: {any}", .{ method, ex })
+            std.log.warn("failed to run {f}: {any}", .{ method, ex })
         else
-            std.log.warn("failed to run {?} on {?}: {any}", .{ method, method_args[0], ex });
+            std.log.warn("failed to run {f} on {f}: {any}", .{ method, method_args[0], ex });
         return state.makeError(error.Internal, method);
     }) orelse {
         if (method.flags.contains(.static))
-            std.log.warn("failed to run {?}: {?}", .{ method, thread.interpreter.exception().toStrongUnchecked() })
+            std.log.warn("failed to run {f}: {f}", .{ method, thread.interpreter.exception().toStrongUnchecked() })
         else
-            std.log.warn("failed to run {?} on {?}: {?}", .{ method, method_args[0], thread.interpreter.exception().toStrongUnchecked() });
+            std.log.warn("failed to run {f} on {f}: {f}", .{ method, method_args[0], thread.interpreter.exception().toStrongUnchecked() });
         return state.makeError(error.Internal, method);
     };
 }
@@ -59,7 +59,7 @@ pub fn setField(obj: object.VmObjectRef, name: []const u8, desc: []const u8, val
     const field = cls.get().findFieldRecursively(name, desc, .{ .static = false }) orelse return state.makeError(error.NoSuchField, state.MethodDescription{ .cls = cls.get().name, .method = name, .desc = desc });
     const field_value = obj.get().getField(@TypeOf(val), field.id);
     field_value.* = val;
-    std.log.debug("set field {?}.{s} = {any}", .{ obj, name, val });
+    std.log.debug("set field {f}.{s} = {any}", .{ obj, name, val });
 }
 
 pub fn setStaticField(cls: object.VmClassRef, name: []const u8, desc: []const u8, val: anytype) Error!void {
@@ -87,7 +87,7 @@ pub fn getStaticFieldInfallible(cls: object.VmClassRef, name: []const u8, compti
 }
 
 pub fn setFieldInfallible(obj: object.VmObjectRef, name: []const u8, desc: []const u8, val: anytype) void {
-    setField(obj, name, desc, val) catch std.debug.panic("object {?} does not have expected field {s}", .{ obj, name });
+    setField(obj, name, desc, val) catch std.debug.panic("object {f} does not have expected field {s}", .{ obj, name });
 }
 
 pub fn setStaticFieldInfallible(cls: object.VmClassRef, name: []const u8, desc: []const u8, val: anytype) void {
@@ -96,9 +96,9 @@ pub fn setStaticFieldInfallible(cls: object.VmClassRef, name: []const u8, desc: 
 
 /// "$what threw exception ..."
 pub fn logExceptionWithCause(thread: *state.ThreadEnv, what: []const u8, exc: object.VmObjectRef) void {
-    const exc_str = object.ToString.new_with_exc_cause(thread.global.allocator.inner, exc);
+    var exc_str = object.ToString.new_with_exc_cause(thread.global.allocator.inner, exc);
     defer exc_str.deinit();
-    std.log.err("{s} threw exception {?}: \"{s}\"", .{ what, exc, exc_str.exc.str });
+    std.log.err("{s} threw exception {f}: \"{s}\"", .{ what, exc, exc_str.exc.str });
     for (exc_str.causes.items) |cause|
         std.log.err(" caused by: \"{s}\"", .{cause.str});
 }

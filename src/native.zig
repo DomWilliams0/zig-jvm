@@ -45,7 +45,7 @@ pub const NativeLibrary = struct {
     lib: *anyopaque,
 
     pub fn openSelf() !@This() {
-        const handle = dlopen(null, std.c.RTLD.LAZY) orelse {
+        const handle = std.c.dlopen(null, std.c.RTLD{ .LAZY = true }) orelse {
             const err = dlerror() orelse "unknown";
 
             std.log.warn("failed to dlopen self: {s}", .{err});
@@ -136,7 +136,7 @@ pub const NativeCode = struct {
         defer self.lock.unlock();
 
         const code = code_res catch |err| {
-            std.log.warn("failed to bind native method {?}: {any}", .{ method, err });
+            std.log.warn("failed to bind native method {f}: {any}", .{ method, err });
             self.inner = .{ .failed_to_bind = err };
             return err;
         };

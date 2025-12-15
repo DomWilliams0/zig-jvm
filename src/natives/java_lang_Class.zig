@@ -238,9 +238,9 @@ fn getDeclaredConstructors(raw_env: JniEnvPtr, cls: jvm.VmClassRef, public_only:
                 while (params.next()) |param| {
                     const param_cls =
                         switch (param.getType()) {
-                        .primitive => |prim| t.global.classloader.getLoadedPrimitive(prim),
-                        else => try t.global.classloader.loadClass(param.str, .bootstrap),
-                    };
+                            .primitive => |prim| t.global.classloader.getLoadedPrimitive(prim),
+                            else => try t.global.classloader.loadClass(param.str, .bootstrap),
+                        };
 
                     arr[p] = param_cls.get().getClassInstance().intoNullable();
                     p += 1;

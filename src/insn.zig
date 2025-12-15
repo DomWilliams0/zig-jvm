@@ -27,9 +27,9 @@ pub const Handler = struct {
                 const name = "_" ++ insn.name;
                 const func = if (@hasDecl(handlers, name)) @field(handlers, name) else nop_handler(insn);
 
-                const ret_type = @typeInfo(@typeInfo(@TypeOf(func)).Fn.return_type.?);
+                const ret_type = @typeInfo(@typeInfo(@TypeOf(func)).@"fn".return_type.?);
                 switch (ret_type) {
-                    .ErrorUnion => |err_union| {
+                    .error_union => |err_union| {
                         if (err_union.payload != void) @compileError("unexpected return type from insn handler: " ++ @typeName(ret_type));
 
                         // insn that could raise an exception
@@ -41,7 +41,7 @@ pub const Handler = struct {
                             return;
                         };
                     },
-                    .Void => {
+                    .void => {
                         // normal insn with no possible errors
                         @call(.always_inline, func, .{ctxt});
                     },
@@ -296,7 +296,7 @@ pub const InsnContext = struct {
 
         // resolve referenced method
         const method = (cls.findMethodRecursive(info.name, info.ty) orelse return error.NoSuchMethod);
-        std.log.debug("resolved method to {?}", .{method});
+        std.log.debug("resolved method to {f}", .{method});
         if (method.flags.contains(.static)) return error.IncompatibleClassChange;
         // TODO check access control?
 
@@ -307,7 +307,7 @@ pub const InsnContext = struct {
         const selected_method = object.VmClass.selectMethod(this_obj.class.get(), method);
         std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.descriptor.str));
 
-        std.log.debug("selected method {?}", .{selected_method});
+        std.log.debug("selected method {f}", .{selected_method});
 
         if (selected_method.flags.contains(.abstract)) return error.AbstractMethod;
 
@@ -334,7 +334,7 @@ pub const InsnContext = struct {
         const selected_method = object.VmClass.selectMethod(this_obj.class.get(), method);
         std.debug.assert(std.mem.eql(u8, method.descriptor.str, selected_method.descriptor.str));
 
-        std.log.debug("resolved interface method to {?}", .{selected_method});
+        std.log.debug("resolved interface method to {f}", .{selected_method});
 
         if (selected_method.flags.contains(.static)) return error.IncompatibleClassChange;
         if (selected_method.flags.contains(.abstract)) return error.AbstractMethod;
@@ -423,7 +423,11 @@ pub const InsnContext = struct {
             .byte_bool => array.getElems(i8)[idx] = @intCast(val),
         }
 
-        std.log.debug("array store {} idx {} = {}", .{ array_obj, idx, val });
+        const fmt = if (@typeInfo(pop_ty) == .@"struct" and @hasDecl(pop_ty, "format"))
+            "array store {f} idx {} = {f}"
+        else
+            "array store {f} idx {} = {}";
+        std.log.debug(fmt, .{ array_obj, idx, val });
     }
 
     fn arrayLoad(self: @This(), comptime opt: ArrayStoreLoad) Error!void {
@@ -450,7 +454,7 @@ pub const InsnContext = struct {
             .byte_bool => @as(i32, @intCast(array.getElems(i8)[idx])),
         });
 
-        std.log.debug("array load {} idx {} = {}", .{ array_obj, idx, self.operandStack().peekRaw() });
+        std.log.debug("array load {f} idx {} = {f}", .{ array_obj, idx, self.operandStack().peekRaw() });
     }
 
     /// Pops value from top of stack for a putfield/putstatic insn
@@ -492,7 +496,7 @@ pub const InsnContext = struct {
             }
         };
 
-        const result = if (@typeInfo(T) == .Int) switch (op) {
+        const result = if (@typeInfo(T) == .int) switch (op) {
             .add => val1 +% val2,
             .sub => val1 -% val2,
             .mul => val1 *% val2,
@@ -512,7 +516,7 @@ pub const InsnContext = struct {
             .bit_and => val1 & val2,
             .bit_or => val1 | val2,
             .bit_xor => val1 ^ val2,
-        } else if (@typeInfo(T) == .Float) switch (op) {
+        } else if (@typeInfo(T) == .float) switch (op) {
             .add => val1 + val2,
             .sub => val1 - val2,
             .mul => val1 * val2,
@@ -538,7 +542,7 @@ pub const InsnContext = struct {
 
     fn neg(self: @This(), comptime T: type) void {
         const value = self.operandStack().pop(T);
-        const res = if (@typeInfo(T) == .Int)
+        const res = if (@typeInfo(T) == .int)
             -%value
         else if (std.math.isNan(value))
             value // NaN has no sign
@@ -566,16 +570,15 @@ pub const InsnContext = struct {
         gt,
         le,
 
-        fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = fmt;
-            return std.fmt.formatBuf(switch (self) {
+        fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            return writer.writeAll(switch (self) {
                 .eq => "==",
                 .ne => "!=",
                 .lt => "<",
                 .ge => ">=",
                 .gt => ">",
                 .le => "<=",
-            }, options, writer);
+            });
         }
     };
 
@@ -626,7 +629,7 @@ pub const InsnContext = struct {
             else => @compileError("invalid op for acmp"),
         };
 
-        std.log.debug("acmp: {} {s} {} = {}{s}", .{ val1, @tagName(op), val2, branch, blk: {
+        std.log.debug("acmp: {f} {s} {f} = {}{s}", .{ val1, @tagName(op), val2, branch, blk: {
             var buf: [32]u8 = undefined;
             break :blk if (branch)
                 std.fmt.bufPrint(&buf, ", so jmp +{d}", .{self.readI16()}) catch unreachable
@@ -661,7 +664,7 @@ pub const InsnContext = struct {
         const val2 = self.operandStack().pop(T);
         const val1 = self.operandStack().pop(T);
 
-        const result: i32 = if (@typeInfo(T) == .Float and (std.math.isNan(val1) or std.math.isNan(val2)))
+        const result: i32 = if (@typeInfo(T) == .float and (std.math.isNan(val1) or std.math.isNan(val2)))
             switch (behaviour) {
                 .nan_is_1 => 1,
                 .nan_is_m1 => -1,
@@ -706,11 +709,11 @@ pub const InsnContext = struct {
     fn convertPrimitive(self: @This(), comptime from: type, comptime to: type) void {
         const val = self.operandStack().pop(from);
         const from_int: ?std.builtin.Type.Int = switch (@typeInfo(from)) {
-            .Int => |i| i,
+            .int => |i| i,
             else => null,
         };
         const to_int: ?std.builtin.Type.Int = switch (@typeInfo(to)) {
-            .Int => |i| i,
+            .int => |i| i,
             else => null,
         };
 
@@ -739,7 +742,7 @@ pub const InsnContext = struct {
     }
 
     fn throwException(self: @This(), exc: VmObjectRef) void {
-        std.log.debug("throwing exception {?}", .{exc});
+        std.log.debug("throwing exception {f}", .{exc});
 
         // find handler in this method
         std.debug.assert(self.frame.payload == .java); // hopefully help optimiser in following function call
@@ -748,7 +751,7 @@ pub const InsnContext = struct {
             self.operandStack().push(exc);
             self.gotoAbsolute(handler);
         } else {
-            std.log.debug("no handler found, bubbling up {?}", .{exc});
+            std.log.debug("no handler found, bubbling up {f}", .{exc});
             self.thread.interpreter.setException(exc);
             self.mutable.control_flow = .bubble_exception;
         }
@@ -1057,12 +1060,12 @@ pub const handlers = struct {
     pub fn _putstatic(ctxt: InsnContext) Error!void {
         const info = try ctxt.resolveField(ctxt.readU16(), .static);
         const field = info.field;
-        std.log.debug("putstatic({}, {s}) {s}", .{ info.cls, field.name, field.descriptor.str });
+        std.log.debug("putstatic({f}, {s}) {s}", .{ info.cls, field.name, field.descriptor.str });
 
         const val = ctxt.popPutFieldValue(field) orelse @panic("incompatible?");
 
         field.u.value = val.value;
-        std.log.debug("putstatic({}, {s}) = {x}", .{ info.cls, field.name, val });
+        std.log.debug("putstatic({f}, {s}) = {f}", .{ info.cls, field.name, val });
     }
     pub fn _getstatic(ctxt: InsnContext) Error!void {
         // resolve field and class
@@ -1080,7 +1083,7 @@ pub const handlers = struct {
 
         const value = frame.Frame.StackEntry{ .value = raw_value, .ty = ty };
         ctxt.operandStack().pushRaw(value);
-        std.log.debug("getstatic({}, {s}) = {x}", .{ info.cls, field.name, value });
+        std.log.debug("getstatic({f}, {s}) = {f}", .{ info.cls, field.name, value });
     }
 
     pub fn _return(ctxt: InsnContext) void {
@@ -1139,7 +1142,7 @@ pub const handlers = struct {
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
-        std.log.debug("putfield({}, {s}) = {?}", .{ obj_ref, field.field.name, val });
+        std.log.debug("putfield({f}, {s}) = {f}", .{ obj_ref, field.field.name, val });
 
         const field_ty = field.field.descriptor.getType();
         switch (field_ty) {
@@ -1163,7 +1166,7 @@ pub const handlers = struct {
         const obj_ref = ctxt.operandStack().pop(VmObjectRef.Nullable);
         const obj = obj_ref.toStrong() orelse return error.NullPointer;
 
-        std.log.debug("getfield({}, {s})", .{
+        std.log.debug("getfield({f}, {s})", .{
             obj_ref,
             field.field.name,
         });
@@ -1178,7 +1181,7 @@ pub const handlers = struct {
         }
 
         ctxt.operandStack().pushRaw(value);
-        std.log.debug("getfield({}, {s}) = {?}", .{ obj_ref, field.field.name, value });
+        std.log.debug("getfield({f}, {s}) = {f}", .{ obj_ref, field.field.name, value });
     }
 
     pub fn _iadd(ctxt: InsnContext) Error!void {
@@ -1538,11 +1541,11 @@ pub const handlers = struct {
     }
     pub fn _monitorenter(ctxt: InsnContext) Error!void {
         const obj = ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong() orelse return error.NullPointer;
-        std.log.warn("monitorenter {?} not implemented", .{obj});
+        std.log.warn("monitorenter {f} not implemented", .{obj});
     }
     pub fn _monitorexit(ctxt: InsnContext) Error!void {
         const obj = ctxt.operandStack().pop(VmObjectRef.Nullable).toStrong() orelse return error.NullPointer;
-        std.log.warn("monitorexit {?} not implemented", .{obj});
+        std.log.warn("monitorexit {f} not implemented", .{obj});
     }
 
     pub fn _instanceof(ctxt: InsnContext) Error!void {
@@ -1554,7 +1557,7 @@ pub const handlers = struct {
         const cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
         const cls = try ctxt.resolveClass(cls_name, .resolve_only);
         const result = object.VmClass.isInstanceOf(obj.get().class, cls);
-        std.log.debug("isinstanceof({?}, {s}) = {any}", .{ obj, cls.get().name, result });
+        std.log.debug("isinstanceof({f}, {s}) = {any}", .{ obj, cls.get().name, result });
         ctxt.operandStack().push(@as(i32, @intFromBool(result)));
     }
     pub fn _checkcast(ctxt: InsnContext) Error!void {
@@ -1563,7 +1566,7 @@ pub const handlers = struct {
         const cls_name = ctxt.constantPool().lookupClass(ctxt.readU16()) orelse unreachable;
         const cls = try ctxt.resolveClass(cls_name, .resolve_only);
         const result = object.VmClass.isInstanceOf(obj.get().class, cls);
-        std.log.debug("checkcast({?}, {s}) = {any}", .{ obj, cls.get().name, result });
+        std.log.debug("checkcast({f}, {s}) = {any}", .{ obj, cls.get().name, result });
         if (!result)
             return error.ClassCast;
     }

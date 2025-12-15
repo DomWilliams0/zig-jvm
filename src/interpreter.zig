@@ -17,9 +17,12 @@ pub const Interpreter = struct {
     /// If false, exception stack is just the cause stack, an exception is not currently active
     exception_active: bool = true,
 
+    allocator: std.mem.Allocator,
+
     pub fn new(alloc: std.mem.Allocator) !Interpreter {
         return .{
             .frames_alloc = try frame.ContiguousBufferStack.new(alloc),
+            .allocator = alloc,
         };
     }
 
@@ -33,7 +36,7 @@ pub const Interpreter = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        self.frames_alloc.deinit();
+        self.frames_alloc.deinit(self.allocator);
     }
 
     /// Returns null if an exception was thrown and set in this thread's interpreter.
@@ -56,8 +59,8 @@ pub const Interpreter = struct {
     pub fn executeUntilReturnWithCallerFrame(self: *@This(), method: *const cafebabe.Method, caller: ?*frame.Frame.OperandStack) state.Error!?frame.Frame.StackEntry {
         const class = method.class();
 
-        std.log.debug("executing {?}", .{method});
-        defer std.log.debug("finished executing {?}", .{method});
+        std.log.debug("executing {f}", .{method});
+        defer std.log.debug("finished executing {f}", .{method});
 
         switch (method.code) {
             .native => |native| {
@@ -84,7 +87,7 @@ pub const Interpreter = struct {
                 self.top_frame = f;
 
                 // invoke native method
-                std.log.debug("{?}", .{self.callstack()});
+                std.log.debug("{f}", .{self.callstack()});
                 code.invoke(caller_stack, static_cls);
 
                 // cleanup
@@ -106,14 +109,14 @@ pub const Interpreter = struct {
                     const n_locals = code.max_locals;
                     const n_operands = code.max_stack;
 
-                    var alloc = try self.frames_alloc.reserve(n_locals + n_operands);
+                    var alloc = try self.frames_alloc.reserve(self.allocator, n_locals + n_operands);
                     const local_vars_buf = alloc[0..n_locals];
                     const operands_buf = alloc[n_locals .. n_locals + n_operands];
 
                     operands = frame.Frame.OperandStack.new(operands_buf.ptr);
                     local_vars = try frame.Frame.LocalVars.new(local_vars_buf.ptr, self.frameAllocator(), n_locals);
                 }
-                errdefer self.frames_alloc.drop(local_vars.vars) catch unreachable;
+                errdefer self.frames_alloc.drop(self.allocator, local_vars.vars) catch unreachable;
 
                 const code_slice = code.code orelse @panic("abstract method");
                 const code_window = code_slice.ptr;
@@ -171,42 +174,39 @@ pub const Interpreter = struct {
     }
 
     fn frameAllocator(self: @This()) std.mem.Allocator {
-        return self.frames_alloc.bufs.allocator;
+        return self.allocator;
     }
 
     const PrintableCallStack = struct {
         top: ?*frame.Frame,
         exc: object.VmObjectRef.Nullable,
-        pub fn format(self_: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        pub fn format(self_: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
             var top = self_.top;
 
             var i: u32 = 0;
-            try std.fmt.formatBuf("call stack: ", options, writer);
+            try writer.writeAll("call stack: ");
             if (self_.exc.toStrong()) |exc|
-                try std.fmt.format(
-                    writer,
-                    " (exception={?})",
+                try writer.print(
+                    " (exception={f})",
                     .{exc},
                 );
 
             while (top) |f| {
-                try std.fmt.format(writer, "\n * {d}) {s} {s}", .{ i, f.method, f.method.descriptor.str });
+                try writer.print("\n * {d}) {f} {s}", .{ i, f.method, f.method.descriptor.str });
                 if (f.currentPc()) |pc| {
-                    try std.fmt.format(writer, " (pc={d}", .{pc});
+                    try writer.print(" (pc={d}", .{pc});
                     const src = f.method.lookupSource(pc);
                     try if (src.file) |src_file|
                         if (src.line) |line|
-                            std.fmt.format(writer, " src={s}:{d})", .{ src_file, line })
+                            writer.print(" src={s}:{d})", .{ src_file, line })
                         else
-                            std.fmt.format(writer, " src={s})", .{src_file})
+                            writer.print(" src={s})", .{src_file})
                     else
-                        std.fmt.format(writer, ")", .{});
-                } else try std.fmt.formatBuf(" (native)", .{}, writer);
+                        writer.print(")", .{});
+                } else try writer.writeAll(" (native)");
                 top = f.parent_frame;
                 i += 1;
             }
-
-            _ = fmt;
         }
     };
     fn callstack(self: @This()) PrintableCallStack {
@@ -227,21 +227,21 @@ pub const Interpreter = struct {
     pub fn popExceptionCauses(self: *@This(), exc_obj: object.VmObjectRef) error{ErrorBuilding}!void {
         var cause = self.exceptions.pop() orelse return;
 
-        const method = exc_obj.get().class.get().findMethodRecursive("initCause", "(Ljava/lang/Throwable;)Ljava/lang/Throwable;") orelse std.debug.panic("no Throwable.initCause method on {?}", .{exc_obj});
+        const method = exc_obj.get().class.get().findMethodRecursive("initCause", "(Ljava/lang/Throwable;)Ljava/lang/Throwable;") orelse std.debug.panic("no Throwable.initCause method on {f}", .{exc_obj});
 
         const StackEntry = frame.Frame.StackEntry;
         var exc = exc_obj;
         var args: [2]StackEntry = undefined;
         while (true) {
-            std.log.debug("setting cause of {?} on throwable {?}", .{ cause, exc });
+            std.log.debug("setting cause of {f} on throwable {f}", .{ cause, exc });
             args[0] = StackEntry.new(exc);
             args[1] = StackEntry.new(cause);
             _ = (self.executeUntilReturnWithArgs(method, 2, args) catch |ex| {
-                std.log.warn("failed to set cause on exception {?}: {any}", .{ exc_obj, ex });
+                std.log.warn("failed to set cause on exception {f}: {any}", .{ exc_obj, ex });
                 return error.ErrorBuilding;
             }) orelse {
                 // just pushed a new exception
-                std.log.warn("failed to set cause on exception {?}: {?}", .{ exc_obj, self.exceptions.peek().? });
+                std.log.warn("failed to set cause on exception {f}: {f}", .{ exc_obj, self.exceptions.peek().? });
                 return error.ErrorBuilding;
             };
 
@@ -300,7 +300,7 @@ pub fn ExceptionStack(comptime T: type, comptime N: usize) type {
         }
 
         fn drop(t: *T) void {
-            if (@typeInfo(T) == .Struct and @hasDecl(T, "drop"))
+            if (@typeInfo(T) == .@"struct" and @hasDecl(T, "drop"))
                 t.drop();
         }
     };
@@ -355,13 +355,13 @@ fn interpreterLoop() void {
 
     var root_reached = false;
     while (!root_reached) {
-        std.log.debug("{?}", .{thread.interpreter.callstack()});
+        std.log.debug("{f}", .{thread.interpreter.callstack()});
 
         // check for exceptions
         if (thread.interpreter.exception().toStrong()) |exc| handled: {
             if (ctxt.frame.payload == .java) {
                 var java = &ctxt.frame.payload.java;
-                std.log.debug("looking for exception handler for {?} at pc {} in {?}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method });
+                std.log.debug("looking for exception handler for {f} at pc {} in {f}", .{ exc, ctxt.frame.currentPc().?, ctxt.frame.method });
 
                 if (ctxt.frame.findExceptionHandler(exc, thread)) |pc| {
                     ctxt.frame.setPc(pc);
@@ -370,7 +370,7 @@ fn interpreterLoop() void {
 
                     // pop this exception so it doesn't get assigned as its own cause
                     _ = thread.interpreter.exceptions.pop();
-                    thread.interpreter.popExceptionCauses(exc) catch |e| std.debug.panic("vm error: populating exception causes on {?}: {any}", .{ exc, e });
+                    thread.interpreter.popExceptionCauses(exc) catch |e| std.debug.panic("vm error: populating exception causes on {f}: {any}", .{ exc, e });
                     break :handled;
                 }
             }
@@ -433,7 +433,7 @@ fn interpreterLoop() void {
                     thread,
                 );
 
-                std.log.debug("{?}", .{thread.interpreter.callstack()});
+                std.log.debug("{f}", .{thread.interpreter.callstack()});
                 return;
             },
             .bubble_exception => {
@@ -441,7 +441,7 @@ fn interpreterLoop() void {
                 const exc = thread.interpreter.exception().toStrongUnchecked();
 
                 const this_frame = thread.interpreter.top_frame.?;
-                std.log.debug("bubbling exception {} to caller from {s}.{s}", .{ exc, this_frame.class.get().name, this_frame.method.name });
+                std.log.debug("bubbling exception {f} to caller from {s}.{s}", .{ exc, this_frame.class.get().name, this_frame.method.name });
                 root_reached = @intFromPtr(this_frame) == top_frame_ptr;
                 popFrame(this_frame, thread);
 

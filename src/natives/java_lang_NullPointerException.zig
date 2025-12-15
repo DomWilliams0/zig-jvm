@@ -17,7 +17,7 @@ pub export fn Java_java_lang_NullPointerException_getExtendedNPEMessage(raw_env:
     else
         "";
 
-    const utf = std.fmt.allocPrint(t.global.allocator.inner, "not really useful but anyway: {?}{s}", .{ f.method, pc }) catch |e| {
+    const utf = std.fmt.allocPrint(t.global.allocator.inner, "not really useful but anyway: {f}{s}", .{ f.method, pc }) catch |e| {
         _ = jni.convert(raw_env).Throw(raw_env, jni.convert(jvm.state.errorToException(e)));
         return null;
     };

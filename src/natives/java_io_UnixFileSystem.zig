@@ -24,7 +24,7 @@ pub export fn Java_java_io_UnixFileSystem_canonicalize0(raw_env: JniEnvPtr, fs: 
     } orelse unreachable; // definitely a string
     defer thread.global.allocator.inner.free(path_utf8);
 
-    var path_buf: [std.fs.MAX_PATH_BYTES + 1:0]u8 = undefined;
+    var path_buf: [std.fs.max_path_bytes + 1:0]u8 = undefined;
     const path_abs = std.fs.realpath(path_utf8, &path_buf) catch |e| {
         // TODO build proper error with the reason
         std.log.warn("realpath error: {}", .{e});

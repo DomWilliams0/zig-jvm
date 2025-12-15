@@ -1,58 +1,49 @@
 const std = @import("std");
 const jvm = @import("jvm");
-
-usingnamespace @import("natives");
+const natives = @import("natives");
 
 const Allocator = std.mem.Allocator;
 
 const LogFile = struct {
     file: std.fs.File,
-    file_writer: std.io.BufferedWriter(8192, std.fs.File.Writer),
+    file_buffer: [8192]u8,
+    file_writer: std.fs.File.Writer,
 };
-var log_file: ?*LogFile = null;
+
+var log_file: ?std.fs.File = null;
+var log_file_buffer: [8192]u8 = undefined;
 var log_mutex: std.Thread.Mutex = .{};
-var stderr_writer: std.io.BufferedWriter(8192, std.fs.File.Writer) = .{ .unbuffered_writer = std.io.getStdErr().writer() };
+
+var stderr_buffer: [8192]u8 = undefined;
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
     .logFn = log,
 };
 
-fn openLogFile(alloc: Allocator) !void {
+fn openLogFile() !void {
     if (log_file != null) @panic("log file already initialised");
-
-    var l = try alloc.create(LogFile);
-    errdefer alloc.destroy(l);
-
-    const file = try std.fs.createFileAbsolute("/tmp/jvmlog", .{});
-    l.file = file;
-    l.file_writer = std.io.BufferedWriter(8192, std.fs.File.Writer){ .unbuffered_writer = l.file.writer() };
-
-    log_file = l;
+    log_file = try std.fs.createFileAbsolute("/tmp/jvmlog", .{});
 }
 
-fn closeLogFile(alloc: Allocator) void {
+fn closeLogFile() void {
     log_mutex.lock();
     defer log_mutex.unlock();
 
     if (log_file) |f| {
-        f.file_writer.flush() catch {};
-        f.file.close();
-        alloc.destroy(f);
+        f.close();
         log_file = null;
     }
-
-    stderr_writer.flush() catch {};
 }
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
-    openLogFile(alloc) catch |e| {
+    openLogFile() catch |e| {
         std.log.warn("couldn't open log file: {any}", .{e});
     };
-    defer closeLogFile(alloc);
+    defer closeLogFile();
 
     std.log.info("running test runner", .{});
 
@@ -65,9 +56,9 @@ pub fn main() !void {
         std.log.info("TODO show test usage", .{});
         return;
     };
-    defer jvm_args.deinit();
+    defer jvm_args.deinit(alloc);
 
-    try jvm_args.boot_classpath.addExtra(Test.class_dir);
+    try jvm_args.boot_classpath.addExtra(alloc, Test.class_dir);
 
     std.log.debug("args:", .{});
     std.log.debug(" classpath: {?s}", .{jvm_args.classpath.slice});
@@ -76,8 +67,8 @@ pub fn main() !void {
     var test_gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const test_alloc = test_gpa.allocator();
     const test_filter = std.posix.getenv("ZIG_JVM_TEST_FILTER");
-    const tests = try Test.discover(test_alloc, test_filter);
-    defer tests.deinit();
+    var tests = try Test.discover(test_alloc, test_filter);
+    defer tests.deinit(test_alloc);
 
     try Test.prepareForAll();
     for (tests.items, 0..) |t, i| {
@@ -121,8 +112,8 @@ const Test = struct {
         defer dir.close();
 
         var iter = dir.iterate();
-        var tests = std.ArrayList(Test).init(alloc);
-        errdefer tests.deinit();
+        var tests: std.ArrayListUnmanaged(Test) = .empty;
+        errdefer tests.deinit(alloc);
         while (try iter.next()) |it| {
             if (it.kind == .file and std.mem.endsWith(u8, it.name, ".java")) {
                 if (filter) |f| {
@@ -130,7 +121,7 @@ const Test = struct {
                 }
                 const src_path = try std.mem.concat(alloc, u8, &.{ path, "/", it.name });
                 std.log.debug("found test {s}", .{it.name});
-                try tests.append(Test{ .src_path = src_path });
+                try tests.append(alloc, Test{ .src_path = src_path });
             }
         }
 
@@ -167,7 +158,7 @@ const Test = struct {
         const end_idx = std.mem.indexOfScalar(u8, header, '\n') orelse n;
 
         const config_string = header[prefix.len..end_idx];
-        var iter = std.mem.split(u8, config_string, " ");
+        var iter = std.mem.splitScalar(u8, config_string, ' ');
         var cfg = Config{};
         while (iter.next()) |s| {
             const trimmed = std.mem.trim(u8, s, " \t");
@@ -238,7 +229,7 @@ const Test = struct {
 
 pub fn log(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -248,14 +239,18 @@ pub fn log(
 
     log_mutex.lock();
     defer log_mutex.unlock();
+
     if (log_file) |f| {
-        nosuspend f.file_writer.writer().print(msg, args) catch {};
-        f.file_writer.flush() catch {};
+        var bw = f.writer(&log_file_buffer);
+        nosuspend bw.interface.print(msg, args) catch {};
+        nosuspend bw.interface.flush() catch {};
     }
 
+
     if (message_level != .debug) {
-        // this is reeeally slow
-        nosuspend stderr_writer.writer().print(msg, args) catch {};
-        stderr_writer.flush() catch {};
+        const stderr_file = std.fs.File.stderr();
+        var writer = stderr_file.writer(&stderr_buffer);
+        nosuspend writer.interface.print(msg, args) catch {};
+        nosuspend writer.interface.flush() catch {};
     }
 }

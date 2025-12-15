@@ -244,7 +244,7 @@ test "valid method descriptors" {
 
 test "getType" {
     const S = struct {
-        fn check(desc: []const u8, expected: @typeInfo(@TypeOf(FieldDescriptor.getType)).Fn.return_type.?) !void {
+        fn check(desc: []const u8, expected: @typeInfo(@TypeOf(FieldDescriptor.getType)).@"fn".return_type.?) !void {
             const ty = FieldDescriptor.new(desc).?.getType();
 
             try switch (expected) {

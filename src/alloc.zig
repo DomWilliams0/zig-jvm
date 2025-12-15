@@ -36,11 +36,11 @@ pub fn VmRef(comptime T: type) type {
 
                 // TODO extra debug field to track double drop
                 const old = self.ptr.block.weak.fetchSub(1, .release);
-                // if (logging) std.log.debug("{}: dropped weak count to {d}", .{ self, old - 1 });
+                // if (logging) std.log.debug("{f}: dropped weak count to {d}", .{ self, old - 1 });
 
                 if (old == 1) {
-                    self.ptr.block.weak.fence(.acquire);
-                    // if (logging) std.log.debug("{}: dropping inner", .{self});
+                    _ = self.ptr.block.weak.load(.acquire); // replaces @fence which was removed in 0.14
+                    // if (logging) std.log.debug("{f}: dropping inner", .{self});
 
                     const alloc = global_allocator();
                     const alloc_size =
@@ -49,10 +49,10 @@ pub fn VmRef(comptime T: type) type {
                     // if (logging) std.log.debug("{*}: freeing {*} len {d}", .{ self.ptr, destroy_slice.ptr, destroy_slice.len });
                     if (std.debug.runtime_safety) {
                         switch (self.ptr.block.alignment) {
-                            8 => alloc.inner.free(@as([*]align(8) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
-                            4 => alloc.inner.free(@as([*]align(4) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
-                            2 => alloc.inner.free(@as([*]align(2) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
-                            else => alloc.inner.free(@as([*]align(1) u8, @alignCast(@ptrCast(self.ptr)))[0..alloc_size]),
+                            8 => alloc.inner.free(@as([*]align(8) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
+                            4 => alloc.inner.free(@as([*]align(4) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
+                            2 => alloc.inner.free(@as([*]align(2) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
+                            else => alloc.inner.free(@as([*]align(1) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
                         }
                     } else {
                         alloc.inner.free(@as([*]u8, @ptrCast(self.ptr))[0..alloc_size]);
@@ -73,7 +73,7 @@ pub fn VmRef(comptime T: type) type {
         pub fn clone(self: Strong) Strong {
             const old = self.ptr.block.strong.fetchAdd(1, .monotonic);
 
-            if (logging) std.log.debug("{}: bumped strong count to {d}", .{ self, old + 1 });
+            if (logging) std.log.debug("{f}: bumped strong count to {d}", .{ self, old + 1 });
 
             if (old > max_counter)
                 @panic("too many refs");
@@ -84,10 +84,10 @@ pub fn VmRef(comptime T: type) type {
         pub fn drop(self: Strong) void {
             // TODO extra debug field to track double drop
             const old = self.ptr.block.strong.fetchSub(1, .release);
-            if (logging) std.log.debug("{}: dropped strong count to {d}", .{ self, old - 1 });
+            if (logging) std.log.debug("{f}: dropped strong count to {d}", .{ self, old - 1 });
             if (old != 1) return;
 
-            self.ptr.block.strong.fence(.acquire);
+            _ = self.ptr.block.strong.load(.acquire); // replaces @fence which was removed in 0.14
 
             // destroy data
             T.vmRefDrop(self.get());
@@ -154,16 +154,15 @@ pub fn VmRef(comptime T: type) type {
                 return .{ .ptr = ptr };
             }
 
-            pub fn format(self: Nullable, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-                _ = fmt;
+            pub fn format(self: Nullable, writer: *std.Io.Writer) std.Io.Writer.Error!void {
                 if (self.toStrong()) |strong| {
                     try if (@hasDecl(T, "formatVmRef"))
                         T.formatVmRef(strong.get(), writer)
                     else
-                        std.fmt.format(writer, "VmRef({s})", .{@typeName(T)});
+                        writer.print("VmRef({s})", .{@typeName(T)});
 
-                    return std.fmt.format(writer, "@{x}", .{@intFromPtr(strong.ptr)});
-                } else return std.fmt.formatBuf("(null)", options, writer);
+                    return writer.print("@{x}", .{@intFromPtr(strong.ptr)});
+                } else return writer.writeAll("(null)");
             }
 
             pub fn atomicStore(dst: *Nullable, src: Nullable, comptime order: AtomicOrder) void {
@@ -235,7 +234,7 @@ pub fn VmRef(comptime T: type) type {
 
             // TODO should be able to get cheaply zero allocated memory from OS, to avoid needing to zero it manually
             //  (which is exactly what is needed for default initialising arrays/objects)
-            const buf = try alloc.inner.allocAdvancedWithRetAddr(u8, alignment, alloc_size, 0);
+            const buf = try alloc.inner.allocAdvancedWithRetAddr(u8, @enumFromInt(alignment), alloc_size, 0);
             if (logging) std.log.debug("allocated {*} len {d} with align={d}, size={d}", .{ buf.ptr, buf.len, alignment, alloc_size });
             const inner: *InnerRef = @ptrCast(buf);
             inner.* = .{
@@ -262,8 +261,8 @@ pub fn VmRef(comptime T: type) type {
             if (@sizeOf(VmRef(T).Weak) != @sizeOf(*T)) @compileError("VmRef is the wrong size");
         }
 
-        pub fn format(self: Strong, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            return Nullable.format(self.intoNullable(), fmt, options, writer);
+        pub fn format(self: Strong, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            return Nullable.format(self.intoNullable(), writer);
         }
 
         /// Pretty dangerous

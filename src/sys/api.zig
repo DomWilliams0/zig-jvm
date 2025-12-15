@@ -6,19 +6,19 @@ pub const JniEnvPtr = [*c][*c]const sys.struct_JNINativeInterface_;
 
 /// A struct just like the original JNINativeInterface_, except function pointers are not optional
 pub const JniEnv = blk: {
-    const field_count = @typeInfo(sys.struct_JNINativeInterface_).Struct.fields.len;
+    const field_count = @typeInfo(sys.struct_JNINativeInterface_).@"struct".fields.len;
     var fields: [field_count]std.builtin.Type.StructField = .{undefined} ** field_count;
 
-    for (@typeInfo(sys.struct_JNINativeInterface_).Struct.fields, &fields) |f, *dst| {
+    for (@typeInfo(sys.struct_JNINativeInterface_).@"struct".fields, &fields) |f, *dst| {
         var new_field = f;
-        const non_optional_ptr = @typeInfo(f.type).Optional.child;
-        const ptr_ty = @typeInfo(non_optional_ptr).Pointer.child;
+        const non_optional_ptr = @typeInfo(f.type).optional.child;
+        const ptr_ty = @typeInfo(non_optional_ptr).pointer.child;
         if (ptr_ty != anyopaque)
             new_field.type = non_optional_ptr; // fn pointer
         dst.* = new_field;
     }
 
-    break :blk @Type(.{ .Struct = .{
+    break :blk @Type(.{ .@"struct" = .{
         .layout = .@"extern",
         .is_tuple = false,
         .fields = &fields,
@@ -28,29 +28,29 @@ pub const JniEnv = blk: {
 
 pub fn makeEnv() JniEnv {
     var result: JniEnv = undefined;
-    inline for (@typeInfo(JniEnv).Struct.fields) |f| {
+    inline for (@typeInfo(JniEnv).@"struct".fields) |f| {
         @field(result, f.name) =
             // leave reserved fields as null. std.mem.startsWith doesn't work for some reason here
             if (f.name.len >= 8 and f.name[0] == 'r' and f.name[1] == 'e' and f.name[2] == 's' and f.name[3] == 'e' and
             f.name[4] == 'r' and f.name[5] == 'v' and f.name[6] == 'e' and f.name[7] == 'd')
-            null
-        else if (@hasDecl(impl, f.name))
-            @field(impl, f.name)
-        else blk: {
-            const S = struct {
-                fn unimplemented(comptime name: []const u8, comptime T: type) T {
-                    const inner = struct {
-                        fn func() callconv(.C) noreturn {
-                            @panic("unimplemented JNI function: " ++ name);
-                        }
-                    };
+                null
+            else if (@hasDecl(impl, f.name))
+                @field(impl, f.name)
+            else blk: {
+                const S = struct {
+                    fn unimplemented(comptime name: []const u8, comptime T: type) T {
+                        const inner = struct {
+                            fn func() callconv(.c) noreturn {
+                                @panic("unimplemented JNI function: " ++ name);
+                            }
+                        };
 
-                    return @ptrCast(&inner.func);
-                }
+                        return @ptrCast(&inner.func);
+                    }
+                };
+
+                break :blk S.unimplemented(f.name, f.type);
             };
-
-            break :blk S.unimplemented(f.name, f.type);
-        };
     }
     return result;
 }
@@ -58,26 +58,26 @@ pub fn makeEnv() JniEnv {
 const impl = struct {
     const state = @import("../state.zig");
     const object = @import("../object.zig");
-    pub fn ExceptionCheck(raw_env: JniEnvPtr) callconv(.C) sys.jboolean {
+    pub fn ExceptionCheck(raw_env: JniEnvPtr) callconv(.c) sys.jboolean {
         _ = raw_env;
         // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
         const thread = state.thread_state();
         return if (!thread.interpreter.hasException()) sys.JNI_FALSE else sys.JNI_TRUE;
     }
 
-    pub fn Throw(raw_env: JniEnvPtr, exc: sys.jthrowable) callconv(.C) sys.jint {
+    pub fn Throw(raw_env: JniEnvPtr, exc: sys.jthrowable) callconv(.c) sys.jint {
         _ = raw_env;
         if (jni.convert(exc).toStrong()) |exception| {
             // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
             const thread = state.thread_state();
-            std.log.debug("throwing exception {?}", .{exception});
+            std.log.debug("throwing exception {f}", .{exception});
             thread.interpreter.setException(exception);
             return 0;
         }
         return -1;
     }
 
-    pub fn FindClass(raw_env: JniEnvPtr, cls_name: [*c]const u8) callconv(.C) sys.jclass {
+    pub fn FindClass(raw_env: JniEnvPtr, cls_name: [*c]const u8) callconv(.c) sys.jclass {
         _ = raw_env;
         // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
         const thread = state.thread_state();
@@ -89,7 +89,7 @@ const impl = struct {
         return jni.convert(loaded.clone());
     }
 
-    pub fn NewObjectArray(raw_env: JniEnvPtr, size: sys.jsize, elem: sys.jclass, initial_elem: sys.jobject) callconv(.C) sys.jobjectArray {
+    pub fn NewObjectArray(raw_env: JniEnvPtr, size: sys.jsize, elem: sys.jclass, initial_elem: sys.jobject) callconv(.c) sys.jobjectArray {
         _ = raw_env;
 
         const elem_cls = jni.convert(elem).toStrongUnchecked();
@@ -112,7 +112,7 @@ const impl = struct {
 
         return jni.convertObject(sys.jobjectArray, array.intoNullable());
     }
-    pub fn SetObjectArrayElement(raw_env: JniEnvPtr, jarray: sys.jobjectArray, index: sys.jsize, jvalue: sys.jobject) callconv(.C) void {
+    pub fn SetObjectArrayElement(raw_env: JniEnvPtr, jarray: sys.jobjectArray, index: sys.jsize, jvalue: sys.jobject) callconv(.c) void {
         _ = raw_env;
         const array_obj = jni.convert(jarray).toStrongUnchecked();
         const array = array_obj.get().getArrayHeader();
@@ -137,7 +137,7 @@ const impl = struct {
         elems[@intCast(index)] = value;
     }
 
-    pub fn NewStringUTF(raw_env: JniEnvPtr, bytes: [*c]const u8) callconv(.C) sys.jstring {
+    pub fn NewStringUTF(raw_env: JniEnvPtr, bytes: [*c]const u8) callconv(.c) sys.jstring {
         _ = raw_env;
         // TODO store the *ThreadEnv at the end of JniEnv instead of looking up from threadlocal every time
         const thread = state.thread_state();
@@ -152,7 +152,7 @@ const impl = struct {
         return jni.convertObject(sys.jstring, str);
     }
 
-    pub fn GetStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, is_copy: [*c]sys.jboolean) callconv(.C) [*c]const u8 {
+    pub fn GetStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, is_copy: [*c]sys.jboolean) callconv(.c) [*c]const u8 {
         _ = raw_env;
         const name_obj = jni.convert(string).toStrongUnchecked();
 
@@ -169,7 +169,7 @@ const impl = struct {
         return string_utf8.ptr;
     }
 
-    pub fn ReleaseStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, utf: [*c]const u8) callconv(.C) void {
+    pub fn ReleaseStringUTFChars(raw_env: JniEnvPtr, string: sys.jstring, utf: [*c]const u8) callconv(.c) void {
         _ = string;
         _ = raw_env;
         const thread = state.thread_state();

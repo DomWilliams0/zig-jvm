@@ -22,14 +22,28 @@ pub fn build(b: *std.Build) !void {
     const test_runner_step = b.step("testrunner", "Build integration tests to run against suite of small Java programs");
     const jvm_step = b.step("java", "Build JVM");
 
-    const test_runner_exe = b.addExecutable(.{ .name = "jvm-test-runner", .root_source_file = b.path("src/test-runner.zig"), .target = target, .optimize = optimize });
-    const java_exe = b.addExecutable(.{ .name = "java", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
+    const test_runner_exe = b.addExecutable(.{
+        .name = "jvm-test-runner",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test-runner.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const java_exe = b.addExecutable(.{
+        .name = "java",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
 
     inline for (.{ .{ test_runner_step, test_runner_exe }, .{ jvm_step, java_exe } }) |tup| {
         const step, const exe = tup;
 
-        // exe.use_llvm = false;
-        // exe.use_lld = false;
+        exe.use_llvm = false;
+        exe.use_lld = false;
 
         exe.root_module.addImport("jvm", jvm);
         exe.root_module.addImport("natives", natives);
@@ -52,7 +66,12 @@ pub fn build(b: *std.Build) !void {
     // b.getInstallStep().dependOn(test_runner_step);
     // b.getInstallStep().dependOn(jvm_step);
 
-    const exe_tests = b.addTest(.{ .root_source_file = b.path("src/root.zig"), .target = target });
+    const exe_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+        }),
+    });
     exe_tests.linkLibC();
     exe_tests.linkSystemLibrary("ffi");
     const test_step = b.step("test", "Run unit tests");

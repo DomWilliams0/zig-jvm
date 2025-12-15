@@ -119,7 +119,7 @@ pub const NativeMethodCode = struct {
         }
 
         var ret_slot: usize = undefined;
-        const func_ptr: *const fn () callconv(.C) void = @ptrCast(self.fn_ptr);
+        const func_ptr: *const fn () callconv(.c) void = @ptrCast(self.fn_ptr);
         libffi.ffi_call(@ptrCast(&self.cif), func_ptr, &ret_slot, @ptrCast(self.args));
 
         // pop args
@@ -149,7 +149,7 @@ pub const NativeMethodCode = struct {
 test "libffi" {
     // std.testing.log_level = .debug;
     const S = struct {
-        fn the_func(jni: *anyopaque, this: *anyopaque, int: i32, float: f32, long: i64) callconv(.C) i32 {
+        fn the_func(jni: *anyopaque, this: *anyopaque, int: i32, float: f32, long: i64) callconv(.c) i32 {
             _ = jni;
             _ = this;
 

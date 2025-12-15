@@ -439,14 +439,14 @@ pub const ClassLoader = struct {
     fn findBootstrapClassFile(arena: Allocator, alloc: Allocator, name: []const u8) std.mem.Allocator.Error!?[]const u8 {
         const thread = state.thread_state();
 
-        var buf_backing = try alloc.alloc(u8, std.fs.MAX_PATH_BYTES * 2);
+        var buf_backing = try alloc.alloc(u8, std.fs.max_path_bytes * 2);
         defer alloc.free(buf_backing);
 
-        const candidate_rel = buf_backing[0..std.fs.MAX_PATH_BYTES];
-        const candidate_abs = buf_backing[std.fs.MAX_PATH_BYTES .. std.fs.MAX_PATH_BYTES * 2];
+        const candidate_rel = buf_backing[0..std.fs.max_path_bytes];
+        const candidate_abs = buf_backing[std.fs.max_path_bytes .. std.fs.max_path_bytes * 2];
 
         const io = struct {
-            pub fn readFile(io_arena: Allocator, rel_path: []const u8, abs_path_buf: *[std.fs.MAX_PATH_BYTES]u8) ![]const u8 {
+            pub fn readFile(io_arena: Allocator, rel_path: []const u8, abs_path_buf: *[std.fs.max_path_bytes]u8) ![]const u8 {
                 const path_abs = try std.fs.realpath(rel_path, abs_path_buf); // TODO expand path too e.g. ~, env vars
 
                 var file = try std.fs.openFileAbsolute(path_abs, .{});
@@ -498,33 +498,33 @@ pub const ClassLoader = struct {
 
     pub const NativeMangling = struct {
         /// Null terminated
-        buf: std.ArrayList(u8),
+        buf: std.ArrayListUnmanaged(u8),
 
-        pub fn escape(out: *std.ArrayList(u8), name: []const u8) !void {
-            try out.ensureUnusedCapacity(name.len);
+        pub fn escape(alloc: Allocator, out: *std.ArrayList(u8), name: []const u8) !void {
+            try out.ensureUnusedCapacity(alloc, name.len);
 
             var utf8 = (try std.unicode.Utf8View.init(name)).iterator();
 
             while (utf8.nextCodepointSlice()) |it| {
                 switch (it.len) {
-                    1 => try if (it[0] == '/') out.append('_') //
-                    else if (it[0] == '_') out.appendSlice("_1") //
-                    else if (it[0] == ';') out.appendSlice("_2") //
-                    else if (it[0] == '[') out.appendSlice("_3") //
-                    else if (it[0] == '$') out.appendSlice("_00024") //
-                    else out.append(it[0]),
+                    1 => try if (it[0] == '/') out.append(alloc, '_') //
+                    else if (it[0] == '_') out.appendSlice(alloc, "_1") //
+                    else if (it[0] == ';') out.appendSlice(alloc, "_2") //
+                    else if (it[0] == '[') out.appendSlice(alloc, "_3") //
+                    else if (it[0] == '$') out.appendSlice(alloc, "_00024") //
+                    else out.append(alloc, it[0]),
                     2 => {
                         const enc = try std.unicode.utf8Decode(it);
-                        try out.ensureUnusedCapacity(6);
-                        std.fmt.format(out.writer(), "_0{x:0>4}", .{enc}) catch unreachable;
+                        try out.ensureUnusedCapacity(alloc, 6);
+                        out.writer(alloc).print("_0{x:0>4}", .{enc}) catch unreachable;
                     },
                     else => @panic("not utf16?"),
                 }
             }
         }
 
-        pub fn deinit(self: *@This()) void {
-            self.buf.deinit();
+        pub fn deinit(self: *@This(), alloc: Allocator) void {
+            self.buf.deinit(alloc);
         }
 
         pub fn strZ(self: *const @This()) [:0]const u8 {
@@ -532,28 +532,28 @@ pub const ClassLoader = struct {
         }
 
         pub fn initShort(alloc: std.mem.Allocator, class_name: []const u8, method_name: []const u8) !@This() {
-            var this = NativeMangling{ .buf = std.ArrayList(u8).init(alloc) };
-            errdefer this.deinit();
+            var this = NativeMangling{ .buf = .empty };
+            errdefer this.deinit(alloc);
 
-            var writer = this.buf.writer();
-            try std.fmt.format(writer, "Java_", .{});
-            try escape(&this.buf, class_name);
+            var writer = this.buf.writer(alloc);
+            try writer.writeAll("Java_");
+            try escape(alloc, &this.buf, class_name);
             _ = try writer.write("_");
-            try escape(&this.buf, method_name);
+            try escape(alloc, &this.buf, method_name);
 
             // null terminate
             _ = try writer.write("\x00");
             return this;
         }
 
-        pub fn appendLong(self: *@This(), desc: descriptor.MethodDescriptor) !void {
+        pub fn appendLong(self: *@This(), alloc: Allocator, desc: descriptor.MethodDescriptor) !void {
             // truncate null byte
             const nul = self.buf.pop();
             std.debug.assert(nul == 0);
 
-            var writer = self.buf.writer();
+            var writer = self.buf.writer(alloc);
             _ = try writer.write("__");
-            try escape(&self.buf, desc.parameters());
+            try escape(alloc, &self.buf, desc.parameters());
 
             // null terminate
             _ = try writer.write("\x00");
@@ -581,7 +581,7 @@ pub const ClassLoader = struct {
         };
 
         var mangled_name = NativeMangling.initShort(self.alloc, class_name, method_name) catch return null;
-        defer mangled_name.deinit();
+        defer mangled_name.deinit(self.alloc);
 
         // special case, check self first
         const first_check = if (loader == .bootstrap) self.this_native else null;
@@ -595,7 +595,7 @@ pub const ClassLoader = struct {
 
         // try long overloaded form
         // TODO even when takes no parameters?
-        mangled_name.appendLong(method_desc) catch return null;
+        mangled_name.appendLong(self.alloc, method_desc) catch return null;
         if (Search.searchLibraries(first_check, natives, mangled_name)) |found| return found;
 
         return null;

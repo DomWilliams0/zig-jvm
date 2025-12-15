@@ -1,7 +1,7 @@
 const std = @import("std");
 const jvm = @import("jvm");
 
-usingnamespace @import("natives");
+const natives = @import("natives");
 
 pub const JvmError = error{
     BadArgs,
@@ -25,7 +25,7 @@ pub fn main() !void {
         std.log.info("TODO show usage", .{});
         return;
     };
-    defer jvm_args.deinit();
+    defer jvm_args.deinit(alloc);
 
     // TODO put this into JvmArgs
     std.log.debug("args:", .{});

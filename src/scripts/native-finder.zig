@@ -72,14 +72,14 @@ fn extractNatives(alloc: std.mem.Allocator, class_name: []const u8, boot_classpa
 }
 
 fn findAndReadClassFile(alloc: std.mem.Allocator, name: []const u8, bcp: []const u8) ![]const u8 {
-    var buf_backing = try alloc.alloc(u8, std.fs.MAX_PATH_BYTES * 2);
+    var buf_backing = try alloc.alloc(u8, std.fs.max_path_bytes * 2);
     defer alloc.free(buf_backing);
 
-    var candidate_rel = buf_backing[0..std.fs.MAX_PATH_BYTES];
-    var candidate_abs = buf_backing[std.fs.MAX_PATH_BYTES .. std.fs.MAX_PATH_BYTES * 2];
+    var candidate_rel = buf_backing[0..std.fs.max_path_bytes];
+    var candidate_abs = buf_backing[std.fs.max_path_bytes .. std.fs.max_path_bytes * 2];
 
     const io = struct {
-        pub fn readFile(io_arena: std.mem.Allocator, rel_path: []const u8, abs_path_buf: *[std.fs.MAX_PATH_BYTES]u8) ![]const u8 {
+        pub fn readFile(io_arena: std.mem.Allocator, rel_path: []const u8, abs_path_buf: *[std.fs.max_path_bytes]u8) ![]const u8 {
             const path_abs = try std.fs.realpath(rel_path, abs_path_buf); // TODO expand path too e.g. ~, env vars
 
             var file = try std.fs.openFileAbsolute(path_abs, .{});

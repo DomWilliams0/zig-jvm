@@ -21,7 +21,7 @@ pub const GlobalState = struct {
     allocator: vm_alloc.VmAllocator,
     args: *const JvmArgs,
     string_pool: string.StringPool,
-    hashcode_rng: std.rand.DefaultPrng,
+    hashcode_rng: std.Random.DefaultPrng,
 
     /// Null until Object and Class are loaded
     main_thread: object.VmObjectRef.Nullable,
@@ -92,7 +92,7 @@ pub const ThreadEnv = struct {
             .classloader = try classloader.ClassLoader.new(alloc),
             .allocator = vm_alloc.VmAllocator{ .inner = alloc },
             .args = args,
-            .hashcode_rng = std.rand.DefaultPrng.init(@bitCast(std.time.timestamp())),
+            .hashcode_rng = std.Random.DefaultPrng.init(@bitCast(std.time.timestamp())),
             .string_pool = undefined, // set next
             .main_thread = object.VmObjectRef.Nullable.nullRef(),
             .main_thread_group = object.VmObjectRef.Nullable.nullRef(),
@@ -221,7 +221,7 @@ fn errorToExceptionClass(err: Error) ?[]const u8 {
 
 comptime {
     // ensure all exception errors have defined a Java class to instantiate
-    const exception_set = @typeInfo(ExceptionError).ErrorSet.?;
+    const exception_set = @typeInfo(ExceptionError).error_set.?;
     for (exception_set) |exc| {
         const err = @field(ExceptionError, exc.name);
         if (errorToExceptionClass(err) == null) @compileError("no class defined for ExceptionError." ++ exc.name);
@@ -237,28 +237,23 @@ pub fn makeError(e: Error, ctxt: anytype) Error {
     const helper = struct {
         fn format(
             data: ArgsType,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-
+            writer: *std.Io.Writer,
+        ) std.Io.Writer.Error!void {
             const ArgsInfo = @typeInfo(ArgsType);
-            if (ArgsInfo == .Pointer) {
-                const child = @typeInfo(ArgsInfo.Pointer.child);
-                if (child == .Array) {
-                    if (child.Array.child == u8) {
+            if (ArgsInfo == .pointer) {
+                const child = @typeInfo(ArgsInfo.pointer.child);
+                if (child == .array) {
+                    if (child.array.child == u8) {
                         // comptime string! bloody hell
-                        return try std.fmt.format(writer, "{s}", .{data});
+                        return try writer.print("{s}", .{data});
                     }
                 }
             }
 
             switch (ArgsType) {
-                *const @import("cafebabe.zig").Method, object.VmClassRef, object.VmClassRef.Nullable => try std.fmt.format(writer, "{?}", .{data}),
-                []const u8, [:0]const u8 => try std.fmt.format(writer, "{s}", .{data}),
-                MethodDescription => try std.fmt.format(writer, "{s}.{s}", .{ data.cls, data.method }),
+                *const @import("cafebabe.zig").Method, object.VmClassRef, object.VmClassRef.Nullable => try writer.print("{f}", .{data}),
+                []const u8, [:0]const u8 => try writer.print("{s}", .{data}),
+                MethodDescription => try writer.print("{s}.{s}", .{ data.cls, data.method }),
                 else => @compileError("unexpected type " ++ @typeName(ArgsType)),
             }
         }
@@ -267,7 +262,7 @@ pub fn makeError(e: Error, ctxt: anytype) Error {
     const t = thread_state();
     const alloc = t.global.allocator.inner;
 
-    const s = std.fmt.allocPrint(alloc, "{?}", .{std.fmt.Formatter(helper.format){ .data = ctxt }}) catch |err| {
+    const s = std.fmt.allocPrint(alloc, "{f}", .{std.fmt.Alt(ArgsType, helper.format){ .data = ctxt }}) catch |err| {
         switch (err) {
             error.OutOfMemory => {
                 std.log.err("out of memory allocating context for {any}", .{err});

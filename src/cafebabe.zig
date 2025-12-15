@@ -48,7 +48,7 @@ pub const ClassFile = struct {
 
     /// Path can be relative. See `load`
     pub fn loadFile(arena: *std.heap.ArenaAllocator, persistent: Allocator, path: []const u8) !ClassFile {
-        var path_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined; // TODO stat to check exists, then put this in arena to avoid filling the stack
+        var path_bytes: [std.fs.max_path_bytes]u8 = undefined; // TODO stat to check exists, then put this in arena to avoid filling the stack
         const path_abs = try std.fs.realpath(path, &path_bytes);
         // TODO expand path too e.g. ~
 
@@ -173,7 +173,7 @@ pub const ClassFile = struct {
             const desc_str = cp.lookupUtf8(desc_idx) orelse return CafebabeError.BadConstantPoolIndex;
 
             // validate desc
-            const desc = T.descriptor.new(desc_str) orelse {
+            const desc = T.descriptor_type.new(desc_str) orelse {
                 std.log.warn("invalid descriptor '{s}'", .{desc_str});
                 return CafebabeError.InvalidDescriptor;
             };
@@ -244,7 +244,7 @@ pub const Field = struct {
         value: u64,
     } = undefined,
 
-    const descriptor = FieldDescriptor;
+    const descriptor_type = FieldDescriptor;
 
     pub const Flags = enum(u16) {
         public = 0x0001,
@@ -336,7 +336,7 @@ pub const Method = struct {
     code: Code,
     class_ref: VmClassRef.Nullable = VmClassRef.Nullable.nullRef(), // set after load
 
-    const descriptor = MethodDescriptor;
+    const descriptor_type = MethodDescriptor;
 
     pub const Flags = enum(u16) {
         public = 0x0001,
@@ -408,7 +408,7 @@ pub const Method = struct {
             code.java.max_locals = try reader.readInt(u16, .big);
             const code_len = try reader.readInt(u32, .big);
             // align code to 4 bytes so tableswitch and lookupswitch are aligned too (4.7.3)
-            const code_buf = try persistent.allocWithOptions(u8, code_len, 4, null);
+            const code_buf = try persistent.allocWithOptions(u8, code_len, std.mem.Alignment.@"4", null);
             errdefer persistent.free(code_buf);
 
             const n = try reader.read(code_buf);
@@ -469,10 +469,8 @@ pub const Method = struct {
         return self.class_ref.toStrongUnchecked();
     }
 
-    pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = options;
-        _ = fmt;
-        return std.fmt.format(writer, "{s}.{s}", .{ self.class().get().name, self.name });
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        return writer.print("{s}.{s}", .{ self.class().get().name, self.name });
     }
 
     /// Must have java code
@@ -504,10 +502,10 @@ pub const Method = struct {
 };
 
 // TODO return type due to https://github.com/ziglang/zig/issues/12949 :(
-fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(Field.Flags) {
+fn enumFromIntField(comptime T: type, input: @typeInfo(T).@"enum".tag_type) ?BitSet(Field.Flags) {
     const all = comptime blk: {
         var bits = 0;
-        for (@typeInfo(T).Enum.fields) |d| {
+        for (@typeInfo(T).@"enum".fields) |d| {
             bits |= d.value;
         }
         break :blk bits;
@@ -521,10 +519,10 @@ fn enumFromIntField(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet
 }
 
 // XXX see above
-fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(Method.Flags) {
+fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).@"enum".tag_type) ?BitSet(Method.Flags) {
     const all = comptime blk: {
         var bits = 0;
-        for (@typeInfo(T).Enum.fields) |d| {
+        for (@typeInfo(T).@"enum".fields) |d| {
             bits |= d.value;
         }
         break :blk bits;
@@ -538,10 +536,10 @@ fn enumFromIntMethod(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSe
 }
 
 // XXX see above
-fn enumFromIntClass(comptime T: type, input: @typeInfo(T).Enum.tag_type) ?BitSet(ClassFile.Flags) {
+fn enumFromIntClass(comptime T: type, input: @typeInfo(T).@"enum".tag_type) ?BitSet(ClassFile.Flags) {
     const all = comptime blk: {
         var bits = 0;
-        for (@typeInfo(T).Enum.fields) |d| {
+        for (@typeInfo(T).@"enum".fields) |d| {
             bits |= d.value;
         }
         break :blk bits;
@@ -767,8 +765,8 @@ pub const ConstantPool = struct {
     /// Checks one-based index. Returns slice starting at body of element
     fn lookupMany(self: Self, index: u16, comptime tags: anytype) ?struct { body: []const u8, tag: Tag } {
         const slice_idx = self.validateIndexCp(index) orelse return null;
-        inline for (@typeInfo(@TypeOf(tags)).Struct.fields) |decl| {
-            const enum_value = @as(*const Tag, @ptrCast(decl.default_value.?)).*;
+        inline for (@typeInfo(@TypeOf(tags)).@"struct".fields) |decl| {
+            const enum_value = @as(*const Tag, @ptrCast(decl.default_value_ptr)).*;
 
             if (self.slice[slice_idx] == @intFromEnum(enum_value))
                 return .{ .body = self.slice[slice_idx + 1 ..], .tag = enum_value };
@@ -841,7 +839,7 @@ pub fn BitSet(comptime E: type) type {
         /// types = set of bits to set
         pub fn init(types: anytype) @This() {
             var bits: @This() = .{ .bits = 0 };
-            inline for (@typeInfo(@TypeOf(types)).Struct.fields) |f| {
+            inline for (@typeInfo(@TypeOf(types)).@"struct".fields) |f| {
                 bits.insert(@field(E, f.name));
             }
 

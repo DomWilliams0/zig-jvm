@@ -85,7 +85,7 @@ pub const DataType = enum(u4) {
     }
 
     pub fn fromName(name: []const u8, comptime primitives_only: bool) ?DataType {
-        return inline for (@typeInfo(@This()).Enum.fields) |field| {
+        return inline for (@typeInfo(@This()).@"enum".fields) |field| {
             const val: @This() = @enumFromInt(field.value);
             if (!primitives_only or val.isPrimitive())
                 if (std.mem.eql(u8, name, field.name))

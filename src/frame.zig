@@ -57,7 +57,7 @@ pub const Frame = struct {
                 } else true;
 
                 if (matches) {
-                    std.log.debug("found handler for exception {?} at pc {}", .{ exception, h.handler_pc });
+                    std.log.debug("found handler for exception {f} at pc {}", .{ exception, h.handler_pc });
                     return h.handler_pc;
                 }
             }
@@ -86,7 +86,7 @@ pub const Frame = struct {
         }
 
         fn typeMismatch(comptime expected: type, actual: types.DataType) noreturn {
-            @setCold(true);
+            @branchHint(.cold);
             std.debug.panic("type mismatch, expected {s} but found {s}", .{ @typeName(expected), @tagName(actual) });
         }
 
@@ -131,20 +131,19 @@ pub const Frame = struct {
             try std.testing.expectEqual(ptr.*, 1);
         }
 
-        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = fmt;
+        pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
             return switch (self.ty) {
-                .boolean => std.fmt.format(writer, "{}", .{convert(bool).from(self.value)}),
-                .byte => std.fmt.format(writer, "{}", .{convert(i8).from(self.value)}),
-                .short => std.fmt.format(writer, "{}", .{convert(i16).from(self.value)}),
-                .int => std.fmt.format(writer, "{}", .{convert(i32).from(self.value)}),
-                .long => std.fmt.format(writer, "{}", .{convert(i64).from(self.value)}),
-                .char => std.fmt.format(writer, "{}", .{convert(u16).from(self.value)}),
-                .float => std.fmt.format(writer, "{}", .{convert(f32).from(self.value)}),
-                .double => std.fmt.format(writer, "{}", .{convert(f64).from(self.value)}),
-                .reference => std.fmt.format(writer, "{}", .{convert(object.VmObjectRef.Nullable).from(self.value)}),
-                .returnAddress => std.fmt.format(writer, "{x}", .{convert(usize).from(self.value)}),
-                .void => std.fmt.formatBuf("void", options, writer),
+                .boolean => writer.print("{}", .{convert(bool).from(self.value)}),
+                .byte => writer.print("{}", .{convert(i8).from(self.value)}),
+                .short => writer.print("{}", .{convert(i16).from(self.value)}),
+                .int => writer.print("{}", .{convert(i32).from(self.value)}),
+                .long => writer.print("{}", .{convert(i64).from(self.value)}),
+                .char => writer.print("{}", .{convert(u16).from(self.value)}),
+                .float => writer.print("{}", .{convert(f32).from(self.value)}),
+                .double => writer.print("{}", .{convert(f64).from(self.value)}),
+                .reference => writer.print("{f}", .{convert(object.VmObjectRef.Nullable).from(self.value)}),
+                .returnAddress => writer.print("{x}", .{convert(usize).from(self.value)}),
+                .void => writer.writeAll("void"),
             };
         }
     };
@@ -180,7 +179,7 @@ pub const Frame = struct {
             self.stack += 1;
 
             if (logging) {
-                std.log.debug("operand stack: pushed #{d} ({s}): {?}", .{ self.depth() - 1, @tagName(val.ty), val });
+                std.log.debug("operand stack: pushed #{d} ({s}): {f}", .{ self.depth() - 1, @tagName(val.ty), val });
             }
         }
 
@@ -198,7 +197,7 @@ pub const Frame = struct {
             self.stack += 1;
 
             if (logging) {
-                std.log.debug("operand stack: inserted at #{d} ({s}): {?}", .{ self.depth() - 1 - idx, @tagName(val.ty), val });
+                std.log.debug("operand stack: inserted at #{d} ({s}): {f}", .{ self.depth() - 1 - idx, @tagName(val.ty), val });
             }
         }
 
@@ -217,9 +216,9 @@ pub const Frame = struct {
 
             if (logging) {
                 if (self.peekRaw().ty.isWide())
-                    std.log.debug("operand stack: dup2 top elem ({s}): {?}", .{ @tagName(self.peekRaw().ty), self.peekRaw() })
+                    std.log.debug("operand stack: dup2 top elem ({s}): {f}", .{ @tagName(self.peekRaw().ty), self.peekRaw() })
                 else
-                    std.log.debug("operand stack: dup2 top elems [({s}): {?}, ({s}): {?}]", .{ @tagName(self.peekRaw().ty), self.peekRaw(), @tagName((self.stack - 2)[0].ty), (self.stack - 2)[0] });
+                    std.log.debug("operand stack: dup2 top elems [({s}): {f}, ({s}): {f}]", .{ @tagName(self.peekRaw().ty), self.peekRaw(), @tagName((self.stack - 2)[0].ty), (self.stack - 2)[0] });
             }
         }
 
@@ -277,7 +276,7 @@ pub const Frame = struct {
                 if (i != 0) {
                     _ = writer.write(", ") catch break;
                 }
-                std.fmt.format(writer.writer(), "#{d}: {s}, {?}", .{ i, @tagName(ptr[0].ty), ptr[0] }) catch break;
+                writer.writer().print("#{d}: {s}, {f}", .{ i, @tagName(ptr[0].ty), ptr[0] }) catch break;
 
                 i += 1;
             }
@@ -305,7 +304,7 @@ pub const Frame = struct {
             const val = self.stack[0];
 
             if (logging) {
-                std.log.debug("operand stack: popped #{d} ({s}): {?}", .{ self.depth(), @tagName(val.ty), val });
+                std.log.debug("operand stack: popped #{d} ({s}): {f}", .{ self.depth(), @tagName(val.ty), val });
             }
             return val;
         }
@@ -416,7 +415,7 @@ pub const Frame = struct {
                 written_anything = true;
 
                 const lvar = self.vars[i];
-                std.fmt.format(writer.writer(), "#{d}: {s}, {?}", .{ i, @tagName(lvar.ty), lvar }) catch break;
+                writer.writer().print("#{d}: {s}, {f}", .{ i, @tagName(lvar.ty), lvar }) catch break;
             }
 
             _ = writer.write("]") catch {};
@@ -526,33 +525,35 @@ pub const ContiguousBufferStack = struct {
     };
 
     /// Stack of slices of len EACH_SIZE
-    bufs: std.ArrayList(*Buf),
+    bufs: std.ArrayListUnmanaged(*Buf),
     stack: std.ArrayListUnmanaged(struct { ptr: usize, len: usize }),
 
     pub const E = error{WrongPopOrder};
 
     pub fn new(allocator: Allocator) !ContiguousBufferStack {
-        const bufs = try std.ArrayList(*Buf).initCapacity(allocator, 4);
-        errdefer bufs.deinit();
+        var bufs = try std.ArrayListUnmanaged(*Buf).initCapacity(allocator, 4);
+        errdefer bufs.deinit(allocator);
 
         var self = ContiguousBufferStack{
             .bufs = bufs,
             .stack = .{},
         };
-        _ = try self.pushNew(); // ensure at least 1
+        _ = try self.pushNew(allocator); // ensure at least 1
         return self;
     }
 
-    fn pushNew(self: *@This()) !*Buf {
-        var buf = try self.bufs.allocator.create(Buf);
+    fn pushNew(self: *@This(), allocator: Allocator) !*Buf {
+        var buf = try allocator.create(Buf);
         buf.used = 0;
-        try self.bufs.append(buf);
+        try self.bufs.append(allocator, buf);
         return buf;
     }
 
-    fn pop(self: *@This()) void {
+    fn pop(self: *@This(), allocator: Allocator) void {
         const buf = self.bufs.pop();
-        self.bufs.allocator.destroy(buf);
+        if (buf) |b| {
+            allocator.destroy(b);
+        }
     }
 
     fn top(self: @This()) *Buf {
@@ -560,39 +561,39 @@ pub const ContiguousBufferStack = struct {
         return self.bufs.items[self.bufs.items.len - 1];
     }
 
-    pub fn deinit(self: *@This()) void {
+    pub fn deinit(self: *@This(), allocator: Allocator) void {
         for (self.bufs.items) |buf| {
-            self.bufs.allocator.destroy(buf);
+            allocator.destroy(buf);
         }
 
-        self.stack.deinit(self.bufs.allocator);
-        self.bufs.deinit();
+        self.stack.deinit(allocator);
+        self.bufs.deinit(allocator);
     }
 
-    pub fn reserve(self: *@This(), n: usize) ![*]Frame.StackEntry {
+    pub fn reserve(self: *@This(), allocator: Allocator, n: usize) ![*]Frame.StackEntry {
         var current = self.top();
         var buf: *Buf = if (current.remaining() < n)
-            try self.pushNew()
+            try self.pushNew(allocator)
         else
             current;
 
         const ret = buf.buf[buf.used .. buf.used + n];
         buf.used += n;
 
-        try self.stack.append(self.bufs.allocator, .{ .ptr = @intFromPtr(ret.ptr), .len = n });
+        try self.stack.append(allocator, .{ .ptr = @intFromPtr(ret.ptr), .len = n });
 
         return ret.ptr;
     }
 
-    pub fn drop(self: *@This(), ptr: [*]Frame.StackEntry) !void {
-        if (self.stack.popOrNull()) |prev| {
+    pub fn drop(self: *@This(), allocator: Allocator, ptr: [*]Frame.StackEntry) !void {
+        if (self.stack.pop()) |prev| {
             if (prev.ptr == @intFromPtr(ptr)) {
                 // nice, it matches
                 var buf = self.top();
                 if (prev.len >= buf.used) {
                     // top is now empty
                     // TODO dont flush immediately, keep allocation until the next push? or not worth
-                    self.pop();
+                    self.pop(allocator);
                 } else {
                     buf.used -= prev.len;
                 }

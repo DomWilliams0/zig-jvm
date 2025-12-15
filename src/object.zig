@@ -82,7 +82,7 @@ pub const VmClass = struct {
     }
 
     pub fn formatVmRef(self: *const @This(), writer: anytype) !void {
-        return std.fmt.format(writer, "{s}.class", .{self.name});
+        return writer.print("{s}.class", .{self.name});
     }
 
     // ---------- field accessors
@@ -253,19 +253,19 @@ pub const VmClass = struct {
                 return (std.mem.eql(u8, m_c.name, m_a.name) and
                     std.mem.eql(u8, m_c.descriptor.str, m_a.descriptor.str) and
                     (m_a.flags.contains(.public) or
-                    m_a.flags.contains(.protected) or (!m_a.flags.contains(.private) and runtime_pkg: {
-                    const m_c_cls = m_c.class();
-                    const m_a_cls = m_a.class();
+                        m_a.flags.contains(.protected) or (!m_a.flags.contains(.private) and runtime_pkg: {
+                        const m_c_cls = m_c.class();
+                        const m_a_cls = m_a.class();
 
-                    // the declaration of mA appears in the same run-time package as the declaration of mC
-                    if (m_a_cls.get().areInSameRuntimePackage(m_c_cls.get())) break :runtime_pkg true;
+                        // the declaration of mA appears in the same run-time package as the declaration of mC
+                        if (m_a_cls.get().areInSameRuntimePackage(m_c_cls.get())) break :runtime_pkg true;
 
-                    // if mA is declared in a class A and mC is declared in a class C, then there exists a method mB declared in a class B such that C is a subclass of B and B is a subclass of A and mC can override mB and mB can override mA.
+                        // if mA is declared in a class A and mC is declared in a class C, then there exists a method mB declared in a class B such that C is a subclass of B and B is a subclass of A and mC can override mB and mB can override mA.
 
-                    // TODO
+                        // TODO
 
-                    break :runtime_pkg false;
-                })));
+                        break :runtime_pkg false;
+                    })));
             }
 
             fn selectRecursively(cls: *const VmClass, method: *const cafebabe.Method) ?*const cafebabe.Method {
@@ -753,28 +753,27 @@ pub const VmObject = struct {
     }
 
     pub fn formatVmRef(self: *@This(), writer: anytype) !void {
-        try std.fmt.format(writer, "{s}", .{self.class.get().name});
+        try writer.print("{s}", .{self.class.get().name});
 
         var buf: [1025]u8 = undefined;
         var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
         if (self.getClassDataChecked().toStrong()) |cls_data| {
-            return try std.fmt.format(writer, "({s})", .{cls_data.get().name});
+            return try writer.print("({s})", .{cls_data.get().name});
         }
 
         // TODO use fmt to determine whether to print string value
         const str: []const u8 = blk: {
             const res = self.getStringValueUtf8(alloc.allocator()) catch |e|
-                if (e == error.OutOfMemory)
-            {
-                @memset(buf[buf.len - 4 ..], '.');
-                break :blk &buf;
-            } else return;
+                if (e == error.OutOfMemory) {
+                    @memset(buf[buf.len - 4 ..], '.');
+                    break :blk &buf;
+                } else return;
 
             break :blk res orelse return;
         };
 
-        try std.fmt.format(writer, "(\"{s}\")", .{str});
+        try writer.print("(\"{s}\")", .{str});
     }
 
     pub fn storage(self: *VmObject) [*]u8 {
@@ -858,11 +857,11 @@ pub const VmObject = struct {
 
         const args = [1]StackEntry{StackEntry.new(self)};
         const ret = state.thread_state().interpreter.executeUntilReturnWithArgs(selected_method, 1, args) catch |err| {
-            std.log.warn("exception invoking toString() on {?}: {any}", .{ self, err });
+            std.log.warn("exception invoking toString() on {f}: {any}", .{ self, err });
             return nullRef(VmObject);
         } orelse {
             const exc = state.thread_state().interpreter.exception().toStrongUnchecked();
-            std.log.warn("exception invoking toString() on {?}: {?}", .{ self, exc });
+            std.log.warn("exception invoking toString() on {f}: {f}", .{ self, exc });
             return nullRef(VmObject);
         };
 
@@ -881,7 +880,7 @@ pub const VmObject = struct {
         if (!self.class.cmpPtr(java_lang_String)) return null;
         var byte_array = self.getField(VmObjectRef.Nullable, strings.field_value).*.toStrong() orelse return null;
         const array = byte_array.get().getArrayHeader();
-        return std.unicode.utf16leToUtf8AllocZ(alloc, array.getElems(u16)) catch |e| {
+        return std.unicode.utf16LeToUtf8AllocZ(alloc, array.getElems(u16)) catch |e| {
             return if (e == error.OutOfMemory) error.OutOfMemory else error.IllegalArgument;
         };
     }
@@ -910,7 +909,7 @@ pub const VmObject = struct {
         if (self.hashcode == 0) {
             const rng = state.thread_state().global.hashcode_rng.random();
             var val: i32 = 0;
-            while (val == 0) val = std.rand.Random.int(rng, i32);
+            while (val == 0) val = std.Random.Random.int(rng, i32);
 
             self.hashcode = val;
         }
@@ -933,18 +932,20 @@ pub const ToString = struct {
 
     pub const ExceptionWithCause = struct {
         exc: ToString,
-        causes: std.ArrayList(ToString),
+        causes: std.ArrayListUnmanaged(ToString),
 
-        pub fn deinit(self: @This()) void {
+        pub fn deinit(self: *@This()) void {
             self.exc.deinit();
-            self.causes.deinit();
+            if (self.exc.alloc) |alloc| {
+                self.causes.deinit(alloc);
+            }
         }
     };
 
     /// Returns constant error string on any error
     pub fn new_with_exc_cause(alloc: std.mem.Allocator, obj: VmObjectRef) ExceptionWithCause {
         const exc = new(alloc, obj);
-        var causes = std.ArrayList(ToString).init(alloc);
+        var causes: std.ArrayListUnmanaged(ToString) = .empty;
 
         // TODO cache this
         const global = state.thread_state().global;
@@ -958,7 +959,7 @@ pub const ToString = struct {
                 const cause_exc = (state.thread_state().interpreter.executeUntilReturnWithArgs(get_cause, 1, args) catch null);
                 if (cause_exc) |ret| {
                     if (ret.convertTo(VmObjectRef.Nullable).toStrong()) |c| {
-                        causes.append(new(alloc, c)) catch break;
+                        causes.append(alloc, new(alloc, c)) catch break;
 
                         // recurse
                         current = c;
@@ -977,12 +978,11 @@ pub const ToString = struct {
     pub fn new_truncate(buf: []u8, obj: VmObjectRef) ?ToString {
         var alloc = std.heap.FixedBufferAllocator.init(buf);
         const str = (try_new(alloc.allocator(), obj) catch |e|
-            if (e == error.OutOfMemory)
-        blk: {
-            if (buf.len > 3)
-                @memset(buf[buf.len - 3 ..], '.');
-            break :blk buf;
-        } else return null) orelse return null;
+            if (e == error.OutOfMemory) blk: {
+                if (buf.len > 3)
+                    @memset(buf[buf.len - 3 ..], '.');
+                break :blk buf;
+            } else return null) orelse return null;
         return .{ .str = str, .alloc = null };
     }
 
@@ -1063,7 +1063,7 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
                 a.descriptor.size() > b.descriptor.size(); // larger first
         }
     };
-    std.sort.insertion(*const Field, sorted_fields, {}, helper.cmpFieldDesc);
+    std.sort.insertion(*Field, sorted_fields, {}, helper.cmpFieldDesc);
 
     // track offsets of each field (maximum 2^16 as stated in class file spec)
     var out_offset = base;
@@ -1331,7 +1331,7 @@ fn makeFlagsAndAntiFlags(comptime E: type, comptime flags: anytype) struct {
 } {
     var yes = cafebabe.BitSet(E){ .bits = 0 };
     var no = cafebabe.BitSet(E){ .bits = 0 };
-    inline for (@typeInfo(@TypeOf(flags)).Struct.fields) |f| {
+    inline for (@typeInfo(@TypeOf(flags)).@"struct".fields) |f| {
         if (@field(flags, f.name) == true)
             yes.insert(@field(E, f.name))
         else

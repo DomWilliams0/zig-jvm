@@ -134,7 +134,7 @@ pub const PlatformProperties = struct {
     pub fn toArray(self: @This()) [PropertyIndices._LENGTH]?[:0]const u8 {
         var arr: [PropertyIndices._LENGTH]?[:0]const u8 = .{null} ** PropertyIndices._LENGTH;
 
-        inline for (@typeInfo(@This()).Struct.fields) |f| {
+        inline for (@typeInfo(@This()).@"struct".fields) |f| {
             const value = @field(self, f.name);
             if (value) |str| {
                 // @compileLog(str);
@@ -173,9 +173,9 @@ pub const SystemProperties = struct {
         };
     }
 
-    const FieldCount = @typeInfo(@This()).Struct.fields.len;
+    const FieldCount = @typeInfo(@This()).@"struct".fields.len;
     pub fn keyValues(self: @This()) [FieldCount][2][:0]const u8 {
-        const fields = @typeInfo(@This()).Struct.fields;
+        const fields = @typeInfo(@This()).@"struct".fields;
         var vals: [fields.len][2][:0]const u8 = undefined;
 
         inline for (fields, 0..) |f, i| {

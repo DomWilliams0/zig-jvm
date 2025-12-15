@@ -42,35 +42,35 @@ pub const JvmArgs = struct {
 
     const Classpath = struct {
         const Elem = struct { idx: u32, len: u32 };
-        indices: std.ArrayList(Elem),
+        indices: std.ArrayListUnmanaged(Elem),
         slice: ?[]const u8,
 
         /// Extra static paths to use, TODO do this better
         extras: std.ArrayList([]const u8),
 
-        fn new(alloc: Allocator) @This() {
-            return .{ .indices = std.ArrayList(Elem).init(alloc), .slice = null, .extras = std.ArrayList([]const u8).init(alloc) };
+        fn new() @This() {
+            return .{ .indices = .empty, .slice = null, .extras = .empty };
         }
 
-        fn initWith(self: *@This(), path: []const u8) !void {
+        fn initWith(self: *@This(), allocator: Allocator, path: []const u8) !void {
             if (self.slice != null) @panic("call only once");
             self.slice = path;
-            try self.indices.ensureTotalCapacity(16);
-            var it = std.mem.split(u8, path, ":");
+            try self.indices.ensureTotalCapacity(allocator, 16);
+            var it = std.mem.splitScalar(u8, path, ':');
             while (it.next()) |s| {
                 const idx = @intFromPtr(s.ptr) - @intFromPtr(path.ptr);
                 const len = s.len;
-                try self.indices.append(.{ .idx = @truncate(idx), .len = @truncate(len) });
+                try self.indices.append(allocator, .{ .idx = @truncate(idx), .len = @truncate(len) });
             }
         }
 
-        pub fn addExtra(self: *@This(), extra: []const u8) !void {
-            try self.extras.append(extra);
+        pub fn addExtra(self: *@This(), allocator: Allocator, extra: []const u8) !void {
+            try self.extras.append(allocator, extra);
         }
 
-        fn deinit(self: *@This()) void {
-            self.indices.deinit();
-            self.extras.deinit();
+        fn deinit(self: *@This(), allocator: Allocator) void {
+            self.indices.deinit(allocator);
+            self.extras.deinit(allocator);
         }
 
         const ClasspathIterator = struct {
@@ -106,10 +106,10 @@ pub const JvmArgs = struct {
         const parsed = do_parse(args) orelse return null;
 
         // abort on help
-        if (parsed.contains(.help)) return null;
+        if (parsed.get(.help) != null) return null;
 
-        var classpath = Classpath.new(alloc);
-        var boot_classpath = Classpath.new(alloc);
+        var classpath = Classpath.new();
+        var boot_classpath = Classpath.new();
         var main_class: []const u8 = undefined;
 
         if (parsed.get(.main_class)) |cls| {
@@ -119,10 +119,10 @@ pub const JvmArgs = struct {
         }
 
         if (parsed.get(.classpath)) |cp_s| {
-            try classpath.initWith(cp_s.?);
+            try classpath.initWith(alloc, cp_s.?);
         }
         if (parsed.get(.bootclasspath)) |cp_s| {
-            try boot_classpath.initWith(cp_s.?);
+            try boot_classpath.initWith(alloc, cp_s.?);
         }
 
         return .{ .argv = args, .classpath = classpath, .boot_classpath = boot_classpath, .main_class = main_class };
@@ -144,10 +144,10 @@ pub const JvmArgs = struct {
 
         // TODO surely dont have to list them all here
         var results = std.EnumMap(ArgType, ?[]const u8).init(.{
-            .bootclasspath = undefined,
-            .help = undefined,
-            .main_class = undefined,
-            .classpath = undefined,
+            .classpath = null,
+            .bootclasspath = null,
+            .help = null,
+            .main_class = null,
         });
 
         while (cursor < args.len) {
@@ -192,8 +192,8 @@ pub const JvmArgs = struct {
                         next_value = arg_def.ty;
                     }
                 } else {
-                    // just a flag, done
-                    results.put(arg_def.ty, null);
+                    // just a flag, use empty string as sentinel to indicate it was set
+                    results.put(arg_def.ty, "");
                 }
             } else if (state == .value) {
                 // value of prev arg
@@ -211,9 +211,9 @@ pub const JvmArgs = struct {
         return results;
     }
 
-    pub fn deinit(self: *@This()) void {
-        self.boot_classpath.deinit();
-        self.classpath.deinit();
+    pub fn deinit(self: *@This(), allocator: Allocator) void {
+        self.boot_classpath.deinit(allocator);
+        self.classpath.deinit(allocator);
     }
 };
 

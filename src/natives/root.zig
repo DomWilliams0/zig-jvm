@@ -115,7 +115,7 @@ fn validateFunctionSignatures(comptime module: type) void {
     const descriptors = @field(module, "methods");
 
     // discovered functions
-    const decls = @typeInfo(module).Struct.decls;
+    const decls = @typeInfo(module).@"struct".decls;
 
     // array of decls visited and declared in `methods`
     var visited: [decls.len]bool = .{false} ** decls.len;
@@ -134,7 +134,7 @@ fn validateFunctionSignatures(comptime module: type) void {
         } else {
             // generate a panicking stub instead
             const S = struct {
-                fn panic_stub() callconv(.C) noreturn {
+                fn panic_stub() callconv(.c) noreturn {
                     std.debug.panic("unimplemented native method {s}", .{m.method});
                 }
             };
@@ -146,7 +146,7 @@ fn validateFunctionSignatures(comptime module: type) void {
         const method_info = @typeInfo(@TypeOf(decl.method));
 
         const expected_return_type = m.desc[std.mem.lastIndexOfScalar(u8, m.desc, ')').? + 1];
-        const actual_return_type = switch (method_info.Fn.return_type.?) {
+        const actual_return_type = switch (method_info.@"fn".return_type.?) {
             void => 'V',
             sys.jobject, sys.jclass, sys.jstring => 'L',
             sys.jobjectArray => '[',
@@ -155,7 +155,7 @@ fn validateFunctionSignatures(comptime module: type) void {
             sys.jfloat => 'F',
             sys.jdouble => 'D',
             sys.jlong => 'J',
-            else => @compileError("TODO ret type " ++ @typeName(method_info.Fn.return_type.?)),
+            else => @compileError("TODO ret type " ++ @typeName(method_info.@"fn".return_type.?)),
         };
 
         if (actual_return_type != expected_return_type) {

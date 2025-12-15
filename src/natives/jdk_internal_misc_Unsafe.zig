@@ -55,8 +55,9 @@ pub export fn Java_jdk_internal_misc_Unsafe_objectFieldOffset1(raw_env: jni.JniE
     return jni.convert(@as(i64, unsafe.offset));
 }
 
+var fence_var: std.atomic.Value(u8) = .{ .raw = 0 }; // @fence was removed
 pub export fn Java_jdk_internal_misc_Unsafe_fullFence() void {
-    @fence(.acquire);
+    _ = fence_var.fetchAdd(0, .seq_cst);
 }
 
 fn Sys(comptime from: type) type {
@@ -93,7 +94,7 @@ fn resolvePtr(comptime T: type, jobj: sys.jobject, offset: sys.jlong) *T {
     const base = if (jni.convert(jobj).toStrong()) |obj| @intFromPtr(obj.get()) else 0; // could be null
     const byte_offset: usize = @intCast(jni.convert(offset)); // never negative
     const byte_ptr: [*]u8 = @ptrFromInt(base + byte_offset);
-    std.log.debug("resolving unsafe ptr to {s}: base={?}, offset={d}, result={x}", .{ @typeName(T), jni.convert(jobj), byte_offset, @intFromPtr(byte_ptr) });
+    std.log.debug("resolving unsafe ptr to {s}: base={x}, offset={d}, result={x}", .{ @typeName(T), jni.convert(jobj), byte_offset, @intFromPtr(byte_ptr) });
     return @ptrCast(@alignCast(byte_ptr)); // should be well aligned
 }
 
@@ -101,12 +102,10 @@ fn compareAndExchange(comptime T: type, jobj: sys.jobject, offset: sys.jlong, ex
     const ptr = resolvePtr(T, jobj, offset);
 
     // hotspot defaults to "conservative" ordering, i.e. 2 way fence
-    @fence(.seq_cst);
     const ret = if (T == jvm.VmObjectRef.Nullable)
         jvm.VmObjectRef.Nullable.atomicCompareAndExchange(ptr, jni.convert(expected), jni.convert(x), .monotonic)
     else
-        @cmpxchgStrong(T, ptr, jni.convert(expected), jni.convert(x), .monotonic, .monotonic);
-    @fence(.seq_cst);
+        @cmpxchgStrong(T, ptr, jni.convert(expected), jni.convert(x), .seq_cst, .seq_cst);
 
     return ret;
 }
