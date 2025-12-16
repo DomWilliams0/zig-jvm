@@ -1070,10 +1070,8 @@ pub fn defineObjectLayout(alloc: Allocator, fields: []Field, base: *ObjectLayout
     std.debug.assert(fields.len <= 65535); // TODO include super class field count too
 
     for (sorted_fields) |f| {
-        if (f.flags.contains(.static)) {
-            // static values just live in the class directly, and have already been initialised to zero or a constant value
-            std.debug.assert(f.u.value != undefined);
-        } else {
+        // static values just live in the class directly, and have already been initialised to zero or a constant value
+        if (!f.flags.contains(.static)) {
             // instance
             const size = f.descriptor.size();
             out_offset.instance_offset = std.mem.alignForward(u16, out_offset.instance_offset, size);

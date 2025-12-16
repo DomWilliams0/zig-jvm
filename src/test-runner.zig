@@ -37,7 +37,7 @@ fn closeLogFile() void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     const alloc = gpa.allocator();
 
     openLogFile() catch |e| {
@@ -245,7 +245,6 @@ pub fn log(
         nosuspend bw.interface.print(msg, args) catch {};
         nosuspend bw.interface.flush() catch {};
     }
-
 
     if (message_level != .debug) {
         const stderr_file = std.fs.File.stderr();

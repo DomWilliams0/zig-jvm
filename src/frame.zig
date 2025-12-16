@@ -491,7 +491,7 @@ test "convert to integer" {
         ) void {
             const entry = Frame.StackEntry.new(val);
             const res_int = entry.convertToInt();
-            const res_expected: i32 = if (@typeInfo(@TypeOf(val)) == .Bool) @intCast(@intFromBool(val)) else @intCast(val);
+            const res_expected: i32 = if (@typeInfo(@TypeOf(val)) == .bool) @intCast(@intFromBool(val)) else @intCast(val);
             std.testing.expectEqual(res_expected, res_int) catch unreachable;
         }
     };
@@ -536,7 +536,7 @@ pub const ContiguousBufferStack = struct {
 
         var self = ContiguousBufferStack{
             .bufs = bufs,
-            .stack = .{},
+            .stack = .empty,
         };
         _ = try self.pushNew(allocator); // ensure at least 1
         return self;
@@ -608,34 +608,34 @@ pub const ContiguousBufferStack = struct {
 
 test "contiguous bufs" {
     var buffers = try ContiguousBufferStack.new(std.testing.allocator);
-    defer buffers.deinit();
+    defer buffers.deinit(std.testing.allocator);
 
-    _ = try buffers.reserve(96); // fits into current
-    _ = try buffers.reserve(3000); // still fits into current
-    _ = try buffers.reserve(990); // still fits into current
+    _ = try buffers.reserve(std.testing.allocator, 6); // fits into current
+    _ = try buffers.reserve(std.testing.allocator, 3000); // still fits into current
+    _ = try buffers.reserve(std.testing.allocator, 1080); // still fits into current
     try std.testing.expectEqual(buffers.bufs.items.len, 1);
 
     // needs a new one
-    const b = try buffers.reserve(20);
+    const b = try buffers.reserve(std.testing.allocator, 20);
     try std.testing.expectEqual(buffers.bufs.items.len, 2);
-    const c = try buffers.reserve(200);
+    const c = try buffers.reserve(std.testing.allocator, 200);
     try std.testing.expectEqual(buffers.bufs.items.len, 2);
 
     // pop in same order
-    try buffers.drop(c);
+    try buffers.drop(std.testing.allocator, c);
     try std.testing.expectEqual(buffers.bufs.items.len, 2); // still needs for b
-    try buffers.drop(b);
+    try buffers.drop(std.testing.allocator, b);
     // buffers.flushNow(); // force flush now
     try std.testing.expectEqual(buffers.bufs.items.len, 1); // popped
 }
 
 test "contiguous bufs pop wrong order" {
     var buffers = try ContiguousBufferStack.new(std.testing.allocator);
-    defer buffers.deinit();
+    defer buffers.deinit(std.testing.allocator);
 
-    const a = try buffers.reserve(50);
-    const b = try buffers.reserve(50);
-    try std.testing.expectError(error.WrongPopOrder, buffers.drop(a)); // should pop b first
+    const a = try buffers.reserve(std.testing.allocator, 50);
+    const b = try buffers.reserve(std.testing.allocator, 50);
+    try std.testing.expectError(error.WrongPopOrder, buffers.drop(std.testing.allocator, a)); // should pop b first
     _ = b;
 }
 

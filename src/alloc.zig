@@ -36,27 +36,27 @@ pub fn VmRef(comptime T: type) type {
 
                 // TODO extra debug field to track double drop
                 const old = self.ptr.block.weak.fetchSub(1, .release);
-                // if (logging) std.log.debug("{f}: dropped weak count to {d}", .{ self, old - 1 });
+                if (logging) std.log.debug("{*}: dropped weak count to {d}", .{ self.ptr, old - 1 });
 
                 if (old == 1) {
                     _ = self.ptr.block.weak.load(.acquire); // replaces @fence which was removed in 0.14
-                    // if (logging) std.log.debug("{f}: dropping inner", .{self});
+                    if (logging) std.log.debug("{*}: dropping inner", .{self.ptr});
 
                     const alloc = global_allocator();
                     const alloc_size =
                         @sizeOf(InnerBlock) + self.ptr.block.padding + @sizeOf(T) + T.vmRefSize(self.ptr.get());
 
+                    if (logging)
+                        std.log.debug("{*}: freeing alloc_size={} stored_align={}", .{
+                            self.ptr,
+                            alloc_size,
+                            self.ptr.block.alignment,
+                        });
+
                     // if (logging) std.log.debug("{*}: freeing {*} len {d}", .{ self.ptr, destroy_slice.ptr, destroy_slice.len });
-                    if (std.debug.runtime_safety) {
-                        switch (self.ptr.block.alignment) {
-                            8 => alloc.inner.free(@as([*]align(8) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
-                            4 => alloc.inner.free(@as([*]align(4) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
-                            2 => alloc.inner.free(@as([*]align(2) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
-                            else => alloc.inner.free(@as([*]align(1) u8, @ptrCast(@alignCast(self.ptr)))[0..alloc_size]),
-                        }
-                    } else {
-                        alloc.inner.free(@as([*]u8, @ptrCast(self.ptr))[0..alloc_size]);
-                    }
+                    const slice: []u8 = @as([*]u8, @ptrCast(self.ptr))[0..alloc_size];
+                    const align_val: std.mem.Alignment = @enumFromInt(self.ptr.block.alignment);
+                    alloc.inner.rawFree(slice, align_val, @returnAddress());
                 }
             }
         };
@@ -166,6 +166,8 @@ pub fn VmRef(comptime T: type) type {
             }
 
             pub fn atomicStore(dst: *Nullable, src: Nullable, comptime order: AtomicOrder) void {
+                _ = src.clone();
+
                 const old: ?*InnerRef = dst.ptr;
 
                 const src_ptr: ?*InnerRef = src.ptr;
@@ -173,7 +175,6 @@ pub fn VmRef(comptime T: type) type {
                 @atomicStore(?*InnerRef, dst_ptr, src_ptr, order);
 
                 Nullable.fromPtr(old).drop();
-                _ = src.clone();
             }
 
             /// Returns owned reference
@@ -212,7 +213,7 @@ pub fn VmRef(comptime T: type) type {
         };
 
         const InnerRef = extern struct {
-            block: InnerBlock,
+            block: InnerBlock align(8),
             // data: T,
 
             fn get(self: *InnerRef) *T {
@@ -289,7 +290,7 @@ test "vmref" {
         // interface for VmRef
         fn vmRefDrop(_: *@This()) void {}
         fn vmRefSize(self: *const @This()) usize {
-            return self.actual_count;
+            return self.actual_count * @sizeOf(u64);
         }
     };
 
@@ -301,7 +302,7 @@ test "vmref" {
 
     // simulate runtime known size, like a class field count
     const runtime_sz: u16 = 25;
-    const strong1 = try IntRef.new_uninit(runtime_sz, @alignOf(VmInt.ActualInt));
+    const strong1 = try IntRef.new_uninit(runtime_sz * @sizeOf(u64), @alignOf(VmInt.ActualInt));
     strong1.get().* = VmInt{ .actual_count = runtime_sz };
     const strong2 = strong1.clone();
 

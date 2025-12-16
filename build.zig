@@ -42,8 +42,8 @@ pub fn build(b: *std.Build) !void {
     inline for (.{ .{ test_runner_step, test_runner_exe }, .{ jvm_step, java_exe } }) |tup| {
         const step, const exe = tup;
 
-        exe.use_llvm = false;
-        exe.use_lld = false;
+        // exe.use_llvm = true; // for debugging
+        // exe.use_lld = true;
 
         exe.root_module.addImport("jvm", jvm);
         exe.root_module.addImport("natives", natives);

@@ -90,7 +90,7 @@ pub const ClassLoader = struct {
 
     pub fn new(alloc: Allocator) !ClassLoader {
         const this_native = try native.NativeLibrary.openSelf();
-        var cl = ClassLoader{ .alloc = alloc, .lock = .{}, .classes = .{}, .natives_lock = .{}, .natives = .{}, .this_native = this_native };
+        var cl = ClassLoader{ .alloc = alloc, .lock = .{}, .classes = .empty, .natives_lock = .{}, .natives = .empty, .this_native = this_native };
         try cl.classes.ensureTotalCapacity(alloc, 1024);
         return cl;
     }
@@ -606,10 +606,10 @@ test "native mangling class name" {
     std.testing.log_level = .debug;
     const cls_name = "my/package/MyObjêct_cool";
 
-    var out = std.ArrayList(u8).init(std.testing.allocator);
-    defer out.deinit();
+    var out = std.ArrayListUnmanaged(u8).empty;
+    defer out.deinit(std.testing.allocator);
 
-    try ClassLoader.NativeMangling.escape(&out, cls_name);
+    try ClassLoader.NativeMangling.escape(std.testing.allocator, &out, cls_name);
     try std.testing.expectEqualStrings("my_package_MyObj_000eact_1cool", out.items);
 }
 
@@ -620,11 +620,11 @@ test "native mangling full method" {
     const desc = descriptor.MethodDescriptor.new("(ILjava/lang/String;[J)D") orelse unreachable;
 
     var mangled = try ClassLoader.NativeMangling.initShort(std.testing.allocator, cls_name, method);
-    defer mangled.deinit();
+    defer mangled.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_00024Inner_doThings_1lol", mangled.strZ());
 
-    try mangled.appendLong(desc);
+    try mangled.appendLong(std.testing.allocator, desc);
     try std.testing.expectEqualSentinel(u8, 0, "Java_my_package_Cool_00024Inner_doThings_1lol__ILjava_lang_String_2_3J", mangled.strZ());
 }
 
