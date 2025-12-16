@@ -12,9 +12,12 @@ const LogFile = struct {
 
 var log_file: ?std.fs.File = null;
 var log_file_buffer: [8192]u8 = undefined;
+var log_writer: ?std.fs.File.Writer = null;
 var log_mutex: std.Thread.Mutex = .{};
 
+var stderr_file: std.fs.File = undefined;
 var stderr_buffer: [8192]u8 = undefined;
+var stderr_writer: std.fs.File.Writer = undefined;
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
@@ -24,6 +27,7 @@ pub const std_options: std.Options = .{
 fn openLogFile() !void {
     if (log_file != null) @panic("log file already initialised");
     log_file = try std.fs.createFileAbsolute("/tmp/jvmlog", .{});
+    log_writer = log_file.?.writer(&log_file_buffer);
 }
 
 fn closeLogFile() void {
@@ -39,6 +43,9 @@ fn closeLogFile() void {
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     const alloc = gpa.allocator();
+
+    stderr_file = std.fs.File.stderr();
+    stderr_writer = stderr_file.writer(&stderr_buffer);
 
     openLogFile() catch |e| {
         std.log.warn("couldn't open log file: {any}", .{e});
@@ -240,16 +247,13 @@ pub fn log(
     log_mutex.lock();
     defer log_mutex.unlock();
 
-    if (log_file) |f| {
-        var bw = f.writer(&log_file_buffer);
-        nosuspend bw.interface.print(msg, args) catch {};
-        nosuspend bw.interface.flush() catch {};
+    if (log_writer) |*w| {
+        nosuspend w.interface.print(msg, args) catch {};
+        nosuspend w.interface.flush() catch {};
     }
 
     if (message_level != .debug) {
-        const stderr_file = std.fs.File.stderr();
-        var writer = stderr_file.writer(&stderr_buffer);
-        nosuspend writer.interface.print(msg, args) catch {};
-        nosuspend writer.interface.flush() catch {};
+        nosuspend stderr_writer.interface.print(msg, args) catch {};
+        nosuspend stderr_writer.interface.flush() catch {};
     }
 }
