@@ -233,9 +233,8 @@ pub const ClassLoader = struct {
 
         const key = Key{ .name = name, .loader = loader };
         const entry = try self.classes.getOrPut(self.alloc, key);
-        if (entry.found_existing)
-            entry.value_ptr.* = load_state
-        else {
+        entry.value_ptr.* = load_state;
+        if (!entry.found_existing) {
             entry.key_ptr.name = try self.alloc.dupe(u8, name);
             entry.key_ptr.loader = loader.clone();
         }
